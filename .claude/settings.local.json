@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc:*)",
+      "Bash(php artisan:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(php /home/iskender/Загрузки/Projects/erp-fineco/artisan:*)",
+      "Bash(php -l:*)",
+      "Bash(npx concurrently *)",
+      "Bash(composer dev *)",
+      "Bash(jobs -l)",
+      "Bash(kill %1)",
+      "Bash(wait)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:8001/settings -L)",
+      "Bash(php -r ' *)",
+      "Bash(composer show *)",
+      "Bash(composer require *)",
+      "Bash(php -r \"require '/home/iskender/Загрузки/Projects/erp-fineco/vendor/autoload.php'; echo 'OK';\")",
+      "Bash(php *)",
+      "Bash(grep -v \"^$\")"
+    ]
+  }
+}
