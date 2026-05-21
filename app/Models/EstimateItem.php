@@ -12,9 +12,10 @@ class EstimateItem extends Model
         'estimate_id',
         'parent_id',
         'service_id',
-        'is_extra',
+        'type',
         'name',
         'periodicity',
+        'due_day',
         'cost',
         'quantity',
         'total',
@@ -22,9 +23,9 @@ class EstimateItem extends Model
     ];
 
     protected $casts = [
-        'cost' => 'decimal:2',
-        'total' => 'decimal:2',
-        'is_extra' => 'boolean',
+        'cost'    => 'decimal:2',
+        'total'   => 'decimal:2',
+        'due_day' => 'integer',
     ];
 
     public function estimate(): BelongsTo

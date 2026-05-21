@@ -107,6 +107,11 @@
                                     {!! $moduleIcons[$module->name] ?? '' !!}
                                 </svg>
                                 {{ $module->display_name }}
+                                @if($module->name === 'buhtasks' && ($sidebarUrgentCount ?? 0) > 0)
+                                    <span class="ml-auto inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 text-xs font-bold text-white bg-red-500 rounded-full">
+                                        {{ $sidebarUrgentCount > 99 ? '99+' : $sidebarUrgentCount }}
+                                    </span>
+                                @endif
                             </a>
                         @else
                             <div class="flex items-center px-4 py-3 rounded-xl text-sm font-medium text-slate-400 cursor-not-allowed transition-all duration-200">

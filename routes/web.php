@@ -62,6 +62,7 @@ Route::middleware('auth:employee')->group(function () {
         Route::get('/{client}/estimate/edit', [EstimateController::class, 'edit'])->name('estimate.edit');
         Route::get('/{client}/estimate', [EstimateController::class, 'show'])->name('estimate.show');
         Route::post('/{client}/estimate', [EstimateController::class, 'save'])->name('estimate.save');
+        Route::post('/{client}/estimate/generate', [EstimateController::class, 'generate'])->name('estimate.generate');
         Route::get('/{client}/estimate/pdf', [EstimateController::class, 'pdf'])->name('estimate.pdf');
     });
 

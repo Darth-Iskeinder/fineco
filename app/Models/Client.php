@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
@@ -173,7 +174,12 @@ class Client extends Model
 
     public function estimate(): HasOne
     {
-        return $this->hasOne(Estimate::class);
+        return $this->hasOne(Estimate::class)->latestOfMany('id');
+    }
+
+    public function estimates(): HasMany
+    {
+        return $this->hasMany(Estimate::class);
     }
 
     public function employees(): BelongsToMany

@@ -11,20 +11,35 @@ use Illuminate\Http\Request;
 
 class EstimateController extends Controller
 {
-    public function edit(Client $client)
+    public function edit(Request $request, Client $client)
     {
+        $year  = (int) $request->get('year',  now()->year);
+        $month = (int) $request->get('month', now()->month);
+        $year  = max(2020, min(2030, $year));
+        $month = max(1, min(12, $month));
+
         $client->load(['taxSystem', 'tariff.services.taxSystems', 'tariff.services.children']);
 
         $estimate = Estimate::firstOrCreate(
-            ['client_id' => $client->id],
+            ['client_id' => $client->id, 'year' => $year, 'month' => $month],
             ['total' => 0]
         );
 
         $estimate->load(['rootItems.children']);
 
-        // Учитываем только позиции с реальным service_id (не null) и не экстра
-        $tariffItems = $estimate->rootItems->filter(fn($i) => !$i->is_extra && $i->service_id !== null);
-        $isFirstLoad = $tariffItems->isEmpty();
+        $tariffItems   = $estimate->rootItems->filter(fn($i) => $i->type === 'recurring' && $i->service_id !== null);
+        $tariffItemIds = $tariffItems->pluck('id');
+        $isFirstLoad   = $tariffItems->isEmpty();
+
+        $prevMonth = $month === 1 ? 12 : $month - 1;
+        $prevYear  = $month === 1 ? $year - 1 : $year;
+
+        $estimateHasItems = $estimate->items()->exists();
+        $hasPrevious = Estimate::where('client_id', $client->id)
+            ->where('year', $prevYear)
+            ->where('month', $prevMonth)
+            ->whereHas('items', fn($q) => $q->where('type', 'recurring'))
+            ->exists();
 
         // Enabled service_ids from saved estimate
         $savedByServiceId      = $tariffItems->keyBy('service_id');
@@ -76,8 +91,8 @@ class EstimateController extends Controller
             }
         }
 
-        // Extra items (added outside tariff)
-        $extraItems = $estimate->rootItems->filter(fn($i) => $i->is_extra);
+        // Extra items = всё что не относится к тарифным (recurring с service_id)
+        $extraItems = $estimate->rootItems->filter(fn($i) => !$tariffItemIds->contains($i->id));
         $extraServiceIds = $extraItems
             ->flatMap(fn($i) => collect([$i->service_id])->merge($i->children->pluck('service_id')))
             ->filter()->unique()->values()->toArray();
@@ -88,6 +103,7 @@ class EstimateController extends Controller
         $extras = $extraItems
             ->map(fn($item) => [
                 'service_id'      => $item->service_id,
+                'type'            => $item->type,
                 'name'            => $item->name,
                 'periodicity'     => $item->periodicity ?? '',
                 'cost'            => (float) $item->cost,
@@ -95,6 +111,7 @@ class EstimateController extends Controller
                 'allows_quantity' => (bool) ($extraServicesById->get($item->service_id)?->allows_quantity ?? false),
                 'children'        => $item->children->map(fn($c) => [
                     'service_id'     => $c->service_id,
+                    'type'           => $c->type,
                     'name'           => $c->name,
                     'periodicity'    => $c->periodicity ?? '',
                     'cost'           => (float) $c->cost,
@@ -125,15 +142,25 @@ class EstimateController extends Controller
                 ])->values()->toArray(),
             ])->values()->toArray();
 
-        return view('clients.estimate', compact('client', 'estimate', 'tariffBPs', 'extras', 'allServices'));
+        return view('clients.estimate', compact(
+            'client', 'estimate', 'tariffBPs', 'extras', 'allServices',
+            'year', 'month', 'prevYear', 'prevMonth', 'hasPrevious', 'estimateHasItems'
+        ));
     }
 
-    public function show(Client $client)
+    public function show(Request $request, Client $client)
     {
-        $estimate = Estimate::firstOrCreate(
-            ['client_id' => $client->id],
-            ['total' => 0]
-        );
+        $year  = (int) $request->get('year',  now()->year);
+        $month = (int) $request->get('month', now()->month);
+
+        $estimate = Estimate::where('client_id', $client->id)
+            ->where('year', $year)
+            ->where('month', $month)
+            ->first();
+
+        if (!$estimate) {
+            return response()->json(['id' => null, 'total' => 0, 'notes' => '', 'updated_at' => null]);
+        }
 
         return response()->json([
             'id'         => $estimate->id,
@@ -146,6 +173,8 @@ class EstimateController extends Controller
     public function save(Request $request, Client $client)
     {
         $request->validate([
+            'year'                                 => 'nullable|integer|min:2020|max:2030',
+            'month'                                => 'nullable|integer|min:1|max:12',
             'notes'                                => 'nullable|string|max:1000',
             'tariff_bps'                           => 'nullable|array',
             'tariff_bps.*.service_id'              => 'required|integer',
@@ -161,8 +190,11 @@ class EstimateController extends Controller
             'extras.*.quantity'                    => 'nullable|integer|min:1',
         ]);
 
+        $year  = (int) $request->input('year',  now()->year);
+        $month = (int) $request->input('month', now()->month);
+
         $estimate = Estimate::firstOrCreate(
-            ['client_id' => $client->id],
+            ['client_id' => $client->id, 'year' => $year, 'month' => $month],
             ['total' => 0]
         );
 
@@ -183,9 +215,10 @@ class EstimateController extends Controller
 
             $parent = $estimate->items()->create([
                 'service_id'  => $service->id,
-                'is_extra'    => false,
+                'type'        => 'recurring',
                 'name'        => $service->name,
                 'periodicity' => $service->periodicity,
+                'due_day'     => $service->due_day,
                 'cost'        => $service->cost,
                 'quantity'    => $qty,
                 'total'       => 0, // filled after children
@@ -205,9 +238,10 @@ class EstimateController extends Controller
                 $estimate->items()->create([
                     'parent_id'   => $parent->id,
                     'service_id'  => $childService->id,
-                    'is_extra'    => false,
+                    'type'        => 'recurring',
                     'name'        => $childService->name,
                     'periodicity' => $childService->periodicity,
+                    'due_day'     => $childService->due_day,
                     'cost'        => $childService->cost,
                     'quantity'    => $cqty,
                     'total'       => $cTotal,
@@ -231,9 +265,12 @@ class EstimateController extends Controller
             $qty   = (int) ($extraData['quantity'] ?? 1);
             $rowTotal = round($cost * $qty, 2);
 
+            $extraType = in_array($extraData['type'] ?? '', ['recurring', 'one_time'])
+                ? $extraData['type'] : 'one_time';
+
             $parent = $estimate->items()->create([
                 'service_id'  => $extraData['service_id'] ?? null,
-                'is_extra'    => true,
+                'type'        => $extraType,
                 'name'        => $extraData['name'],
                 'periodicity' => $extraData['periodicity'] ?? null,
                 'cost'        => $cost,
@@ -252,7 +289,7 @@ class EstimateController extends Controller
                 $estimate->items()->create([
                     'parent_id'   => $parent->id,
                     'service_id'  => $childData['service_id'] ?? null,
-                    'is_extra'    => true,
+                    'type'        => $extraType,
                     'name'        => $childData['name'],
                     'periodicity' => $childData['periodicity'] ?? null,
                     'cost'        => $cc,
@@ -282,10 +319,88 @@ class EstimateController extends Controller
         ]);
     }
 
-    public function pdf(Client $client)
+    public function generate(Request $request, Client $client)
     {
+        $year  = (int) $request->input('year',  now()->year);
+        $month = (int) $request->input('month', now()->month);
+        $year  = max(2020, min(2030, $year));
+        $month = max(1, min(12, $month));
+
+        $prevMonth = $month === 1 ? 12 : $month - 1;
+        $prevYear  = $month === 1 ? $year - 1 : $year;
+
+        $estimate = Estimate::firstOrCreate(
+            ['client_id' => $client->id, 'year' => $year, 'month' => $month],
+            ['total' => 0]
+        );
+
+        if ($estimate->items()->exists()) {
+            return response()->json(['success' => false, 'message' => 'Смета уже содержит позиции']);
+        }
+
+        $prevEstimate = Estimate::where('client_id', $client->id)
+            ->where('year', $prevYear)
+            ->where('month', $prevMonth)
+            ->first();
+
+        if (!$prevEstimate) {
+            return response()->json(['success' => false, 'message' => 'Нет сметы за прошлый месяц']);
+        }
+
+        $total = 0;
+        $recurringItems = $prevEstimate->items()
+            ->whereNull('parent_id')
+            ->where('type', 'recurring')
+            ->orderBy('sort_order')
+            ->with(['children' => fn($q) => $q->where('type', 'recurring')->orderBy('sort_order')])
+            ->get();
+
+        foreach ($recurringItems as $item) {
+            $newItem = $estimate->items()->create([
+                'service_id'  => $item->service_id,
+                'type'        => 'recurring',
+                'name'        => $item->name,
+                'periodicity' => $item->periodicity,
+                'cost'        => $item->cost,
+                'quantity'    => $item->quantity,
+                'total'       => $item->total,
+                'sort_order'  => $item->sort_order,
+            ]);
+
+            foreach ($item->children as $child) {
+                $estimate->items()->create([
+                    'parent_id'   => $newItem->id,
+                    'service_id'  => $child->service_id,
+                    'type'        => 'recurring',
+                    'name'        => $child->name,
+                    'periodicity' => $child->periodicity,
+                    'cost'        => $child->cost,
+                    'quantity'    => $child->quantity,
+                    'total'       => $child->total,
+                    'sort_order'  => $child->sort_order,
+                ]);
+            }
+
+            $total += $item->total;
+        }
+
+        $estimate->total = $total;
+        $estimate->save();
+
+        return response()->json(['success' => true]);
+    }
+
+    public function pdf(Request $request, Client $client)
+    {
+        $year  = (int) $request->get('year',  now()->year);
+        $month = (int) $request->get('month', now()->month);
+
         $client->load(['taxSystem', 'tariff']);
-        $estimate = Estimate::with(['rootItems.children'])->where('client_id', $client->id)->first();
+        $estimate = Estimate::with(['rootItems.children'])
+            ->where('client_id', $client->id)
+            ->where('year', $year)
+            ->where('month', $month)
+            ->first();
 
         if (!$estimate) {
             abort(404, 'Смета не найдена');
@@ -294,7 +409,8 @@ class EstimateController extends Controller
         $pdf = Pdf::loadView('pdf.estimate', compact('client', 'estimate'))
             ->setPaper('a4', 'portrait');
 
-        $filename = 'smeta_' . preg_replace('/[^a-zA-Z0-9]/', '_', $client->name) . '.pdf';
+        $filename = 'smeta_' . preg_replace('/[^a-zA-Z0-9]/', '_', $client->name)
+            . '_' . $year . '_' . str_pad($month, 2, '0', STR_PAD_LEFT) . '.pdf';
 
         return $pdf->download($filename);
     }

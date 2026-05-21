@@ -9,12 +9,13 @@ class BuhAdhocTask extends Model
 {
     protected $fillable = [
         'employee_id', 'client_id', 'name', 'cost',
-        'year', 'month', 'status',
+        'year', 'month', 'due_day', 'status',
         'started_at', 'resumed_at', 'paused_seconds', 'completed_at',
     ];
 
     protected $casts = [
         'cost'           => 'decimal:2',
+        'due_day'        => 'integer',
         'started_at'     => 'datetime',
         'resumed_at'     => 'datetime',
         'completed_at'   => 'datetime',

@@ -21,15 +21,21 @@ class BuhTasksController extends Controller
         $year  = max(2020, min(2030, $year));
         $month = max(1, min(12, $month));
 
-        // Клиенты сотрудника с активными сметами
+        // Клиенты сотрудника с активными сметами за выбранный период
         $clients = $employee->clients()
             ->with([
-                'estimate.rootItems' => fn($q) => $q
-                    ->whereNull('parent_id')
-                    ->orderBy('sort_order'),
+                'estimates' => fn($q) => $q
+                    ->where('year', $year)
+                    ->where('month', $month)
+                    ->with(['rootItems' => fn($q) => $q
+                        ->whereNull('parent_id')
+                        ->orderBy('sort_order'),
+                    ]),
             ])
-            ->whereHas('estimate.rootItems', fn($q) => $q
-                ->whereNull('parent_id'))
+            ->whereHas('estimates', fn($q) => $q
+                ->where('year', $year)
+                ->where('month', $month)
+                ->whereHas('rootItems', fn($q2) => $q2->whereNull('parent_id')))
             ->orderBy('name')
             ->get();
 
@@ -53,7 +59,7 @@ class BuhTasksController extends Controller
         // Плановые задачи из сметы
         $tasks = [];
         foreach ($clients as $client) {
-            $items = $client->estimate?->rootItems ?? collect();
+            $items = $client->estimates->first()?->rootItems ?? collect();
             foreach ($items as $item) {
                 $log = $logs->get($item->id);
 
@@ -67,6 +73,7 @@ class BuhTasksController extends Controller
                     'name'            => $item->name,
                     'cost'            => (float) $item->total,
                     'periodicity'     => $item->periodicity,
+                    'due_day'         => $item->due_day,
                     'status'          => $log?->status ?? 'pending',
                     'elapsed_seconds' => $this->calcElapsed($log),
                 ];
@@ -84,6 +91,7 @@ class BuhTasksController extends Controller
                 'name'            => $adhoc->name,
                 'cost'            => (float) $adhoc->cost,
                 'periodicity'     => null,
+                'due_day'         => $adhoc->due_day,
                 'status'          => $adhoc->status,
                 'elapsed_seconds' => $this->calcElapsed($adhoc),
             ];
@@ -117,7 +125,12 @@ class BuhTasksController extends Controller
             'service_id' => 'nullable|exists:services,id',
             'name'       => 'required_without:service_id|nullable|string|max:255',
             'cost'       => 'nullable|numeric|min:0',
+            'year'       => 'nullable|integer|min:2020|max:2030',
+            'month'      => 'nullable|integer|min:1|max:12',
         ]);
+
+        $year  = (int) $request->input('year',  now()->year);
+        $month = (int) $request->input('month', now()->month);
 
         $employee = auth('employee')->user();
 
@@ -129,7 +142,7 @@ class BuhTasksController extends Controller
         $client = Client::find($request->client_id);
 
         $estimate = Estimate::firstOrCreate(
-            ['client_id' => $client->id],
+            ['client_id' => $client->id, 'year' => $year, 'month' => $month],
             ['total' => 0]
         );
 
@@ -138,11 +151,13 @@ class BuhTasksController extends Controller
             $name        = $service->name;
             $cost        = (float) $service->cost;
             $periodicity = $service->periodicity;
+            $dueDay      = $service->due_day;
             $serviceId   = $service->id;
         } else {
             $name        = $request->name;
             $cost        = (float) ($request->cost ?? 0);
             $periodicity = null;
+            $dueDay      = $request->due_day ? (int) $request->due_day : null;
             $serviceId   = null;
         }
 
@@ -150,9 +165,10 @@ class BuhTasksController extends Controller
 
         $item = $estimate->items()->create([
             'service_id'  => $serviceId,
-            'is_extra'    => true,
+            'type'        => 'one_time',
             'name'        => $name,
             'periodicity' => $periodicity,
+            'due_day'     => $dueDay,
             'cost'        => $cost,
             'quantity'    => 1,
             'total'       => $cost,
@@ -174,6 +190,7 @@ class BuhTasksController extends Controller
                 'name'              => $item->name,
                 'cost'              => (float) $item->total,
                 'periodicity'       => $item->periodicity,
+                'due_day'           => $item->due_day,
                 'status'            => 'pending',
                 'elapsed_seconds'   => 0,
                 'loading'           => false,
@@ -293,6 +310,7 @@ class BuhTasksController extends Controller
             'cost'      => 'required|numeric|min:0',
             'year'      => 'required|integer',
             'month'     => 'required|integer|min:1|max:12',
+            'due_day'   => 'nullable|integer|min:1|max:31',
         ]);
 
         $employee = auth('employee')->user();
@@ -309,6 +327,7 @@ class BuhTasksController extends Controller
             'cost'           => $request->cost,
             'year'           => $request->year,
             'month'          => $request->month,
+            'due_day'        => $request->due_day,
             'status'         => 'pending',
             'paused_seconds' => 0,
         ]);
@@ -324,6 +343,7 @@ class BuhTasksController extends Controller
                 'name'            => $adhoc->name,
                 'cost'            => (float) $adhoc->cost,
                 'periodicity'     => null,
+                'due_day'         => $adhoc->due_day,
                 'status'          => 'pending',
                 'elapsed_seconds' => 0,
                 'loading'         => false,

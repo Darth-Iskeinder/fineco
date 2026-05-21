@@ -6,6 +6,27 @@
 @section('content')
 <div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($services) }})" x-cloak>
 
+    {{-- Баннер срочных задач --}}
+    <template x-if="urgentSummary.overdue.length > 0 || urgentSummary.today.length > 0 || urgentSummary.soon.length > 0">
+        <div class="mb-4 rounded-2xl border px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-1"
+             :class="urgentSummary.overdue.length > 0 ? 'bg-red-50 border-red-200' : (urgentSummary.today.length > 0 ? 'bg-orange-50 border-orange-200' : 'bg-amber-50 border-amber-200')">
+            <svg class="w-5 h-5 flex-shrink-0"
+                 :class="urgentSummary.overdue.length > 0 ? 'text-red-500' : 'text-amber-500'"
+                 fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+            </svg>
+            <span x-show="urgentSummary.overdue.length > 0"
+                  class="text-sm font-semibold text-red-700"
+                  x-text="'Просрочено: ' + urgentSummary.overdue.length + ' ' + plural(urgentSummary.overdue.length, 'задача', 'задачи', 'задач')"></span>
+            <span x-show="urgentSummary.today.length > 0"
+                  class="text-sm font-semibold text-orange-700"
+                  x-text="'Сегодня истекает: ' + urgentSummary.today.length + ' ' + plural(urgentSummary.today.length, 'задача', 'задачи', 'задач')"></span>
+            <span x-show="urgentSummary.soon.length > 0"
+                  class="text-sm text-amber-700"
+                  x-text="'Скоро истекает: ' + urgentSummary.soon.length + ' ' + plural(urgentSummary.soon.length, 'задача', 'задачи', 'задач')"></span>
+        </div>
+    </template>
+
     {{-- Шапка --}}
     <div class="flex items-center justify-between mb-6">
         <div class="flex items-center gap-2 text-sm text-slate-500">
@@ -69,7 +90,13 @@
                 </thead>
                 <tbody class="divide-y divide-slate-100">
                     <template x-for="(task, idx) in tasks" :key="task.uid">
-                        <tr :class="task.status === 'completed' ? 'bg-emerald-50/30' : 'hover:bg-slate-50/50'">
+                        <tr :class="{
+                                'bg-emerald-50/30': task.status === 'completed',
+                                'border-l-4 border-l-red-400 bg-red-50/40': task.status !== 'completed' && urgency(task) === 'overdue',
+                                'border-l-4 border-l-orange-400 bg-orange-50/30': task.status !== 'completed' && urgency(task) === 'today',
+                                'border-l-4 border-l-amber-300 bg-amber-50/20': task.status !== 'completed' && urgency(task) === 'soon',
+                                'hover:bg-slate-50/50': task.status !== 'completed' && !urgency(task),
+                            }">
 
                             {{-- Статус-точка --}}
                             <td class="px-4 py-3.5">
@@ -89,6 +116,10 @@
                                           x-text="task.name"></span>
                                     <span x-show="task.type === 'adhoc'"
                                           class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">доп.</span>
+                                    <span x-show="task.status !== 'completed' && urgency(task) === 'overdue'"
+                                          class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">просрочена</span>
+                                    <span x-show="task.status !== 'completed' && urgency(task) === 'today'"
+                                          class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-700">сегодня</span>
                                 </div>
                             </td>
 
@@ -97,10 +128,21 @@
                             </td>
 
                             <td class="px-4 py-3.5">
-                                <span x-show="task.periodicity"
-                                      class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600"
-                                      x-text="task.periodicity"></span>
-                                <span x-show="!task.periodicity" class="text-slate-300 text-sm">—</span>
+                                <div class="flex flex-col gap-0.5">
+                                    <span x-show="task.periodicity"
+                                          class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 w-fit"
+                                          x-text="task.periodicity"></span>
+                                    <span x-show="task.due_day"
+                                          class="text-xs font-medium w-fit"
+                                          :class="{
+                                              'text-red-600': urgency(task) === 'overdue',
+                                              'text-orange-600': urgency(task) === 'today',
+                                              'text-amber-600': urgency(task) === 'soon',
+                                              'text-slate-500': !urgency(task),
+                                          }"
+                                          x-text="'до ' + task.due_day + '-го'"></span>
+                                    <span x-show="!task.periodicity && !task.due_day" class="text-slate-300 text-sm">—</span>
+                                </div>
                             </td>
 
                             <td class="px-4 py-3.5 text-right">
@@ -197,7 +239,13 @@
                 </thead>
                 <tbody class="divide-y divide-slate-100">
                     <template x-for="(task, idx) in tasks" :key="task.uid">
-                        <tr :class="task.status === 'completed' ? 'bg-emerald-50/30' : 'hover:bg-slate-50/50'"
+                        <tr :class="{
+                                'bg-emerald-50/30': task.status === 'completed',
+                                'border-l-4 border-l-red-400 bg-red-50/40': task.status !== 'completed' && urgency(task) === 'overdue',
+                                'border-l-4 border-l-orange-400 bg-orange-50/30': task.status !== 'completed' && urgency(task) === 'today',
+                                'border-l-4 border-l-amber-300 bg-amber-50/20': task.status !== 'completed' && urgency(task) === 'soon',
+                                'hover:bg-slate-50/50': task.status !== 'completed' && !urgency(task),
+                            }"
                             class="cursor-pointer" @click="toggleChecklist(idx)">
                             <td class="px-4 py-3.5" @click.stop>
                                 <input type="checkbox"
@@ -213,16 +261,31 @@
                                           x-text="task.name"></span>
                                     <span x-show="task.type === 'adhoc'"
                                           class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">доп.</span>
+                                    <span x-show="task.status !== 'completed' && urgency(task) === 'overdue'"
+                                          class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">просрочена</span>
+                                    <span x-show="task.status !== 'completed' && urgency(task) === 'today'"
+                                          class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-700">сегодня</span>
                                 </div>
                             </td>
                             <td class="px-4 py-3.5">
                                 <span class="text-sm text-slate-600" x-text="task.client_name"></span>
                             </td>
                             <td class="px-4 py-3.5">
-                                <span x-show="task.periodicity"
-                                      class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600"
-                                      x-text="task.periodicity"></span>
-                                <span x-show="!task.periodicity" class="text-slate-300 text-sm">—</span>
+                                <div class="flex flex-col gap-0.5">
+                                    <span x-show="task.periodicity"
+                                          class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 w-fit"
+                                          x-text="task.periodicity"></span>
+                                    <span x-show="task.due_day"
+                                          class="text-xs font-medium w-fit"
+                                          :class="{
+                                              'text-red-600': urgency(task) === 'overdue',
+                                              'text-orange-600': urgency(task) === 'today',
+                                              'text-amber-600': urgency(task) === 'soon',
+                                              'text-slate-500': !urgency(task),
+                                          }"
+                                          x-text="'до ' + task.due_day + '-го'"></span>
+                                    <span x-show="!task.periodicity && !task.due_day" class="text-slate-300 text-sm">—</span>
+                                </div>
                             </td>
                             <td class="px-4 py-3.5 text-right">
                                 <span class="text-sm font-semibold text-slate-700"
@@ -323,14 +386,25 @@
                                    placeholder="Например: Сверка с банком"
                                    class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50">
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium text-slate-700 mb-1.5">Стоимость (сом)</label>
-                            <input type="number"
-                                   x-model="newTask.cost"
-                                   placeholder="0"
-                                   min="0"
-                                   step="0.01"
-                                   class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50">
+                        <div class="flex gap-3">
+                            <div class="flex-1">
+                                <label class="block text-sm font-medium text-slate-700 mb-1.5">Стоимость (сом)</label>
+                                <input type="number"
+                                       x-model="newTask.cost"
+                                       placeholder="0"
+                                       min="0"
+                                       step="0.01"
+                                       class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50">
+                            </div>
+                            <div class="w-32">
+                                <label class="block text-sm font-medium text-slate-700 mb-1.5">Срок (день)</label>
+                                <input type="number"
+                                       x-model="newTask.due_day"
+                                       placeholder="25"
+                                       min="1"
+                                       max="31"
+                                       class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50">
+                            </div>
                         </div>
                     </div>
                 </template>
@@ -368,7 +442,7 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
         now: Math.floor(Date.now() / 1000),
 
         showCreateModal: false,
-        newTask: { mode: 'catalog', client_id: '', service_id: '', name: '', cost: '' },
+        newTask: { mode: 'catalog', client_id: '', service_id: '', name: '', cost: '', due_day: '' },
         creating: false,
         createError: '',
 
@@ -379,6 +453,40 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
         get totalProgressPct() {
             if (!this.tasks.length) return 0;
             return Math.round(this.totalCompleted / this.tasks.length * 100);
+        },
+
+        urgency(task) {
+            if (task.status === 'completed' || !task.due_day) return null;
+            const now = new Date();
+            if (this.year !== now.getFullYear() || this.month !== now.getMonth() + 1) return null;
+            const today = now.getDate();
+            if (task.due_day < today) return 'overdue';
+            if (task.due_day === today) return 'today';
+            if (task.due_day <= today + 3) return 'soon';
+            return null;
+        },
+
+        get urgentSummary() {
+            const pending = this.tasks.filter(t => t.status !== 'completed' && t.due_day);
+            const now = new Date();
+            if (this.year !== now.getFullYear() || this.month !== now.getMonth() + 1) {
+                return { overdue: [], today: [], soon: [] };
+            }
+            const today = now.getDate();
+            return {
+                overdue: pending.filter(t => t.due_day < today),
+                today:   pending.filter(t => t.due_day === today),
+                soon:    pending.filter(t => t.due_day > today && t.due_day <= today + 3),
+            };
+        },
+
+        plural(n, one, few, many) {
+            const mod10  = n % 10;
+            const mod100 = n % 100;
+            if (mod100 >= 11 && mod100 <= 19) return many;
+            if (mod10 === 1) return one;
+            if (mod10 >= 2 && mod10 <= 4) return few;
+            return many;
         },
 
         init() {
@@ -572,12 +680,13 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
             this.creating = true;
 
             try {
-                const body = { client_id: this.newTask.client_id };
+                const body = { client_id: this.newTask.client_id, year: this.year, month: this.month };
                 if (this.newTask.mode === 'catalog') {
                     body.service_id = this.newTask.service_id;
                 } else {
-                    body.name = this.newTask.name.trim();
-                    body.cost = parseFloat(this.newTask.cost) || 0;
+                    body.name    = this.newTask.name.trim();
+                    body.cost    = parseFloat(this.newTask.cost) || 0;
+                    body.due_day = this.newTask.due_day ? parseInt(this.newTask.due_day) : null;
                 }
 
                 const r = await fetch('/buhtasks/extra', {
@@ -593,7 +702,7 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
 
                 if (data.success) {
                     this.tasks.push(data.task);
-                    this.newTask = { mode: this.newTask.mode, client_id: '', service_id: '', name: '', cost: '' };
+                    this.newTask = { mode: this.newTask.mode, client_id: '', service_id: '', name: '', cost: '', due_day: '' };
                     this.showCreateModal = false;
                 } else {
                     this.createError = data.message || 'Ошибка создания задачи';

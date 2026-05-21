@@ -795,7 +795,7 @@
     </div>
 
     <!-- ==================== СМЕТА (превью) ==================== -->
-    @php $estimate = \App\Models\Estimate::where('client_id', $client->id)->first(); @endphp
+    @php $estimate = \App\Models\Estimate::where('client_id', $client->id)->where('year', now()->year)->where('month', now()->month)->first(); @endphp
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden mt-6">
         <div class="px-6 py-5 flex items-center justify-between">
             <div class="flex items-center gap-4">

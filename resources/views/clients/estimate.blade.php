@@ -9,13 +9,23 @@
 .toggle-btn { transition: background-color .2s; }
 </style>
 
+@php
+$prevMonth  = $month === 1 ? 12 : $month - 1;
+$prevYear   = $month === 1 ? $year - 1 : $year;
+$nextMonth  = $month === 12 ? 1 : $month + 1;
+$nextYear   = $month === 12 ? $year + 1 : $year;
+$monthNames = ['', 'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+@endphp
+
 <div x-data="estimatePage(
     {{ $client->id }},
     {{ json_encode($tariffBPs) }},
     {{ json_encode($extras) }},
     {{ json_encode($estimate->notes ?? '') }},
     {{ json_encode($estimate->updated_at?->format('d.m.Y H:i')) }},
-    {{ json_encode($allServices) }}
+    {{ json_encode($allServices) }},
+    {{ $year }},
+    {{ $month }}
 )">
 
     <!-- Хлебные крошки -->
@@ -37,13 +47,29 @@
                 @if($client->tariff) · Тариф: {{ $client->tariff->name }} @endif
             </p>
         </div>
-        <div class="flex items-center gap-2">
-            <a href="/clients/{{ $client->id }}/estimate/pdf" target="_blank"
+        <div class="flex items-center gap-2 flex-wrap justify-end">
+
+            <!-- Навигация по месяцам -->
+            <div class="flex items-center bg-white border border-slate-200 rounded-xl px-1 py-1">
+                <a href="/clients/{{ $client->id }}/estimate/edit?year={{ $prevYear }}&month={{ $prevMonth }}"
+                   class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                </a>
+                <span class="text-sm font-semibold text-slate-800 px-3 min-w-[130px] text-center">
+                    {{ $monthNames[$month] }} {{ $year }}
+                </span>
+                <a href="/clients/{{ $client->id }}/estimate/edit?year={{ $nextYear }}&month={{ $nextMonth }}"
+                   class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                </a>
+            </div>
+
+            <a href="/clients/{{ $client->id }}/estimate/pdf?year={{ $year }}&month={{ $month }}" target="_blank"
                class="inline-flex items-center px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors">
                 <svg class="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
                 </svg>
-                Скачать PDF
+                PDF
             </a>
             <button @click="save()" :disabled="saving"
                     class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-60 transition-colors">
@@ -58,11 +84,30 @@
 
     <div class="space-y-4">
 
-        <!-- Блок: Услуги по тарифу -->
+        <!-- Кнопка "Сформировать из прошлого месяца" -->
+        @if($hasPrevious && !$estimateHasItems)
+        <div class="bg-violet-50 border border-violet-200 rounded-2xl p-5 flex items-center justify-between">
+            <div>
+                <p class="text-sm font-semibold text-violet-900">Смета за {{ $monthNames[$month] }} {{ $year }} пустая</p>
+                <p class="text-xs text-violet-600 mt-0.5">Перенести постоянные услуги из {{ $monthNames[$prevMonth] }} {{ $prevYear }}?</p>
+            </div>
+            <button type="button" @click="generate()" :disabled="generating"
+                    class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-60 transition-colors flex-shrink-0 ml-4">
+                <svg x-show="generating" class="w-4 h-4 mr-1.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                </svg>
+                <span x-text="generating ? 'Формируем...' : 'Сформировать'"></span>
+            </button>
+        </div>
+        @endif
+
+        <!-- Блок: Услуги по тарифу (всегда постоянные) -->
         <template x-if="tariffBPs.length > 0">
             <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
-                <div class="px-6 py-3 bg-slate-50 border-b border-slate-100">
+                <div class="px-6 py-3 bg-slate-50 border-b border-slate-100 flex items-center gap-3">
                     <h2 class="text-sm font-semibold text-slate-600 uppercase tracking-wider">Услуги по тарифу</h2>
+                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">Постоянные</span>
                 </div>
                 <div class="divide-y divide-slate-100">
                     <template x-for="(bp, bpIdx) in tariffBPs" :key="bp.service_id">
@@ -78,11 +123,9 @@
                                           :style="bp.enabled ? 'transform: translateX(20px)' : ''"></span>
                                 </button>
 
-                                <!-- Название и периодичность -->
                                 <div class="flex-1 min-w-0">
                                     <div class="flex items-center gap-2">
                                         <p class="text-sm font-medium text-slate-800" x-text="bp.name"></p>
-                                        <!-- Индикатор наличия подпунктов -->
                                         <template x-if="bp.children.length > 0">
                                             <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-500 flex-shrink-0">
                                                 <svg class="w-3 h-3 transition-transform duration-200" :class="bp.enabled ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
@@ -93,7 +136,6 @@
                                     <p class="text-xs text-slate-400 mt-0.5" x-show="bp.periodicity" x-text="bp.periodicity"></p>
                                 </div>
 
-                                <!-- Кол-во (если разрешено и нет активных подпунктов) -->
                                 <template x-if="bp.allows_quantity && bp.enabled && !bp.children.some(c => c.enabled)">
                                     <div class="flex items-center gap-1.5">
                                         <span class="text-xs text-slate-500">Кол-во:</span>
@@ -107,7 +149,6 @@
                                     </div>
                                 </template>
 
-                                <!-- Стоимость -->
                                 <div class="text-right flex-shrink-0">
                                     <template x-if="bp.children.length === 0">
                                         <span class="text-sm font-semibold text-slate-800" x-text="fmt(bp.cost * (bp.allows_quantity ? bp.quantity : 1))"></span>
@@ -124,13 +165,12 @@
                                 </div>
                             </div>
 
-                            <!-- Подпункты (показываются если bp.enabled и есть children) -->
+                            <!-- Подпункты -->
                             <template x-if="bp.enabled && bp.children.length > 0">
                                 <div class="bg-slate-50/60 border-t border-slate-100 pl-14 pr-6 py-2 space-y-1">
                                     <template x-for="(child, cIdx) in bp.children" :key="child.service_id">
                                         <div class="flex items-center gap-4 py-2"
                                              :class="child.enabled ? '' : 'opacity-50'">
-                                            <!-- Toggle подпункта -->
                                             <button type="button" @click="child.enabled = !child.enabled"
                                                     class="toggle-btn flex-shrink-0 w-9 h-5 rounded-full relative"
                                                     :class="child.enabled ? 'bg-indigo-500' : 'bg-slate-200'">
@@ -143,7 +183,6 @@
                                                 <p class="text-xs text-slate-400" x-show="child.periodicity" x-text="child.periodicity"></p>
                                             </div>
 
-                                            <!-- Кол-во подпункта -->
                                             <template x-if="child.allows_quantity && child.enabled">
                                                 <div class="flex items-center gap-1.5">
                                                     <span class="text-xs text-slate-500">Кол-во:</span>
@@ -179,7 +218,7 @@
         <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
             <div class="px-6 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
                 <h2 class="text-sm font-semibold text-slate-600 uppercase tracking-wider">Дополнительные услуги</h2>
-                <button type="button" @click="showExtraModal = true; catalogSearch = ''"
+                <button type="button" @click="showExtraModal = true; catalogSearch = ''; newExtraType = 'one_time'"
                         class="inline-flex items-center text-xs text-indigo-600 hover:text-indigo-800 font-medium">
                     <svg class="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
                     Добавить
@@ -189,7 +228,7 @@
             <template x-if="extras.length === 0">
                 <div class="px-6 py-6 text-center text-slate-400 text-sm">
                     Нет дополнительных услуг.
-                    <button type="button" @click="showExtraModal = true; catalogSearch = ''"
+                    <button type="button" @click="showExtraModal = true; catalogSearch = ''; newExtraType = 'one_time'"
                             class="text-indigo-500 hover:text-indigo-700 font-medium ml-1">Добавить из каталога</button>
                 </div>
             </template>
@@ -197,9 +236,20 @@
             <div class="divide-y divide-slate-100">
                 <template x-for="(extra, eIdx) in extras" :key="eIdx">
                     <div>
-                        <div class="flex items-center gap-4 px-6 py-4">
+                        <div class="flex items-center gap-3 px-6 py-4">
+
                             <div class="flex-1 min-w-0">
-                                <p class="text-sm font-medium text-slate-800" x-text="extra.name"></p>
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <p class="text-sm font-medium text-slate-800" x-text="extra.name"></p>
+                                    <!-- Бейдж типа -->
+                                    <button type="button"
+                                            @click="extra.type = extra.type === 'recurring' ? 'one_time' : 'recurring'"
+                                            class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium transition-colors cursor-pointer"
+                                            :class="extra.type === 'recurring' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-amber-100 text-amber-700 hover:bg-amber-200'"
+                                            :title="extra.type === 'recurring' ? 'Постоянная — нажмите чтобы сделать временной' : 'Временная — нажмите чтобы сделать постоянной'"
+                                            x-text="extra.type === 'recurring' ? 'Постоянная' : 'Временная'">
+                                    </button>
+                                </div>
                                 <p class="text-xs text-slate-400 mt-0.5" x-show="extra.periodicity" x-text="extra.periodicity"></p>
                             </div>
 
@@ -225,7 +275,7 @@
                             </button>
                         </div>
 
-                        <!-- Подпункты доп. услуги (если есть в каталоге) -->
+                        <!-- Подпункты доп. услуги -->
                         <template x-if="extra.service_id && getCatalogChildren(extra.service_id).length > 0">
                             <div class="bg-slate-50/60 border-t border-slate-100 pl-14 pr-6 py-2 space-y-1">
                                 <template x-for="(child, cIdx) in getCatalogChildren(extra.service_id)" :key="child.id">
@@ -293,6 +343,33 @@
                         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                     </button>
                 </div>
+
+                <!-- Выбор типа: Временная / Постоянная -->
+                <div class="flex items-center gap-1 p-1 bg-slate-100 rounded-xl mb-4">
+                    <button type="button" @click="newExtraType = 'one_time'"
+                            class="flex-1 py-2 px-3 rounded-lg text-xs font-semibold transition-all"
+                            :class="newExtraType === 'one_time'
+                                ? 'bg-white shadow text-amber-700 ring-1 ring-amber-200'
+                                : 'text-slate-500 hover:text-slate-700'">
+                        Временная
+                        <span class="block text-xs font-normal mt-0.5 leading-tight"
+                              :class="newExtraType === 'one_time' ? 'text-amber-500' : 'text-slate-400'">
+                            только этот месяц
+                        </span>
+                    </button>
+                    <button type="button" @click="newExtraType = 'recurring'"
+                            class="flex-1 py-2 px-3 rounded-lg text-xs font-semibold transition-all"
+                            :class="newExtraType === 'recurring'
+                                ? 'bg-white shadow text-emerald-700 ring-1 ring-emerald-200'
+                                : 'text-slate-500 hover:text-slate-700'">
+                        Постоянная
+                        <span class="block text-xs font-normal mt-0.5 leading-tight"
+                              :class="newExtraType === 'recurring' ? 'text-emerald-500' : 'text-slate-400'">
+                            переходит каждый месяц
+                        </span>
+                    </button>
+                </div>
+
                 <div class="flex gap-2 mb-3">
                     <input type="text" x-model="catalogSearch" placeholder="Поиск по каталогу..."
                            class="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
@@ -303,7 +380,7 @@
                 </div>
 
                 <!-- Из каталога -->
-                <div x-show="!showCustomForm" class="space-y-1 max-h-72 overflow-y-auto">
+                <div x-show="!showCustomForm" class="space-y-1 max-h-64 overflow-y-auto">
                     <template x-for="svc in filteredExtraServices" :key="svc.id">
                         <button type="button" @click="addExtra(svc)"
                                 class="w-full flex items-center justify-between px-4 py-3 rounded-xl hover:bg-indigo-50 border border-transparent hover:border-indigo-100 text-left transition-colors">
@@ -367,7 +444,7 @@
 </div>
 
 <script>
-function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedAt, allServices) {
+function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedAt, allServices, year, month) {
     return {
         clientId,
         tariffBPs,
@@ -375,8 +452,11 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
         notes: initialNotes,
         updatedAt: initialUpdatedAt,
         allServices,
+        year,
+        month,
 
         saving: false,
+        generating: false,
         toastShow: false,
         toastMsg: '',
         toastType: 'success',
@@ -384,6 +464,7 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
         showExtraModal: false,
         catalogSearch: '',
         showCustomForm: false,
+        newExtraType: 'one_time',
         customForm: { name: '', cost: 0, periodicity: '', allows_quantity: false },
 
         get filteredExtraServices() {
@@ -456,6 +537,7 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
         addExtra(svc) {
             this.extras.push({
                 service_id:      svc.id,
+                type:            this.newExtraType,
                 name:            svc.name,
                 periodicity:     svc.periodicity,
                 cost:            svc.cost,
@@ -470,6 +552,7 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
         addCustomExtra() {
             this.extras.push({
                 service_id:      null,
+                type:            this.newExtraType,
                 name:            this.customForm.name,
                 periodicity:     this.customForm.periodicity,
                 cost:            this.customForm.cost,
@@ -480,6 +563,30 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
             this.customForm = { name: '', cost: 0, periodicity: '', allows_quantity: false };
             this.showCustomForm = false;
             this.showExtraModal = false;
+        },
+
+        async generate() {
+            this.generating = true;
+            try {
+                const res = await fetch('/clients/' + this.clientId + '/estimate/generate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]').content,
+                        'Accept': 'application/json',
+                    },
+                    body: JSON.stringify({ year: this.year, month: this.month }),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    window.location.reload();
+                } else {
+                    this.showToast(data.message || 'Ошибка', 'error');
+                }
+            } catch(e) {
+                this.showToast('Ошибка: ' + e.message, 'error');
+            }
+            this.generating = false;
         },
 
         async save() {
@@ -493,6 +600,8 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
                         'Accept': 'application/json',
                     },
                     body: JSON.stringify({
+                        year:       this.year,
+                        month:      this.month,
                         notes:      this.notes,
                         tariff_bps: this.tariffBPs,
                         extras:     this.extras,
