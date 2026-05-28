@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\ActivityType;
+use App\Models\Rate;
 use App\Models\Service;
 use App\Models\Tariff;
 use App\Models\TaxSystem;
@@ -14,9 +15,41 @@ class SettingsController extends Controller
 {
     public function index()
     {
-        return view('settings.index', [
+        return redirect()->route('settings.tax-systems');
+    }
+
+    public function taxSystemsPage()
+    {
+        return view('settings.tax-systems', [
             'taxSystems' => TaxSystem::ordered()->get(),
+        ]);
+    }
+
+    public function activityTypesPage()
+    {
+        return view('settings.activity-types', [
             'activityTypes' => ActivityType::ordered()->get(),
+        ]);
+    }
+
+    public function tariffsPage()
+    {
+        return view('settings.tariffs', [
+            'tariffs' => Tariff::ordered()->get(),
+        ]);
+    }
+
+    public function ratesPage()
+    {
+        return view('settings.rates', [
+            'rates' => Rate::orderBy('name')->get(),
+        ]);
+    }
+
+    public function servicesPage()
+    {
+        return view('settings.services', [
+            'taxSystems' => TaxSystem::ordered()->get(),
             'tariffs' => Tariff::ordered()->get(),
             'services' => Service::with(['tariffs', 'taxSystems', 'children.tariffs'])->roots()->ordered()->get(),
         ]);
@@ -155,6 +188,56 @@ class SettingsController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Вид деятельности удалён',
+        ]);
+    }
+
+    // =============================================
+    // RATES (СПРАВОЧНИК СТАВОК)
+    // =============================================
+
+    public function storeRate(Request $request)
+    {
+        $validated = $request->validate([
+            'name'       => 'required|string|max:255',
+            'unit'       => 'nullable|string|max:100',
+            'price'      => 'required|numeric|min:0',
+            'conditions' => 'nullable|string|max:1000',
+        ]);
+
+        $rate = Rate::create($validated);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Ставка создана',
+            'item'    => $rate,
+        ]);
+    }
+
+    public function updateRate(Request $request, Rate $rate)
+    {
+        $validated = $request->validate([
+            'name'       => 'required|string|max:255',
+            'unit'       => 'nullable|string|max:100',
+            'price'      => 'required|numeric|min:0',
+            'conditions' => 'nullable|string|max:1000',
+        ]);
+
+        $rate->update($validated);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Ставка обновлена',
+            'item'    => $rate->fresh(),
+        ]);
+    }
+
+    public function destroyRate(Rate $rate)
+    {
+        $rate->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Ставка удалена',
         ]);
     }
 

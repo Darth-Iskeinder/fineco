@@ -20,6 +20,9 @@
             <button @click="activeTab = 'services'" :class="activeTab === 'services' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'" class="py-3 px-1 border-b-2 font-medium text-sm transition-colors">
                 Бизнес процессы
             </button>
+            <button @click="activeTab = 'rates'" :class="activeTab === 'rates' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'" class="py-3 px-1 border-b-2 font-medium text-sm transition-colors">
+                Справочник ставок
+            </button>
         </nav>
     </div>
 
@@ -273,6 +276,57 @@
                         <tr>
                             <td colspan="6" class="px-6 py-8 text-center text-slate-500">Нет бизнес-процессов. Нажмите «Добавить БП» чтобы создать первый.</td>
                         </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Справочник ставок -->
+    <div x-show="activeTab === 'rates'" x-cloak>
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                <h2 class="text-lg font-semibold text-slate-800">Справочник ставок</h2>
+                <button @click="openRateModal()" class="inline-flex items-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">
+                    <svg class="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
+                    Создать ставку
+                </button>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-slate-200">
+                    <thead class="bg-slate-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Название</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Единица</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Цена</th>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Условия</th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-slate-200">
+                        <template x-for="rate in rates" :key="rate.id">
+                            <tr class="hover:bg-slate-50">
+                                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900" x-text="rate.name"></td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-500" x-text="rate.unit || '—'"></td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-900" x-text="formatPrice(rate.price)"></td>
+                                <td class="px-6 py-4 text-sm text-slate-500 max-w-xs truncate" x-text="rate.conditions || '—'"></td>
+                                <td class="px-6 py-4 whitespace-nowrap text-right text-sm">
+                                    <div class="flex items-center justify-end gap-2">
+                                        <button @click="openRateModal(rate)" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Редактировать">
+                                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                        </button>
+                                        <button @click="openDeleteRateModal(rate)" class="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Удалить">
+                                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        </template>
+                        <template x-if="rates.length === 0">
+                            <tr>
+                                <td colspan="5" class="px-6 py-8 text-center text-slate-500">Нет ставок. Нажмите «Создать ставку» чтобы добавить первую.</td>
+                            </tr>
+                        </template>
                     </tbody>
                 </table>
             </div>
@@ -646,6 +700,57 @@
         </div>
     </template>
 
+    <!-- Модальное окно ставки -->
+    <template x-teleport="body">
+        <div x-show="showRateModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto" aria-modal="true">
+            <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:p-0">
+                <div x-show="showRateModal" x-transition:enter="ease-out duration-300" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100" x-transition:leave="ease-in duration-200" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0" class="fixed inset-0 bg-slate-500/75 transition-opacity" @click="showRateModal = false"></div>
+
+                <div x-show="showRateModal" x-transition:enter="ease-out duration-300" x-transition:enter-start="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95" x-transition:enter-end="opacity-100 translate-y-0 sm:scale-100" x-transition:leave="ease-in duration-200" x-transition:leave-start="opacity-100 translate-y-0 sm:scale-100" x-transition:leave-end="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95" class="relative inline-block w-full max-w-lg p-6 my-8 text-left align-middle bg-white rounded-2xl shadow-xl transform transition-all">
+                    <div class="flex items-center justify-between mb-6">
+                        <h3 class="text-lg font-semibold text-slate-900" x-text="rateForm.id ? 'Редактирование ставки' : 'Новая ставка'"></h3>
+                        <button @click="showRateModal = false" class="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors">
+                            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                    </div>
+
+                    <form @submit.prevent="submitRateForm()">
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-1">Название <span class="text-red-500">*</span></label>
+                                <input type="text" x-model="rateForm.name" required class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-700 mb-1">Единица</label>
+                                    <input type="text" x-model="rateForm.unit" placeholder="час, шт., услуга..." class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-700 mb-1">Цена <span class="text-red-500">*</span></label>
+                                    <input type="number" x-model="rateForm.price" required min="0" step="0.01" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-1">Условия</label>
+                                <textarea x-model="rateForm.conditions" rows="3" placeholder="Опишите условия применения ставки..." class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-none"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="flex justify-end gap-3 mt-6 pt-6 border-t border-slate-100">
+                            <button type="button" @click="showRateModal = false" class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors">
+                                Отмена
+                            </button>
+                            <button type="submit" :disabled="savingRate" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                                <svg x-show="savingRate" class="w-4 h-4 mr-2 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                                <span x-text="rateForm.id ? 'Сохранить' : 'Создать'"></span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </template>
+
     <!-- Модальное окно удаления -->
     <template x-teleport="body">
         <div x-show="showDeleteModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto" aria-modal="true">
@@ -733,6 +838,7 @@ function settingsPage() {
         taxSystems: @json($taxSystems),
         activityTypes: @json($activityTypes),
         tariffs: @json($tariffs),
+        rates: @json($rates),
         services: @json($servicesJson),
 
         // Общий модал (налоги, виды деят., тарифы)
@@ -756,6 +862,11 @@ function settingsPage() {
             sort_order: 0,
             is_active: true,
         },
+
+        // Модал ставки
+        showRateModal: false,
+        savingRate: false,
+        rateForm: { id: null, name: '', unit: '', price: 0, conditions: '' },
 
         // Модал услуги
         showServiceModal: false,
@@ -849,6 +960,53 @@ function settingsPage() {
                 sort_order: 0,
                 is_active: true,
             };
+        },
+
+        openRateModal(rate = null) {
+            this.rateForm = rate
+                ? { id: rate.id, name: rate.name, unit: rate.unit || '', price: rate.price, conditions: rate.conditions || '' }
+                : { id: null, name: '', unit: '', price: 0, conditions: '' };
+            this.showRateModal = true;
+        },
+
+        openDeleteRateModal(rate) {
+            this.deleteType = 'rates';
+            this.deleteItem = rate;
+            this.deleteIsService = false;
+            this.showDeleteModal = true;
+        },
+
+        async submitRateForm() {
+            this.savingRate = true;
+            const url = this.rateForm.id ? `/settings/rates/${this.rateForm.id}` : '/settings/rates';
+            const method = this.rateForm.id ? 'PUT' : 'POST';
+            try {
+                const response = await fetch(url, {
+                    method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                        'Accept': 'application/json',
+                    },
+                    body: JSON.stringify(this.rateForm),
+                });
+                const data = await response.json();
+                if (data.success) {
+                    this.showToast(data.message, 'success');
+                    if (this.rateForm.id) {
+                        const idx = this.rates.findIndex(r => r.id === this.rateForm.id);
+                        if (idx !== -1) this.rates[idx] = data.item;
+                    } else {
+                        this.rates.push(data.item);
+                    }
+                    this.showRateModal = false;
+                } else {
+                    this.showToast(data.message || 'Ошибка сохранения', 'error');
+                }
+            } catch (e) {
+                this.showToast('Ошибка сохранения', 'error');
+            }
+            this.savingRate = false;
         },
 
         openServiceModal(svc = null) {
@@ -1081,6 +1239,7 @@ function settingsPage() {
                 tax_systems: '/settings/tax-systems',
                 activity_types: '/settings/activity-types',
                 tariffs: '/settings/tariffs',
+                rates: '/settings/rates',
                 services: '/settings/services',
             };
 
@@ -1125,6 +1284,7 @@ function settingsPage() {
                 tax_systems: this.taxSystems,
                 activity_types: this.activityTypes,
                 tariffs: this.tariffs,
+                rates: this.rates,
             };
             return lists[type];
         },

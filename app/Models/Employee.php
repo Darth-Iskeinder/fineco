@@ -19,6 +19,11 @@ class Employee extends Authenticatable
         'position',
         'email',
         'phone',
+        'employee_number',
+        'birth_date',
+        'hired_at',
+        'fired_at',
+        'employment_status',
         'password',
         'role_id',
         'status',
@@ -34,12 +39,15 @@ class Employee extends Authenticatable
     ];
 
     protected $casts = [
+        'birth_date' => 'date',
+        'hired_at' => 'date',
+        'fired_at' => 'date',
         'invite_sent_at' => 'datetime',
         'invite_accepted_at' => 'datetime',
         'password' => 'hashed',
     ];
 
-    // Статусы
+    // Статусы аккаунта
     const STATUS_PENDING = 'pending';
     const STATUS_ACTIVE = 'active';
     const STATUS_INACTIVE = 'inactive';
@@ -54,6 +62,15 @@ class Employee extends Authenticatable
         self::STATUS_PENDING => 'yellow',
         self::STATUS_ACTIVE => 'green',
         self::STATUS_INACTIVE => 'red',
+    ];
+
+    // Статусы занятости
+    const EMPLOYMENT_EMPLOYED = 'employed';
+    const EMPLOYMENT_FIRED = 'fired';
+
+    public static array $employmentStatuses = [
+        self::EMPLOYMENT_EMPLOYED => 'Активный',
+        self::EMPLOYMENT_FIRED => 'Уволен',
     ];
 
     // Связи
@@ -167,6 +184,16 @@ class Employee extends Authenticatable
         return $this->modules()->where('name', $moduleName)->exists();
     }
 
+    public function isEmployed(): bool
+    {
+        return $this->employment_status === self::EMPLOYMENT_EMPLOYED;
+    }
+
+    public function isFired(): bool
+    {
+        return $this->employment_status === self::EMPLOYMENT_FIRED;
+    }
+
     public function getStatusLabelAttribute(): string
     {
         return self::$statuses[$this->status] ?? $this->status;
@@ -175,5 +202,10 @@ class Employee extends Authenticatable
     public function getStatusColorAttribute(): string
     {
         return self::$statusColors[$this->status] ?? 'gray';
+    }
+
+    public function getEmploymentStatusLabelAttribute(): string
+    {
+        return self::$employmentStatuses[$this->employment_status] ?? $this->employment_status;
     }
 }

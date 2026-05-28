@@ -6,16 +6,12 @@
 @section('content')
 <div x-data="{
     showCreateModal: false,
-    showEditModal: false,
     showDeleteModal: false,
     deleteEmployee: null,
-    editEmployee: null,
     allModules: @js($modules->map(fn($m) => ['id' => $m->id, 'name' => $m->display_name])),
     createSelectedIds: [],
-    editSelectedIds: [],
     adminRoleId: 1,
 
-    // Live search
     searchQuery: '',
     employees: @js($employees->map(fn($e) => [
         'id' => $e->id,
@@ -23,9 +19,8 @@
         'position' => $e->position,
         'email' => $e->email,
         'phone' => $e->phone,
-        'role_id' => $e->role_id,
         'role_name' => $e->role->display_name,
-        'module_ids' => $e->modules->pluck('id')->toArray(),
+        'employment_status' => $e->employment_status ?? 'employed',
     ])),
     loading: false,
     searchTimeout: null,
@@ -43,9 +38,7 @@
 
     onSearchInput() {
         clearTimeout(this.searchTimeout);
-        this.searchTimeout = setTimeout(() => {
-            this.searchEmployees();
-        }, 300);
+        this.searchTimeout = setTimeout(() => this.searchEmployees(), 300);
     },
 
     clearSearch() {
@@ -53,11 +46,8 @@
         this.searchEmployees();
     },
 
-    // Create modal methods
     createAdd(id) {
-        if (!this.createSelectedIds.includes(id)) {
-            this.createSelectedIds.push(id);
-        }
+        if (!this.createSelectedIds.includes(id)) this.createSelectedIds.push(id);
     },
     createRemove(id) {
         this.createSelectedIds = this.createSelectedIds.filter(i => i !== id);
@@ -71,27 +61,6 @@
     resetCreateForm() {
         this.createSelectedIds = [];
     },
-
-    // Edit modal methods
-    editAdd(id) {
-        if (!this.editSelectedIds.includes(id)) {
-            this.editSelectedIds.push(id);
-        }
-    },
-    editRemove(id) {
-        this.editSelectedIds = this.editSelectedIds.filter(i => i !== id);
-    },
-    editGetSelected() {
-        return this.allModules.filter(m => this.editSelectedIds.includes(m.id));
-    },
-    editGetAvailable() {
-        return this.allModules.filter(m => !this.editSelectedIds.includes(m.id));
-    },
-    openEditModal(employee) {
-        this.editEmployee = employee;
-        this.editSelectedIds = employee.module_ids || [];
-        this.showEditModal = true;
-    }
 }">
     <div class="sm:flex sm:items-center sm:justify-between mb-8">
         <div>
@@ -171,6 +140,9 @@
                         <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                             Роль
                         </th>
+                        <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                            Статус
+                        </th>
                         <th scope="col" class="relative px-6 py-4">
                             <span class="sr-only">Действия</span>
                         </th>
@@ -199,16 +171,23 @@
                             <td class="px-6 py-4 whitespace-nowrap">
                                 <div class="text-sm text-slate-600" x-text="employee.role_name"></div>
                             </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <template x-if="employee.employment_status === 'employed'">
+                                    <span class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-emerald-100 text-emerald-700">Активный</span>
+                                </template>
+                                <template x-if="employee.employment_status === 'fired'">
+                                    <span class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-red-100 text-red-700">Уволен</span>
+                                </template>
+                            </td>
                             <td class="px-6 py-4 whitespace-nowrap text-right">
                                 <div class="flex items-center justify-end gap-1">
-                                    <button type="button"
-                                            @click="openEditModal(employee)"
-                                            class="inline-flex items-center p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all duration-150"
-                                            title="Редактировать">
+                                    <a :href="'/employees/' + employee.id"
+                                       class="inline-flex items-center p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all duration-150"
+                                       title="Открыть">
                                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                                         </svg>
-                                    </button>
+                                    </a>
                                     <button type="button"
                                             @click="deleteEmployee = { id: employee.id, name: employee.full_name }; showDeleteModal = true"
                                             class="inline-flex items-center p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all duration-150"
@@ -413,141 +392,6 @@
         </div>
     </div>
 
-    <!-- Modal: Редактировать сотрудника -->
-    <div x-show="showEditModal"
-         x-transition:enter="transition ease-out duration-300"
-         x-transition:enter-start="opacity-0"
-         x-transition:enter-end="opacity-100"
-         x-transition:leave="transition ease-in duration-200"
-         x-transition:leave-start="opacity-100"
-         x-transition:leave-end="opacity-0"
-         class="fixed inset-0 z-50 overflow-y-auto"
-         style="display: none;">
-        <div class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm" @click="showEditModal = false"></div>
-
-        <div class="flex min-h-full items-center justify-center p-4">
-            <div x-show="showEditModal"
-                 x-transition:enter="transition ease-out duration-300"
-                 x-transition:enter-start="opacity-0 translate-y-4 scale-95"
-                 x-transition:enter-end="opacity-100 translate-y-0 scale-100"
-                 x-transition:leave="transition ease-in duration-200"
-                 x-transition:leave-start="opacity-100 translate-y-0 scale-100"
-                 x-transition:leave-end="opacity-0 translate-y-4 scale-95"
-                 @click.away="showEditModal = false"
-                 class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden">
-
-                <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-                    <h3 class="text-lg font-semibold text-slate-800">Редактировать сотрудника</h3>
-                    <button @click="showEditModal = false" type="button" class="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all duration-150">
-                        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
-                </div>
-
-                <form :action="'/employees/' + editEmployee?.id" method="POST" class="overflow-y-auto max-h-[calc(90vh-140px)]">
-                    @csrf
-                    @method('PUT')
-                    <div class="px-6 py-6">
-                        <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                            <div class="sm:col-span-2">
-                                <label for="edit_full_name" class="block text-sm font-medium text-slate-700 mb-2">ФИО <span class="text-red-500">*</span></label>
-                                <input type="text" name="full_name" id="edit_full_name" :value="editEmployee?.full_name" required class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
-                            </div>
-
-                            <div>
-                                <label for="edit_position" class="block text-sm font-medium text-slate-700 mb-2">Должность <span class="text-red-500">*</span></label>
-                                <input type="text" name="position" id="edit_position" :value="editEmployee?.position" required class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
-                            </div>
-
-                            <div>
-                                <label for="edit_email" class="block text-sm font-medium text-slate-700 mb-2">Email (логин) <span class="text-red-500">*</span></label>
-                                <input type="email" name="email" id="edit_email" :value="editEmployee?.email" required class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
-                            </div>
-
-                            <div>
-                                <label for="edit_phone" class="block text-sm font-medium text-slate-700 mb-2">Телефон</label>
-                                <input type="tel" name="phone" id="edit_phone" :value="editEmployee?.phone" placeholder="+996 (___) ___-___" class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
-                            </div>
-
-                            <div>
-                                <label for="edit_role_id" class="block text-sm font-medium text-slate-700 mb-2">Роль <span class="text-red-500">*</span></label>
-                                <select name="role_id" id="edit_role_id" x-model="editEmployee.role_id" required class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
-                                    <option value="">Выберите роль</option>
-                                    @foreach($roles as $role)
-                                        <option value="{{ $role->id }}">{{ $role->display_name }}</option>
-                                    @endforeach
-                                </select>
-                            </div>
-
-                            <div class="sm:col-span-2">
-                                <label class="block text-sm font-medium text-slate-700 mb-3">Доступ к модулям</label>
-
-                                <template x-if="editEmployee?.role_id == adminRoleId">
-                                    <p class="text-sm text-slate-500 mb-4 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
-                                        <svg class="inline w-4 h-4 mr-1 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                        </svg>
-                                        Администратор имеет доступ ко всем модулям
-                                    </p>
-                                </template>
-
-                                <template x-if="editEmployee?.role_id != adminRoleId">
-                                    <div>
-                                        <div class="mb-4">
-                                            <p class="text-xs text-slate-500 mb-2">Выбранные модули:</p>
-                                            <div class="flex flex-wrap gap-2 min-h-[42px] p-3 bg-slate-50/50 border border-slate-200 rounded-xl">
-                                                <template x-for="module in editGetSelected()" :key="module.id">
-                                                    <span class="inline-flex items-center px-3 py-1.5 bg-gradient-to-r from-violet-500 to-indigo-600 text-white text-sm font-medium rounded-lg shadow-sm">
-                                                        <span x-text="module.name"></span>
-                                                        <button type="button" @click="editRemove(module.id)" class="ml-2 hover:bg-white/20 rounded-full p-0.5 transition-colors duration-150">
-                                                            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                                                            </svg>
-                                                        </button>
-                                                        <input type="hidden" name="modules[]" :value="module.id">
-                                                    </span>
-                                                </template>
-                                                <span x-show="editGetSelected().length === 0" class="text-sm text-slate-400 italic">Нет выбранных модулей</span>
-                                            </div>
-                                        </div>
-
-                                        <div>
-                                            <p class="text-xs text-slate-500 mb-2">Доступные модули:</p>
-                                            <div class="flex flex-wrap gap-2 min-h-[42px] p-3 bg-slate-50/50 border border-slate-200 rounded-xl">
-                                                <template x-for="module in editGetAvailable()" :key="module.id">
-                                                    <button type="button" @click="editAdd(module.id)" class="inline-flex items-center px-3 py-1.5 bg-white border border-slate-200 text-slate-700 text-sm font-medium rounded-lg hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 transition-all duration-150">
-                                                        <svg class="w-3.5 h-3.5 mr-1.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                                                        </svg>
-                                                        <span x-text="module.name"></span>
-                                                    </button>
-                                                </template>
-                                                <span x-show="editGetAvailable().length === 0" class="text-sm text-slate-400 italic">Все модули выбраны</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </template>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
-                        <button @click="showEditModal = false" type="button" class="inline-flex items-center px-5 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 bg-white hover:bg-slate-50 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all duration-200">
-                            Отмена
-                        </button>
-                        <button type="submit" class="inline-flex items-center px-5 py-2.5 bg-gradient-to-r from-violet-500 to-indigo-600 text-white text-sm font-medium rounded-xl shadow-lg shadow-indigo-500/25 hover:shadow-xl hover:shadow-indigo-500/30 transition-all duration-200">
-                            <svg class="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-                            </svg>
-                            Сохранить изменения
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-    </div>
-
     <!-- Modal: Подтверждение удаления -->
     <div x-show="showDeleteModal"
          x-transition:enter="transition ease-out duration-300"
@@ -633,7 +477,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     setupPhoneMask(document.getElementById('create_phone'));
-    setupPhoneMask(document.getElementById('edit_phone'));
 });
 </script>
 @endsection

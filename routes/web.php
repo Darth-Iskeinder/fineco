@@ -46,7 +46,8 @@ Route::middleware('auth:employee')->group(function () {
         Route::get('/', [EmployeeController::class, 'index'])->name('index');
         Route::get('/search', [EmployeeController::class, 'search'])->name('search');
         Route::post('/', [EmployeeController::class, 'store'])->name('store');
-        Route::put('/{employee}', [EmployeeController::class, 'update'])->name('update');
+        Route::get('/{employee}', [EmployeeController::class, 'show'])->name('show');
+        Route::patch('/{employee}', [EmployeeController::class, 'updateSection'])->name('update-section');
         Route::delete('/{employee}', [EmployeeController::class, 'destroy'])->name('destroy');
     });
 
@@ -91,19 +92,31 @@ Route::middleware('auth:employee')->group(function () {
 
     // Настройки (только для админов)
     Route::prefix('settings')->name('settings.')->middleware('admin')->group(function () {
-        Route::get('/', [SettingsController::class, 'index'])->name('index');
+        Route::get('/', fn() => redirect()->route('settings.tax-systems'))->name('index');
 
-        // Системы налогообложения
+        // Страницы разделов
+        Route::get('/tax-systems', [SettingsController::class, 'taxSystemsPage'])->name('tax-systems');
+        Route::get('/activity-types', [SettingsController::class, 'activityTypesPage'])->name('activity-types');
+        Route::get('/tariffs', [SettingsController::class, 'tariffsPage'])->name('tariffs');
+        Route::get('/rates', [SettingsController::class, 'ratesPage'])->name('rates');
+        Route::get('/services', [SettingsController::class, 'servicesPage'])->name('services');
+
+        // CRUD: Системы налогообложения
         Route::post('/tax-systems', [SettingsController::class, 'storeTaxSystem'])->name('tax-systems.store');
         Route::put('/tax-systems/{taxSystem}', [SettingsController::class, 'updateTaxSystem'])->name('tax-systems.update');
         Route::delete('/tax-systems/{taxSystem}', [SettingsController::class, 'destroyTaxSystem'])->name('tax-systems.destroy');
 
-        // Виды деятельности
+        // CRUD: Виды деятельности
         Route::post('/activity-types', [SettingsController::class, 'storeActivityType'])->name('activity-types.store');
         Route::put('/activity-types/{activityType}', [SettingsController::class, 'updateActivityType'])->name('activity-types.update');
         Route::delete('/activity-types/{activityType}', [SettingsController::class, 'destroyActivityType'])->name('activity-types.destroy');
 
-        // Тарифы
+        // CRUD: Справочник ставок
+        Route::post('/rates', [SettingsController::class, 'storeRate'])->name('rates.store');
+        Route::put('/rates/{rate}', [SettingsController::class, 'updateRate'])->name('rates.update');
+        Route::delete('/rates/{rate}', [SettingsController::class, 'destroyRate'])->name('rates.destroy');
+
+        // CRUD: Тарифы
         Route::post('/tariffs', [SettingsController::class, 'storeTariff'])->name('tariffs.store');
         Route::put('/tariffs/{tariff}', [SettingsController::class, 'updateTariff'])->name('tariffs.update');
         Route::delete('/tariffs/{tariff}', [SettingsController::class, 'destroyTariff'])->name('tariffs.destroy');
@@ -111,7 +124,7 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/tariffs/{tariff}/services', [SettingsController::class, 'attachService'])->name('tariffs.services.attach');
         Route::delete('/tariffs/{tariff}/services/{service}', [SettingsController::class, 'detachService'])->name('tariffs.services.detach');
 
-        // Бизнес процессы (услуги)
+        // CRUD: Бизнес-процессы
         Route::post('/services', [SettingsController::class, 'storeService'])->name('services.store');
         Route::put('/services/{service}', [SettingsController::class, 'updateService'])->name('services.update');
         Route::delete('/services/{service}', [SettingsController::class, 'destroyService'])->name('services.destroy');
