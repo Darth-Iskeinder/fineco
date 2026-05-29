@@ -2,8 +2,15 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AccountingMethod;
 use App\Models\ActivityType;
+use App\Models\CheckType;
+use App\Models\ClientStatus;
+use App\Models\OrganizationForm;
+use App\Models\Periodicity;
 use App\Models\Rate;
+use App\Models\ServiceType;
+use App\Models\TaxpayerCategory;
 use App\Models\Service;
 use App\Models\Tariff;
 use App\Models\TaxSystem;
@@ -17,6 +24,74 @@ class SettingsController extends Controller
     {
         return redirect()->route('settings.tax-systems');
     }
+
+    // =============================================
+    // ПРОСТЫЕ СПРАВОЧНИКИ (общий паттерн)
+    // =============================================
+
+    private function lookupView(string $title, string $endpoint, $items, string $description = '')
+    {
+        return view('settings.lookup', compact('title', 'description', 'items') + [
+            'pageTitle'    => $title,
+            'baseEndpoint' => $endpoint,
+        ]);
+    }
+
+    private function lookupStore(Request $request, string $model): \Illuminate\Http\JsonResponse
+    {
+        $validated = $request->validate(['name' => 'required|string|max:255']);
+        $item = $model::create($validated);
+        return response()->json(['success' => true, 'item' => $item]);
+    }
+
+    private function lookupUpdate(Request $request, $record): \Illuminate\Http\JsonResponse
+    {
+        $validated = $request->validate(['name' => 'required|string|max:255']);
+        $record->update($validated);
+        return response()->json(['success' => true, 'item' => $record->fresh()]);
+    }
+
+    private function lookupDestroy($record): \Illuminate\Http\JsonResponse
+    {
+        $record->delete();
+        return response()->json(['success' => true]);
+    }
+
+    public function organizationFormsPage()   { return $this->lookupView('Форма/тип организации',      '/settings/organization-forms',    OrganizationForm::orderBy('name')->get()); }
+    public function clientStatusesPage()      { return $this->lookupView('Статус клиента',              '/settings/client-statuses',       ClientStatus::orderBy('name')->get()); }
+    public function taxpayerCategoriesPage()  { return $this->lookupView('Категория налогоплательщика', '/settings/taxpayer-categories',   TaxpayerCategory::orderBy('name')->get()); }
+    public function accountingMethodsPage()   { return $this->lookupView('Метод учёта',                 '/settings/accounting-methods',    AccountingMethod::orderBy('name')->get()); }
+    public function serviceTypesPage()        { return $this->lookupView('Тип обслуживания',            '/settings/service-types',         ServiceType::orderBy('name')->get()); }
+    public function periodicitiesPage()       { return $this->lookupView('Периодичность',               '/settings/periodicities',         Periodicity::orderBy('name')->get()); }
+    public function checkTypesPage()          { return $this->lookupView('Проверка',                    '/settings/check-types',           CheckType::orderBy('name')->get()); }
+
+    public function storeOrganizationForm(Request $r)                { return $this->lookupStore($r, OrganizationForm::class); }
+    public function updateOrganizationForm(Request $r, OrganizationForm $organizationForm) { return $this->lookupUpdate($r, $organizationForm); }
+    public function destroyOrganizationForm(OrganizationForm $organizationForm)            { return $this->lookupDestroy($organizationForm); }
+
+    public function storeClientStatus(Request $r)                    { return $this->lookupStore($r, ClientStatus::class); }
+    public function updateClientStatus(Request $r, ClientStatus $clientStatus)             { return $this->lookupUpdate($r, $clientStatus); }
+    public function destroyClientStatus(ClientStatus $clientStatus)                        { return $this->lookupDestroy($clientStatus); }
+
+    public function storeTaxpayerCategory(Request $r)                { return $this->lookupStore($r, TaxpayerCategory::class); }
+    public function updateTaxpayerCategory(Request $r, TaxpayerCategory $taxpayerCategory){ return $this->lookupUpdate($r, $taxpayerCategory); }
+    public function destroyTaxpayerCategory(TaxpayerCategory $taxpayerCategory)           { return $this->lookupDestroy($taxpayerCategory); }
+
+    public function storeAccountingMethod(Request $r)                { return $this->lookupStore($r, AccountingMethod::class); }
+    public function updateAccountingMethod(Request $r, AccountingMethod $accountingMethod) { return $this->lookupUpdate($r, $accountingMethod); }
+    public function destroyAccountingMethod(AccountingMethod $accountingMethod)            { return $this->lookupDestroy($accountingMethod); }
+
+    public function storeServiceType(Request $r)                     { return $this->lookupStore($r, ServiceType::class); }
+    public function updateServiceType(Request $r, ServiceType $serviceType)                { return $this->lookupUpdate($r, $serviceType); }
+    public function destroyServiceType(ServiceType $serviceType)                           { return $this->lookupDestroy($serviceType); }
+
+    public function storePeriodicity(Request $r)                     { return $this->lookupStore($r, Periodicity::class); }
+    public function updatePeriodicity(Request $r, Periodicity $periodicity)                { return $this->lookupUpdate($r, $periodicity); }
+    public function destroyPeriodicity(Periodicity $periodicity)                           { return $this->lookupDestroy($periodicity); }
+
+    public function storeCheckType(Request $r)                       { return $this->lookupStore($r, CheckType::class); }
+    public function updateCheckType(Request $r, CheckType $checkType)                      { return $this->lookupUpdate($r, $checkType); }
+    public function destroyCheckType(CheckType $checkType)                                 { return $this->lookupDestroy($checkType); }
 
     public function taxSystemsPage()
     {
@@ -314,9 +389,19 @@ class SettingsController extends Controller
             'tax_systems'                   => 'required|array|min:1',
             'tax_systems.*'                 => 'required|exists:tax_systems,id',
             'description'                   => 'nullable|string|max:1000',
+            'sphere'                        => 'nullable|string|max:255',
+            'service_group'                 => 'nullable|string|max:255',
+            'business_process'              => 'nullable|string|max:255',
+            'category'                      => 'nullable|string|max:255',
             'cost'                          => 'required|numeric|min:0',
             'periodicity'                   => 'nullable|string|max:100',
             'due_day'                       => 'nullable|integer|min:1|max:31',
+            'deadline_days'                 => 'nullable|integer|min:0',
+            'execution_minutes'             => 'nullable|integer|min:0',
+            'closing_rule'                  => 'nullable|string|max:255',
+            'check_type'                    => 'nullable|string|max:255',
+            'billing'                       => 'nullable|string|max:255',
+            'comment'                       => 'nullable|string',
             'allows_quantity'               => 'boolean',
             'sort_order'                    => 'integer|min:0',
             'tariffs'                       => 'required|array|min:1',
@@ -334,15 +419,25 @@ class SettingsController extends Controller
         ]);
 
         $service = Service::create([
-            'name'            => $request->name,
-            'description'     => $request->description,
-            'cost'            => $request->cost,
-            'pricing_rules'   => $request->input('pricing_rules') ?: null,
-            'periodicity'     => $request->periodicity,
-            'due_day'         => $request->input('due_day') ?: null,
-            'is_active'       => true,
-            'allows_quantity' => $request->boolean('allows_quantity', false),
-            'sort_order'      => $request->input('sort_order', 0),
+            'name'               => $request->name,
+            'description'        => $request->description,
+            'sphere'             => $request->sphere ?: null,
+            'service_group'      => $request->service_group ?: null,
+            'business_process'   => $request->business_process ?: null,
+            'category'           => $request->category ?: null,
+            'cost'               => $request->cost,
+            'pricing_rules'      => $request->input('pricing_rules') ?: null,
+            'periodicity'        => $request->periodicity,
+            'due_day'            => $request->input('due_day') ?: null,
+            'deadline_days'      => $request->input('deadline_days') ?: null,
+            'execution_minutes'  => $request->input('execution_minutes') ?: null,
+            'closing_rule'       => $request->closing_rule ?: null,
+            'check_type'         => $request->check_type ?: null,
+            'billing'            => $request->billing ?: null,
+            'comment'            => $request->comment ?: null,
+            'is_active'          => true,
+            'allows_quantity'    => $request->boolean('allows_quantity', false),
+            'sort_order'         => $request->input('sort_order', 0),
         ]);
 
         $service->tariffs()->sync($this->buildTariffSyncData($request->input('tariffs', [])));
@@ -375,9 +470,19 @@ class SettingsController extends Controller
             'tax_systems'                   => 'required|array|min:1',
             'tax_systems.*'                 => 'required|exists:tax_systems,id',
             'description'                   => 'nullable|string|max:1000',
+            'sphere'                        => 'nullable|string|max:255',
+            'service_group'                 => 'nullable|string|max:255',
+            'business_process'              => 'nullable|string|max:255',
+            'category'                      => 'nullable|string|max:255',
             'cost'                          => 'required|numeric|min:0',
             'periodicity'                   => 'nullable|string|max:100',
             'due_day'                       => 'nullable|integer|min:1|max:31',
+            'deadline_days'                 => 'nullable|integer|min:0',
+            'execution_minutes'             => 'nullable|integer|min:0',
+            'closing_rule'                  => 'nullable|string|max:255',
+            'check_type'                    => 'nullable|string|max:255',
+            'billing'                       => 'nullable|string|max:255',
+            'comment'                       => 'nullable|string',
             'allows_quantity'               => 'boolean',
             'sort_order'                    => 'integer|min:0',
             'tariffs'                       => 'required|array|min:1',
@@ -396,14 +501,24 @@ class SettingsController extends Controller
         ]);
 
         $service->update([
-            'name'            => $request->name,
-            'description'     => $request->description,
-            'cost'            => $request->cost,
-            'pricing_rules'   => $request->input('pricing_rules') ?: null,
-            'periodicity'     => $request->periodicity,
-            'due_day'         => $request->input('due_day') ?: null,
-            'allows_quantity' => $request->boolean('allows_quantity', false),
-            'sort_order'      => $request->input('sort_order', $service->sort_order),
+            'name'               => $request->name,
+            'description'        => $request->description,
+            'sphere'             => $request->sphere ?: null,
+            'service_group'      => $request->service_group ?: null,
+            'business_process'   => $request->business_process ?: null,
+            'category'           => $request->category ?: null,
+            'cost'               => $request->cost,
+            'pricing_rules'      => $request->input('pricing_rules') ?: null,
+            'periodicity'        => $request->periodicity,
+            'due_day'            => $request->input('due_day') ?: null,
+            'deadline_days'      => $request->input('deadline_days') ?: null,
+            'execution_minutes'  => $request->input('execution_minutes') ?: null,
+            'closing_rule'       => $request->closing_rule ?: null,
+            'check_type'         => $request->check_type ?: null,
+            'billing'            => $request->billing ?: null,
+            'comment'            => $request->comment ?: null,
+            'allows_quantity'    => $request->boolean('allows_quantity', false),
+            'sort_order'         => $request->input('sort_order', $service->sort_order),
         ]);
 
         $service->tariffs()->sync($this->buildTariffSyncData($request->input('tariffs', [])));

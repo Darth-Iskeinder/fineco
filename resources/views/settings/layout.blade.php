@@ -12,7 +12,7 @@
             <a href="{{ route('settings.tax-systems') }}"
                class="block px-3 py-2 rounded-lg text-sm transition-colors
                       {{ request()->routeIs('settings.tax-systems') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
-                Системы налогообложения
+                Режимы налогообложения
             </a>
             <a href="{{ route('settings.activity-types') }}"
                class="block px-3 py-2 rounded-lg text-sm transition-colors
@@ -33,6 +33,41 @@
                class="block px-3 py-2 rounded-lg text-sm transition-colors
                       {{ request()->routeIs('settings.services') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
                 Бизнес процессы
+            </a>
+            <a href="{{ route('settings.organization-forms') }}"
+               class="block px-3 py-2 rounded-lg text-sm transition-colors
+                      {{ request()->routeIs('settings.organization-forms') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
+                Форма/тип организации
+            </a>
+            <a href="{{ route('settings.client-statuses') }}"
+               class="block px-3 py-2 rounded-lg text-sm transition-colors
+                      {{ request()->routeIs('settings.client-statuses') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
+                Статус клиента
+            </a>
+            <a href="{{ route('settings.taxpayer-categories') }}"
+               class="block px-3 py-2 rounded-lg text-sm transition-colors
+                      {{ request()->routeIs('settings.taxpayer-categories') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
+                Категория налогоплательщика
+            </a>
+            <a href="{{ route('settings.accounting-methods') }}"
+               class="block px-3 py-2 rounded-lg text-sm transition-colors
+                      {{ request()->routeIs('settings.accounting-methods') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
+                Метод учёта
+            </a>
+            <a href="{{ route('settings.service-types') }}"
+               class="block px-3 py-2 rounded-lg text-sm transition-colors
+                      {{ request()->routeIs('settings.service-types') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
+                Тип обслуживания
+            </a>
+            <a href="{{ route('settings.periodicities') }}"
+               class="block px-3 py-2 rounded-lg text-sm transition-colors
+                      {{ request()->routeIs('settings.periodicities') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
+                Периодичность
+            </a>
+            <a href="{{ route('settings.check-types') }}"
+               class="block px-3 py-2 rounded-lg text-sm transition-colors
+                      {{ request()->routeIs('settings.check-types') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
+                Проверка
             </a>
         </nav>
     </aside>

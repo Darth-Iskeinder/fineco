@@ -128,5 +128,47 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/services', [SettingsController::class, 'storeService'])->name('services.store');
         Route::put('/services/{service}', [SettingsController::class, 'updateService'])->name('services.update');
         Route::delete('/services/{service}', [SettingsController::class, 'destroyService'])->name('services.destroy');
+
+        // Форма/тип организации
+        Route::get('/organization-forms', [SettingsController::class, 'organizationFormsPage'])->name('organization-forms');
+        Route::post('/organization-forms', [SettingsController::class, 'storeOrganizationForm'])->name('organization-forms.store');
+        Route::put('/organization-forms/{organizationForm}', [SettingsController::class, 'updateOrganizationForm'])->name('organization-forms.update');
+        Route::delete('/organization-forms/{organizationForm}', [SettingsController::class, 'destroyOrganizationForm'])->name('organization-forms.destroy');
+
+        // Статус клиента
+        Route::get('/client-statuses', [SettingsController::class, 'clientStatusesPage'])->name('client-statuses');
+        Route::post('/client-statuses', [SettingsController::class, 'storeClientStatus'])->name('client-statuses.store');
+        Route::put('/client-statuses/{clientStatus}', [SettingsController::class, 'updateClientStatus'])->name('client-statuses.update');
+        Route::delete('/client-statuses/{clientStatus}', [SettingsController::class, 'destroyClientStatus'])->name('client-statuses.destroy');
+
+        // Категория налогоплательщика
+        Route::get('/taxpayer-categories', [SettingsController::class, 'taxpayerCategoriesPage'])->name('taxpayer-categories');
+        Route::post('/taxpayer-categories', [SettingsController::class, 'storeTaxpayerCategory'])->name('taxpayer-categories.store');
+        Route::put('/taxpayer-categories/{taxpayerCategory}', [SettingsController::class, 'updateTaxpayerCategory'])->name('taxpayer-categories.update');
+        Route::delete('/taxpayer-categories/{taxpayerCategory}', [SettingsController::class, 'destroyTaxpayerCategory'])->name('taxpayer-categories.destroy');
+
+        // Метод учёта
+        Route::get('/accounting-methods', [SettingsController::class, 'accountingMethodsPage'])->name('accounting-methods');
+        Route::post('/accounting-methods', [SettingsController::class, 'storeAccountingMethod'])->name('accounting-methods.store');
+        Route::put('/accounting-methods/{accountingMethod}', [SettingsController::class, 'updateAccountingMethod'])->name('accounting-methods.update');
+        Route::delete('/accounting-methods/{accountingMethod}', [SettingsController::class, 'destroyAccountingMethod'])->name('accounting-methods.destroy');
+
+        // Тип обслуживания
+        Route::get('/service-types', [SettingsController::class, 'serviceTypesPage'])->name('service-types');
+        Route::post('/service-types', [SettingsController::class, 'storeServiceType'])->name('service-types.store');
+        Route::put('/service-types/{serviceType}', [SettingsController::class, 'updateServiceType'])->name('service-types.update');
+        Route::delete('/service-types/{serviceType}', [SettingsController::class, 'destroyServiceType'])->name('service-types.destroy');
+
+        // Периодичность
+        Route::get('/periodicities', [SettingsController::class, 'periodicitiesPage'])->name('periodicities');
+        Route::post('/periodicities', [SettingsController::class, 'storePeriodicity'])->name('periodicities.store');
+        Route::put('/periodicities/{periodicity}', [SettingsController::class, 'updatePeriodicity'])->name('periodicities.update');
+        Route::delete('/periodicities/{periodicity}', [SettingsController::class, 'destroyPeriodicity'])->name('periodicities.destroy');
+
+        // Проверка
+        Route::get('/check-types', [SettingsController::class, 'checkTypesPage'])->name('check-types');
+        Route::post('/check-types', [SettingsController::class, 'storeCheckType'])->name('check-types.store');
+        Route::put('/check-types/{checkType}', [SettingsController::class, 'updateCheckType'])->name('check-types.update');
+        Route::delete('/check-types/{checkType}', [SettingsController::class, 'destroyCheckType'])->name('check-types.destroy');
     });
 });

@@ -7,15 +7,25 @@ $servicesJson = $services->map(fn($s) => [
     'id'              => $s->id,
     'parent_id'       => $s->parent_id,
     'tax_systems'     => $s->taxSystems->map(fn($ts) => ['id' => $ts->id, 'name' => $ts->name])->values(),
-    'name'            => $s->name,
-    'description'     => $s->description,
-    'cost'            => $s->cost,
+    'name'             => $s->name,
+    'description'      => $s->description,
+    'sphere'           => $s->sphere,
+    'service_group'    => $s->service_group,
+    'business_process' => $s->business_process,
+    'category'         => $s->category,
+    'cost'             => $s->cost,
     'pricing_rules'   => $s->pricing_rules ?? [],
-    'periodicity'     => $s->periodicity,
-    'due_day'         => $s->due_day,
-    'is_active'       => $s->is_active,
-    'allows_quantity' => $s->allows_quantity,
-    'sort_order'      => $s->sort_order,
+    'periodicity'       => $s->periodicity,
+    'due_day'           => $s->due_day,
+    'deadline_days'     => $s->deadline_days,
+    'execution_minutes' => $s->execution_minutes,
+    'closing_rule'      => $s->closing_rule,
+    'check_type'        => $s->check_type,
+    'billing'           => $s->billing,
+    'comment'           => $s->comment,
+    'is_active'         => $s->is_active,
+    'allows_quantity'   => $s->allows_quantity,
+    'sort_order'        => $s->sort_order,
     'tariffs'         => $s->tariffs->map(fn($t) => [
         'id'             => $t->id,
         'name'           => $t->name,
@@ -55,64 +65,55 @@ $servicesJson = $services->map(fn($s) => [
             <table class="min-w-full divide-y divide-slate-200">
                 <thead class="bg-slate-50">
                     <tr>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Название</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Режим налогообложения</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Тарифы</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Периодичность</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Срок</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Стоимость</th>
-                        <th class="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Действия</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Бизнес процесс</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Сфера</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Группа</th>
+                        {{-- TODO: колонка "Бизнес процесс" (поле business_process) удалена — дублировала "Название", рассмотреть удаление поля из таблицы --}}
+                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Категория</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Режим НО</th>
+                        {{-- TODO: колонка "Тарифы" скрыта — возможно не нужна в таблице БП, рассмотреть удаление связи tariffs из services --}}
+                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Периодичность</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Дедлайн (дн.)</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">План (мин.)</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Правило закрытия</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Проверка</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Биллинг</th>
+                        {{-- TODO: колонка "Стоимость" скрыта — возможно не нужна в таблице БП, рассмотреть удаление поля cost из services --}}
+                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Комментарий</th>
+                        <th class="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Действия</th>
                     </tr>
                 </thead>
                 <template x-for="svc in services" :key="svc.id">
                     <tbody class="bg-white divide-y divide-slate-100">
                         <tr class="hover:bg-slate-50">
-                            <td class="px-6 py-3 text-sm font-semibold text-slate-900">
+                            <td class="px-4 py-3 text-sm font-semibold text-slate-900 whitespace-nowrap">
                                 <span x-text="svc.name"></span>
-                                <span x-show="svc.allows_quantity" class="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">кол-во</span>
+                                <span x-show="svc.allows_quantity" class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">кол-во</span>
                             </td>
-                            <td class="px-6 py-3 text-sm text-slate-600">
+                            <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="svc.sphere || '—'"></td>
+                            <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="svc.service_group || '—'"></td>
+                            {{-- TODO: ячейка "Бизнес процесс" (поле business_process) удалена — дублировала "Название", рассмотреть удаление поля из таблицы --}}
+                            <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="svc.category || '—'"></td>
+                            <td class="px-4 py-3 text-sm text-slate-600">
                                 <div class="flex flex-wrap gap-1">
                                     <template x-if="svc.tax_systems && svc.tax_systems.length > 0">
                                         <template x-for="ts in svc.tax_systems" :key="ts.id">
                                             <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700" x-text="ts.name"></span>
                                         </template>
                                     </template>
-                                    <template x-if="!svc.tax_systems || svc.tax_systems.length === 0">
-                                        <span class="text-slate-400">—</span>
-                                    </template>
+                                    <template x-if="!svc.tax_systems || svc.tax_systems.length === 0"><span class="text-slate-400">—</span></template>
                                 </div>
                             </td>
-                            <td class="px-6 py-3 text-sm">
-                                <div class="flex flex-wrap gap-1">
-                                    <template x-if="svc.tariffs && svc.tariffs.length > 0">
-                                        <template x-for="t in svc.tariffs" :key="t.id">
-                                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-violet-100 text-violet-700" x-text="t.name"></span>
-                                        </template>
-                                    </template>
-                                    <template x-if="!svc.tariffs || svc.tariffs.length === 0">
-                                        <span class="text-slate-400">—</span>
-                                    </template>
-                                </div>
-                            </td>
-                            <td class="px-6 py-3 whitespace-nowrap text-sm text-slate-500" x-text="svc.periodicity || '—'"></td>
-                            <td class="px-6 py-3 whitespace-nowrap text-sm text-slate-500">
-                                <template x-if="svc.due_day">
-                                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-rose-100 text-rose-700">
-                                        до <span x-text="svc.due_day" class="mx-0.5"></span> числа
-                                    </span>
-                                </template>
-                                <template x-if="!svc.due_day"><span class="text-slate-300">—</span></template>
-                            </td>
-                            <td class="px-6 py-3 whitespace-nowrap text-sm font-semibold text-slate-900">
-                                <template x-if="svc.children && svc.children.length > 0">
-                                    <span class="text-slate-400 font-normal text-xs">из подпунктов: <span class="font-semibold text-slate-700" x-text="formatPrice(svc.children.reduce((s, c) => s + Number(c.cost), 0))"></span></span>
-                                </template>
-                                <template x-if="!svc.children || svc.children.length === 0">
-                                    <span x-text="formatPrice(svc.cost)"></span>
-                                </template>
-                            </td>
-                            <td class="px-6 py-3 whitespace-nowrap text-right">
+                            {{-- TODO: ячейка тарифов скрыта — см. комментарий в thead --}}
+                            <td class="px-4 py-3 whitespace-nowrap text-sm text-slate-500" x-text="svc.periodicity || '—'"></td>
+                            <td class="px-4 py-3 whitespace-nowrap text-sm text-slate-500" x-text="svc.deadline_days ? svc.deadline_days + ' дн.' : '—'"></td>
+                            <td class="px-4 py-3 whitespace-nowrap text-sm text-slate-500" x-text="svc.execution_minutes ? svc.execution_minutes + ' мин.' : '—'"></td>
+                            <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="svc.closing_rule || '—'"></td>
+                            <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="svc.check_type || '—'"></td>
+                            <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="svc.billing || '—'"></td>
+                            {{-- TODO: ячейка "Стоимость" скрыта — возможно не нужна в таблице БП, рассмотреть удаление поля cost из services --}}
+                            <td class="px-4 py-3 text-sm text-slate-500 max-w-[160px] truncate" x-text="svc.comment || '—'"></td>
+                            <td class="px-4 py-3 whitespace-nowrap text-right">
                                 <div class="flex items-center justify-end gap-1">
                                     <button @click="openServiceModal(svc)" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Редактировать">
                                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
@@ -123,21 +124,31 @@ $servicesJson = $services->map(fn($s) => [
                                 </div>
                             </td>
                         </tr>
+
                         <template x-for="child in (svc.children || [])" :key="child.id">
                             <tr class="bg-slate-50/50 hover:bg-slate-50">
-                                <td class="pl-12 pr-6 py-2.5 text-sm text-slate-600">
+                                <td class="pl-10 pr-4 py-2.5 text-sm text-slate-600 whitespace-nowrap">
                                     <div class="flex items-center gap-1.5">
-                                        <svg class="w-3 h-3 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                                        <svg class="w-3 h-3 text-slate-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
                                         <span x-text="child.name"></span>
                                         <span x-show="child.allows_quantity" class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">кол-во</span>
                                     </div>
                                 </td>
-                                <td class="px-6 py-2.5 text-sm text-slate-400">—</td>
-                                <td class="px-6 py-2.5 text-sm text-slate-400">—</td>
-                                <td class="px-6 py-2.5 whitespace-nowrap text-sm text-slate-400" x-text="child.periodicity || '—'"></td>
-                                <td class="px-6 py-2.5 text-sm text-slate-300">—</td>
-                                <td class="px-6 py-2.5 whitespace-nowrap text-sm text-slate-600" x-text="formatPrice(child.cost)"></td>
-                                <td class="px-6 py-2.5 whitespace-nowrap text-right">
+                                <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
+                                <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
+                                {{-- TODO: ячейка "Бизнес процесс" удалена — см. комментарий в thead --}}
+                                <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
+                                <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
+                                {{-- TODO: ячейка тарифов скрыта — см. комментарий в thead --}}
+                                <td class="px-4 py-2.5 whitespace-nowrap text-sm text-slate-400" x-text="child.periodicity || '—'"></td>
+                                <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
+                                <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
+                                <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
+                                <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
+                                <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
+                                {{-- TODO: ячейка "Стоимость" скрыта — см. комментарий в thead --}}
+                                <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
+                                <td class="px-4 py-2.5 whitespace-nowrap text-right">
                                     <div class="flex items-center justify-end gap-1">
                                         <button @click="openServiceModal(child)" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Редактировать">
                                             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
@@ -152,7 +163,7 @@ $servicesJson = $services->map(fn($s) => [
                     </tbody>
                 </template>
                 <tbody x-show="services.length === 0">
-                    <tr><td colspan="7" class="px-6 py-10 text-center text-slate-400">Нет бизнес-процессов. Нажмите «Добавить БП» чтобы создать первый.</td></tr>
+                    <tr><td colspan="13" class="px-6 py-10 text-center text-slate-400">Нет бизнес-процессов. Нажмите «Добавить БП» чтобы создать первый.</td></tr>
                 </tbody>
             </table>
         </div>
@@ -180,6 +191,51 @@ $servicesJson = $services->map(fn($s) => [
                                 <label class="block text-sm font-medium text-slate-700 mb-1">Описание</label>
                                 <textarea x-model="serviceForm.description" rows="2" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-none"></textarea>
                             </div>
+
+                            {{-- Дополнительные классификационные поля --}}
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-700 mb-1">Сфера</label>
+                                    <input type="text" x-model="serviceForm.sphere" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-700 mb-1">Группа</label>
+                                    <input type="text" x-model="serviceForm.service_group" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-700 mb-1">Бизнес процесс</label>
+                                    <input type="text" x-model="serviceForm.business_process" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-700 mb-1">Категория</label>
+                                    <input type="text" x-model="serviceForm.category" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-700 mb-1">Дедлайн (дней)</label>
+                                    <input type="number" x-model="serviceForm.deadline_days" min="0" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-700 mb-1">План выполнения (мин.)</label>
+                                    <input type="number" x-model="serviceForm.execution_minutes" min="0" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-700 mb-1">Правило закрытия</label>
+                                    <input type="text" x-model="serviceForm.closing_rule" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-700 mb-1">Проверка</label>
+                                    <input type="text" x-model="serviceForm.check_type" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-700 mb-1">Биллинг</label>
+                                    <input type="text" x-model="serviceForm.billing" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-700 mb-1">Комментарий</label>
+                                    <input type="text" x-model="serviceForm.comment" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                </div>
+                            </div>
+
                             <div class="grid grid-cols-2 gap-4">
                                 <template x-if="serviceForm.children.length === 0">
                                     <div>
@@ -433,8 +489,11 @@ function servicesPage() {
         serviceFormErrors: { tax_systems: false, tariffs: false },
         serviceForm: {
             id: null, parent_id: null, tax_systems: [], name: '', description: '',
+            sphere: '', service_group: '', business_process: '', category: '',
             cost: 0, pricing_rules: [], use_tiered_pricing: false,
-            periodicity: '', due_day: null, allows_quantity: false, tariffs: [], children: [],
+            periodicity: '', due_day: null, deadline_days: null, execution_minutes: null,
+            closing_rule: '', check_type: '', billing: '', comment: '',
+            allows_quantity: false, tariffs: [], children: [],
         },
 
         showDeleteModal: false,
@@ -451,8 +510,13 @@ function servicesPage() {
                     id: svc.id, parent_id: svc.parent_id || null,
                     tax_systems: (svc.tax_systems || []).map(ts => ts.id),
                     name: svc.name, description: svc.description || '',
+                    sphere: svc.sphere || '', service_group: svc.service_group || '',
+                    business_process: svc.business_process || '', category: svc.category || '',
                     cost: svc.cost, pricing_rules: rules, use_tiered_pricing: rules.length > 0,
                     periodicity: svc.periodicity || '', due_day: svc.due_day || null,
+                    deadline_days: svc.deadline_days || null, execution_minutes: svc.execution_minutes || null,
+                    closing_rule: svc.closing_rule || '', check_type: svc.check_type || '',
+                    billing: svc.billing || '', comment: svc.comment || '',
                     allows_quantity: svc.allows_quantity || false,
                     tariffs: (svc.tariffs || []).map(t => ({ id: t.id, free_limit: t.free_limit ?? 0, price_override: t.price_override ?? null })),
                     children: (svc.children || []).map(c => ({ id: c.id, name: c.name, cost: c.cost, periodicity: c.periodicity || '', allows_quantity: c.allows_quantity || false })),
@@ -460,8 +524,11 @@ function servicesPage() {
             } else {
                 this.serviceForm = {
                     id: null, parent_id: null, tax_systems: [], name: '', description: '',
+                    sphere: '', service_group: '', business_process: '', category: '',
                     cost: 0, pricing_rules: [], use_tiered_pricing: false,
-                    periodicity: '', due_day: null, allows_quantity: false, tariffs: [], children: [],
+                    periodicity: '', due_day: null, deadline_days: null, execution_minutes: null,
+                    closing_rule: '', check_type: '', billing: '', comment: '',
+                    allows_quantity: false, tariffs: [], children: [],
                 };
             }
             this.showServiceModal = true;

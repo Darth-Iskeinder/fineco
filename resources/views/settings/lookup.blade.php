@@ -1,14 +1,16 @@
 @extends('settings.layout')
-@section('page-title', 'Режимы налогообложения')
+@section('page-title', $pageTitle)
 
 @section('settings-content')
-<div x-data="taxSystemsPage()" class="space-y-4">
+<div x-data="lookupPage('{{ $baseEndpoint }}', @json($items))" class="space-y-4">
 
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
         <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
             <div>
-                <h2 class="text-lg font-semibold text-slate-800">Режимы налогообложения</h2>
-                <p class="text-sm text-slate-500 mt-0.5">Режимы налогообложения, применяемые к клиентам</p>
+                <h2 class="text-lg font-semibold text-slate-800">{{ $pageTitle }}</h2>
+                @if(!empty($description))
+                    <p class="text-sm text-slate-500 mt-0.5">{{ $description }}</p>
+                @endif
             </div>
             <button @click="openCreate()" class="inline-flex items-center px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">
                 <svg class="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
@@ -20,30 +22,19 @@
                 <thead class="bg-slate-50">
                     <tr>
                         <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Название</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Код</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Описание</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Порядок</th>
-                        <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Статус</th>
                         <th class="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Действия</th>
                     </tr>
                 </thead>
                 <tbody class="bg-white divide-y divide-slate-200">
                     <template x-for="item in items" :key="item.id">
                         <tr class="hover:bg-slate-50">
-                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900" x-text="item.name"></td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-500 font-mono" x-text="item.code"></td>
-                            <td class="px-6 py-4 text-sm text-slate-500 max-w-xs truncate" x-text="item.description || '—'"></td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-500" x-text="item.sort_order"></td>
-                            <td class="px-6 py-4 whitespace-nowrap">
-                                <span x-show="item.is_active" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">Активен</span>
-                                <span x-show="!item.is_active" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">Неактивен</span>
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-right">
+                            <td class="px-6 py-4 text-sm font-medium text-slate-900" x-text="item.name"></td>
+                            <td class="px-6 py-4 text-right">
                                 <div class="flex items-center justify-end gap-1">
-                                    <button @click="openEdit(item)" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Редактировать">
+                                    <button @click="openEdit(item)" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors">
                                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                                     </button>
-                                    <button @click="openDelete(item)" class="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Удалить">
+                                    <button @click="openDelete(item)" class="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
                                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                                     </button>
                                 </div>
@@ -51,7 +42,7 @@
                         </tr>
                     </template>
                     <template x-if="items.length === 0">
-                        <tr><td colspan="6" class="px-6 py-10 text-center text-slate-400">Нет данных</td></tr>
+                        <tr><td colspan="2" class="px-6 py-10 text-center text-slate-400">Нет данных</td></tr>
                     </template>
                 </tbody>
             </table>
@@ -63,40 +54,18 @@
         <div x-show="showModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto">
             <div class="flex items-center justify-center min-h-screen px-4">
                 <div class="fixed inset-0 bg-slate-500/75" @click="closeModal()"></div>
-                <div class="relative w-full max-w-lg bg-white rounded-2xl shadow-xl p-6 z-10">
+                <div class="relative w-full max-w-md bg-white rounded-2xl shadow-xl p-6 z-10">
                     <div class="flex items-center justify-between mb-6">
-                        <h3 class="text-lg font-semibold text-slate-900" x-text="isEditing ? 'Редактирование' : 'Новая система налогообложения'"></h3>
+                        <h3 class="text-lg font-semibold text-slate-900" x-text="isEditing ? 'Редактировать' : 'Добавить'"></h3>
                         <button @click="closeModal()" class="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100">
                             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                         </button>
                     </div>
                     <form @submit.prevent="submit()">
-                        <div class="space-y-4">
-                            <div>
-                                <label class="block text-sm font-medium text-slate-700 mb-1">Название <span class="text-red-500">*</span></label>
-                                <input type="text" x-model="form.name" required class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-slate-700 mb-1">Код <span class="text-red-500">*</span></label>
-                                <input type="text" x-model="form.code" required pattern="[a-z0-9_]+" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" placeholder="например: usn">
-                                <p class="mt-1 text-xs text-slate-400">Только строчные латинские буквы, цифры и _</p>
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-slate-700 mb-1">Описание</label>
-                                <textarea x-model="form.description" rows="2" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-none"></textarea>
-                            </div>
-                            <div class="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label class="block text-sm font-medium text-slate-700 mb-1">Порядок сортировки</label>
-                                    <input type="number" x-model="form.sort_order" min="0" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                                </div>
-                                <div class="flex items-end pb-2">
-                                    <label class="flex items-center">
-                                        <input type="checkbox" x-model="form.is_active" class="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500">
-                                        <span class="ml-2 text-sm font-medium text-slate-700">Активен</span>
-                                    </label>
-                                </div>
-                            </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1">Название <span class="text-red-500">*</span></label>
+                            <input type="text" x-model="form.name" required autofocus
+                                class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
                         </div>
                         <div class="flex justify-end gap-3 mt-6 pt-6 border-t border-slate-100">
                             <button type="button" @click="closeModal()" class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50">Отмена</button>
@@ -126,7 +95,7 @@
                             <p class="text-sm text-slate-500">Это действие нельзя отменить</p>
                         </div>
                     </div>
-                    <p class="text-slate-700 mb-6">Вы уверены, что хотите удалить «<span class="font-medium" x-text="deleteItem?.name"></span>»?</p>
+                    <p class="text-slate-700 mb-6">Удалить «<span class="font-medium" x-text="deleteItem?.name"></span>»?</p>
                     <div class="flex justify-end gap-3">
                         <button @click="showDeleteModal = false" class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50">Отмена</button>
                         <button @click="confirmDelete()" :disabled="deleting" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50">
@@ -152,35 +121,40 @@
 </div>
 
 <script>
-function taxSystemsPage() {
+function lookupPage(baseEndpoint, initialItems) {
     return {
-        items: @json($taxSystems),
+        items: initialItems,
         showModal: false, isEditing: false, editingId: null, saving: false,
-        form: { name: '', code: '', description: '', sort_order: 0, is_active: true },
+        form: { name: '' },
         showDeleteModal: false, deleteItem: null, deleting: false,
         toast: { show: false, message: '', type: 'success' },
 
-        openCreate() { this.isEditing = false; this.editingId = null; this.resetForm(); this.showModal = true; },
-        openEdit(item) {
-            this.isEditing = true; this.editingId = item.id;
-            this.form = { name: item.name, code: item.code, description: item.description || '', sort_order: item.sort_order || 0, is_active: item.is_active };
-            this.showModal = true;
-        },
+        csrf() { return document.querySelector('meta[name="csrf-token"]').content; },
+
+        openCreate() { this.isEditing = false; this.editingId = null; this.form = { name: '' }; this.showModal = true; },
+        openEdit(item) { this.isEditing = true; this.editingId = item.id; this.form = { name: item.name }; this.showModal = true; },
+        closeModal() { this.showModal = false; },
         openDelete(item) { this.deleteItem = item; this.showDeleteModal = true; },
-        closeModal() { this.showModal = false; this.resetForm(); },
-        resetForm() { this.form = { name: '', code: '', description: '', sort_order: 0, is_active: true }; },
 
         async submit() {
             this.saving = true;
-            const url = this.isEditing ? `/settings/tax-systems/${this.editingId}` : '/settings/tax-systems';
+            const url = this.isEditing ? `${baseEndpoint}/${this.editingId}` : baseEndpoint;
             try {
-                const r = await fetch(url, { method: this.isEditing ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content, 'Accept': 'application/json' }, body: JSON.stringify(this.form) });
+                const r = await fetch(url, {
+                    method: this.isEditing ? 'PUT' : 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': this.csrf(), 'Accept': 'application/json' },
+                    body: JSON.stringify(this.form),
+                });
                 const d = await r.json();
                 if (d.success) {
-                    this.showToast(d.message, 'success');
-                    if (this.isEditing) { const i = this.items.findIndex(x => x.id === this.editingId); if (i !== -1) this.items[i] = d.item; }
-                    else { this.items.push(d.item); }
+                    if (this.isEditing) {
+                        const i = this.items.findIndex(x => x.id === this.editingId);
+                        if (i !== -1) this.items[i] = d.item;
+                    } else {
+                        this.items.push(d.item);
+                    }
                     this.closeModal();
+                    this.showToast('Сохранено');
                 } else { this.showToast(d.message || 'Ошибка', 'error'); }
             } catch { this.showToast('Ошибка сохранения', 'error'); }
             this.saving = false;
@@ -189,15 +163,24 @@ function taxSystemsPage() {
         async confirmDelete() {
             this.deleting = true;
             try {
-                const r = await fetch(`/settings/tax-systems/${this.deleteItem.id}`, { method: 'DELETE', headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content, 'Accept': 'application/json' } });
+                const r = await fetch(`${baseEndpoint}/${this.deleteItem.id}`, {
+                    method: 'DELETE',
+                    headers: { 'X-CSRF-TOKEN': this.csrf(), 'Accept': 'application/json' },
+                });
                 const d = await r.json();
-                if (d.success) { this.showToast(d.message, 'success'); this.items = this.items.filter(i => i.id !== this.deleteItem.id); this.showDeleteModal = false; }
-                else { this.showToast(d.message || 'Ошибка', 'error'); }
+                if (d.success) {
+                    this.items = this.items.filter(i => i.id !== this.deleteItem.id);
+                    this.showDeleteModal = false;
+                    this.showToast('Удалено');
+                } else { this.showToast(d.message || 'Ошибка', 'error'); }
             } catch { this.showToast('Ошибка удаления', 'error'); }
             this.deleting = false;
         },
 
-        showToast(message, type = 'success') { this.toast = { show: true, message, type }; setTimeout(() => { this.toast.show = false; }, 3000); },
+        showToast(message, type = 'success') {
+            this.toast = { show: true, message, type };
+            setTimeout(() => { this.toast.show = false; }, 3000);
+        },
     };
 }
 </script>
