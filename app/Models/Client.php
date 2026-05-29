@@ -9,6 +9,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use App\Models\OrganizationForm;
+use App\Models\TaxpayerCategory;
+use App\Models\ClientStatus;
+use App\Models\ClientDocument;
 
 class Client extends Model
 {
@@ -18,6 +22,7 @@ class Client extends Model
         // Основная информация
         'name',
         'ownership_form',
+        'organization_form_id',
         'inn',
         'director_inn',
         'activity_type',
@@ -27,6 +32,23 @@ class Client extends Model
         'tax_system_id',
         'accounting_method',
         'taxpayer_category',
+        'taxpayer_category_id',
+        // Характеристики бизнеса — объём
+        'is_zero_movement',
+        'has_employees',
+        'employees_count',
+        'has_kkm',
+        'kkm_count',
+        'has_marketplaces',
+        'marketplaces_count',
+        // Характеристики бизнеса — режимы
+        'import_eaeu',
+        'import_third_countries',
+        'has_export',
+        'pvt_mode',
+        'pki_mode',
+        'has_alcohol',
+        'edo_operator',
         // Договор и обслуживание
         'service_type',
         'price',
@@ -55,14 +77,37 @@ class Client extends Model
         'its_contact',
         // Банки
         'bank_credentials',
+        // Контакты и связи
+        'contacts',
+        'related_persons',
+        // Дополнительно
+        'client_folder_url',
+        'access_instructions',
+        'extra_fields',
         // Прочее
         'is_active',
+        'client_status_id',
         'notes',
     ];
 
     protected $casts = [
         'is_active' => 'boolean',
         'its_enabled' => 'boolean',
+        // Boolean флаги
+        'is_zero_movement' => 'boolean',
+        'has_employees' => 'boolean',
+        'has_kkm' => 'boolean',
+        'has_marketplaces' => 'boolean',
+        'import_eaeu' => 'boolean',
+        'import_third_countries' => 'boolean',
+        'has_export' => 'boolean',
+        'pvt_mode' => 'boolean',
+        'pki_mode' => 'boolean',
+        'has_alcohol' => 'boolean',
+        // Числа
+        'employees_count' => 'integer',
+        'kkm_count' => 'integer',
+        'marketplaces_count' => 'integer',
         'price' => 'decimal:2',
         // Даты
         'service_start_date' => 'date',
@@ -71,6 +116,9 @@ class Client extends Model
         'eds_expires' => 'date',
         // JSON поля
         'founding_docs_urls' => 'array',
+        'contacts' => 'array',
+        'related_persons' => 'array',
+        'extra_fields' => 'array',
         // Зашифрованные поля (пароли и учётные данные)
         'eds_password' => 'encrypted',
         'cabinet_credentials' => 'encrypted:array',
@@ -157,6 +205,11 @@ class Client extends Model
     // =============================================
     // СВЯЗИ
     // =============================================
+    public function organizationForm(): BelongsTo
+    {
+        return $this->belongsTo(OrganizationForm::class);
+    }
+
     public function taxSystem(): BelongsTo
     {
         return $this->belongsTo(TaxSystem::class);
@@ -186,6 +239,21 @@ class Client extends Model
     {
         return $this->belongsToMany(Employee::class, 'client_employee')
             ->withTimestamps();
+    }
+
+    public function clientStatus(): BelongsTo
+    {
+        return $this->belongsTo(ClientStatus::class);
+    }
+
+    public function taxpayerCategoryModel(): BelongsTo
+    {
+        return $this->belongsTo(TaxpayerCategory::class, 'taxpayer_category_id');
+    }
+
+    public function documents(): HasMany
+    {
+        return $this->hasMany(ClientDocument::class)->orderBy('created_at', 'desc');
     }
 
     // =============================================

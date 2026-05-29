@@ -16,10 +16,15 @@
             <div>
                 <div class="flex items-center gap-3">
                     <h1 class="text-2xl font-bold text-slate-800" x-text="client.name">{{ $client->name }}</h1>
-                    <template x-if="client.is_active">
+                    <template x-if="client.client_status">
+                        <span class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium"
+                              :class="statusBadgeClass(client.client_status.color)"
+                              x-text="client.client_status.name"></span>
+                    </template>
+                    <template x-if="!client.client_status && client.is_active">
                         <span class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-emerald-100 text-emerald-700">Активен</span>
                     </template>
-                    <template x-if="!client.is_active">
+                    <template x-if="!client.client_status && !client.is_active">
                         <span class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-100 text-slate-600">Неактивен</span>
                     </template>
                 </div>
@@ -64,7 +69,11 @@
                 <div class="px-6 py-5">
                     <!-- Режим просмотра -->
                     <template x-if="!editing.basic">
-                        <dl class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-4">
+                        <dl class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-x-6 gap-y-4">
+                            <div>
+                                <dt class="text-sm font-medium text-slate-500">Форма организации</dt>
+                                <dd class="mt-1 text-sm text-slate-900" x-text="client.organization_form?.name || '—'"></dd>
+                            </div>
                             <div>
                                 <dt class="text-sm font-medium text-slate-500">ИНН</dt>
                                 <dd class="mt-1 text-sm text-slate-900 font-mono" x-text="client.inn || '—'"></dd>
@@ -85,10 +94,19 @@
                     </template>
                     <!-- Режим редактирования -->
                     <template x-if="editing.basic">
-                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-x-6 gap-y-4">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-x-6 gap-y-4">
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-1">Название <span class="text-red-500">*</span></label>
                                 <input type="text" x-model="form.basic.name" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-1">Форма организации</label>
+                                <select x-model="form.basic.organization_form_id" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                    <option value="">Не указана</option>
+                                    <template x-for="of in organizationForms" :key="of.id">
+                                        <option :value="String(of.id)" :selected="String(of.id) === form.basic.organization_form_id" x-text="of.name"></option>
+                                    </template>
+                                </select>
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-1">ИНН <span class="text-red-500">*</span></label>
@@ -110,6 +128,100 @@
                                         <option :value="String(at.id)" :selected="String(at.id) === form.basic.activity_type_id" x-text="at.name"></option>
                                     </template>
                                 </select>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- Статус и период обслуживания -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="p-2 bg-teal-100 rounded-lg">
+                            <svg class="w-5 h-5 text-teal-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                        </div>
+                        <h2 class="text-lg font-semibold text-slate-800">Статус и период обслуживания</h2>
+                    </div>
+                    <template x-if="!editing.status">
+                        <button @click="startEdit('status')" class="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" title="Редактировать">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                        </button>
+                    </template>
+                    <template x-if="editing.status">
+                        <div class="flex items-center gap-2">
+                            <button @click="saveSection('status')" :disabled="saving.status" class="inline-flex items-center px-3 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-all">
+                                <svg x-show="saving.status" class="w-4 h-4 mr-1 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                                <svg x-show="!saving.status" class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+                                Сохранить
+                            </button>
+                            <button @click="cancelEdit('status')" class="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all">
+                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                        </div>
+                    </template>
+                </div>
+                <div class="px-6 py-5">
+                    <!-- Режим просмотра -->
+                    <template x-if="!editing.status">
+                        <dl class="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-4">
+                            <div>
+                                <dt class="text-sm font-medium text-slate-500">Статус</dt>
+                                <dd class="mt-1">
+                                    <template x-if="client.client_status">
+                                        <span class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium"
+                                              :class="statusBadgeClass(client.client_status.color)"
+                                              x-text="client.client_status.name"></span>
+                                    </template>
+                                    <template x-if="!client.client_status">
+                                        <span class="text-sm text-slate-500">—</span>
+                                    </template>
+                                </dd>
+                            </div>
+                            <div>
+                                <dt class="text-sm font-medium text-slate-500">Дата начала обслуживания</dt>
+                                <dd class="mt-1 text-sm text-slate-900" x-text="formatDate(client.service_start_date) || '—'"></dd>
+                            </div>
+                            <div>
+                                <dt class="text-sm font-medium text-slate-500">Дата завершения</dt>
+                                <dd class="mt-1 text-sm text-slate-900" x-text="formatDate(client.service_end_date) || 'Бессрочно'"></dd>
+                            </div>
+                        </dl>
+                    </template>
+                    <!-- Режим редактирования -->
+                    <template x-if="editing.status">
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-1">Статус клиента</label>
+                                <select x-model="form.status.client_status_id" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                    <option value="">Не выбран</option>
+                                    <template x-for="cs in clientStatuses" :key="cs.id">
+                                        <option :value="String(cs.id)" :selected="String(cs.id) === form.status.client_status_id" x-text="cs.name"></option>
+                                    </template>
+                                </select>
+                                <template x-if="form.status.client_status_id && clientStatuses.find(cs => String(cs.id) === form.status.client_status_id)?.closes_service">
+                                    <p class="mt-1 text-xs text-amber-600">Этот статус завершает обслуживание. is_active будет снят автоматически.</p>
+                                </template>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-1">Дата начала обслуживания</label>
+                                <input type="date" x-model="form.status.service_start_date"
+                                       class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-1">Дата завершения</label>
+                                <div class="flex gap-2">
+                                    <input type="date" x-model="form.status.service_end_date"
+                                           class="flex-1 min-w-0 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                    <button type="button" @click="form.status.service_end_date = new Date().toISOString().split('T')[0]"
+                                            class="px-3 py-2 text-xs text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors whitespace-nowrap">
+                                        Сегодня
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </template>
@@ -160,7 +272,7 @@
                             </div>
                             <div>
                                 <dt class="text-sm font-medium text-slate-500">Категория налогоплательщика</dt>
-                                <dd class="mt-1 text-sm text-slate-900" x-text="taxpayerCategories[client.taxpayer_category] || '—'"></dd>
+                                <dd class="mt-1 text-sm text-slate-900" x-text="client.taxpayer_category_model?.name || taxpayerCategoriesLegacy[client.taxpayer_category] || '—'"></dd>
                             </div>
                         </dl>
                     </template>
@@ -186,15 +298,305 @@
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-1">Категория налогоплательщика</label>
-                                <select x-model="form.tax.taxpayer_category" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                <select x-model="form.tax.taxpayer_category_id" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
                                     <option value="">Не указана</option>
-                                    <template x-for="(label, key) in taxpayerCategories" :key="key">
-                                        <option :value="key" :selected="key === form.tax.taxpayer_category" x-text="label"></option>
+                                    <template x-for="tc in taxpayerCategories" :key="tc.id">
+                                        <option :value="String(tc.id)" :selected="String(tc.id) === form.tax.taxpayer_category_id" x-text="tc.name"></option>
                                     </template>
                                 </select>
                             </div>
                         </div>
                     </template>
+                </div>
+            </div>
+
+            <!-- Характеристики бизнеса -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="p-2 bg-orange-100 rounded-lg">
+                            <svg class="w-5 h-5 text-orange-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                            </svg>
+                        </div>
+                        <h2 class="text-lg font-semibold text-slate-800">Характеристики бизнеса</h2>
+                    </div>
+                    <template x-if="!editing.flags">
+                        <button @click="startEdit('flags')" class="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" title="Редактировать">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                        </button>
+                    </template>
+                    <template x-if="editing.flags">
+                        <div class="flex items-center gap-2">
+                            <button @click="saveSection('flags')" :disabled="saving.flags" class="inline-flex items-center px-3 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-all">
+                                <svg x-show="saving.flags" class="w-4 h-4 mr-1 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                                <svg x-show="!saving.flags" class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+                                Сохранить
+                            </button>
+                            <button @click="cancelEdit('flags')" class="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all">
+                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                        </div>
+                    </template>
+                </div>
+                <div class="px-6 py-5">
+
+                    <!-- Режим просмотра -->
+                    <template x-if="!editing.flags">
+                        <div class="space-y-4">
+                            <!-- Карточки с количеством -->
+                            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                <div :class="client.is_zero_movement ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-100'" class="flex items-center gap-3 p-3 rounded-xl border transition-colors">
+                                    <div :class="client.is_zero_movement ? 'bg-amber-100 text-amber-500' : 'bg-slate-100 text-slate-300'" class="p-1.5 rounded-lg flex-shrink-0">
+                                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <p :class="client.is_zero_movement ? 'text-amber-700' : 'text-slate-400'" class="text-xs font-medium leading-tight">Нулевой клиент</p>
+                                        <p :class="client.is_zero_movement ? 'text-amber-500 font-semibold' : 'text-slate-400'" class="text-xs" x-text="client.is_zero_movement ? 'Да' : 'Нет'"></p>
+                                    </div>
+                                </div>
+                                <div :class="client.has_employees ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-100'" class="flex items-center gap-3 p-3 rounded-xl border transition-colors">
+                                    <div :class="client.has_employees ? 'bg-emerald-100 text-emerald-500' : 'bg-slate-100 text-slate-300'" class="p-1.5 rounded-lg flex-shrink-0">
+                                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <p :class="client.has_employees ? 'text-emerald-700' : 'text-slate-400'" class="text-xs font-medium leading-tight">Сотрудники</p>
+                                        <p :class="client.has_employees ? 'text-emerald-600 font-semibold' : 'text-slate-400'" class="text-xs" x-text="client.has_employees ? (client.employees_count ? client.employees_count + ' чел.' : 'Да') : 'Нет'"></p>
+                                    </div>
+                                </div>
+                                <div :class="client.has_kkm ? 'bg-blue-50 border-blue-200' : 'bg-slate-50 border-slate-100'" class="flex items-center gap-3 p-3 rounded-xl border transition-colors">
+                                    <div :class="client.has_kkm ? 'bg-blue-100 text-blue-500' : 'bg-slate-100 text-slate-300'" class="p-1.5 rounded-lg flex-shrink-0">
+                                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <p :class="client.has_kkm ? 'text-blue-700' : 'text-slate-400'" class="text-xs font-medium leading-tight">ККМ / Касса</p>
+                                        <p :class="client.has_kkm ? 'text-blue-600 font-semibold' : 'text-slate-400'" class="text-xs" x-text="client.has_kkm ? (client.kkm_count ? client.kkm_count + ' шт.' : 'Да') : 'Нет'"></p>
+                                    </div>
+                                </div>
+                                <div :class="client.has_marketplaces ? 'bg-violet-50 border-violet-200' : 'bg-slate-50 border-slate-100'" class="flex items-center gap-3 p-3 rounded-xl border transition-colors">
+                                    <div :class="client.has_marketplaces ? 'bg-violet-100 text-violet-500' : 'bg-slate-100 text-slate-300'" class="p-1.5 rounded-lg flex-shrink-0">
+                                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" /></svg>
+                                    </div>
+                                    <div class="min-w-0">
+                                        <p :class="client.has_marketplaces ? 'text-violet-700' : 'text-slate-400'" class="text-xs font-medium leading-tight">Маркетплейсы</p>
+                                        <p :class="client.has_marketplaces ? 'text-violet-600 font-semibold' : 'text-slate-400'" class="text-xs" x-text="client.has_marketplaces ? (client.marketplaces_count ? client.marketplaces_count + ' шт.' : 'Да') : 'Нет'"></p>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Режимы и особенности — чипы -->
+                            <div class="flex flex-wrap gap-2 pt-1">
+                                <span :class="client.import_eaeu ? 'bg-teal-50 text-teal-700 border-teal-200' : 'bg-slate-50 text-slate-400 border-slate-200'" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border">
+                                    <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="client.import_eaeu ? 'bg-teal-500' : 'bg-slate-300'"></span>
+                                    Импорт ЕАЭС
+                                </span>
+                                <span :class="client.import_third_countries ? 'bg-teal-50 text-teal-700 border-teal-200' : 'bg-slate-50 text-slate-400 border-slate-200'" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border">
+                                    <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="client.import_third_countries ? 'bg-teal-500' : 'bg-slate-300'"></span>
+                                    Импорт ГТД
+                                </span>
+                                <span :class="client.has_export ? 'bg-cyan-50 text-cyan-700 border-cyan-200' : 'bg-slate-50 text-slate-400 border-slate-200'" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border">
+                                    <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="client.has_export ? 'bg-cyan-500' : 'bg-slate-300'"></span>
+                                    Экспорт
+                                </span>
+                                <span :class="client.pvt_mode ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-slate-50 text-slate-400 border-slate-200'" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border">
+                                    <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="client.pvt_mode ? 'bg-indigo-500' : 'bg-slate-300'"></span>
+                                    Режим ПВТ
+                                </span>
+                                <span :class="client.pki_mode ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-slate-50 text-slate-400 border-slate-200'" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border">
+                                    <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="client.pki_mode ? 'bg-purple-500' : 'bg-slate-300'"></span>
+                                    Режим ПКИ
+                                </span>
+                                <span :class="client.has_alcohol ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-slate-50 text-slate-400 border-slate-200'" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border">
+                                    <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="client.has_alcohol ? 'bg-rose-500' : 'bg-slate-300'"></span>
+                                    Алкоголь / ГосАлко
+                                </span>
+                            </div>
+                            <!-- Оператор ЭДО -->
+                            <template x-if="client.edo_operator">
+                                <div class="pt-2 border-t border-slate-100">
+                                    <span class="text-sm text-slate-500">Оператор ЭДО / ЭСФ: </span>
+                                    <span class="text-sm font-medium text-slate-800" x-text="client.edo_operator"></span>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+
+                    <!-- Режим редактирования -->
+                    <template x-if="editing.flags">
+                        <div class="space-y-5">
+                            <!-- Карточки-тогглы: объём -->
+                            <div>
+                                <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Состав бизнеса</p>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                                    <!-- Нулевой клиент -->
+                                    <div :class="form.flags.is_zero_movement ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'" class="p-3.5 rounded-xl border transition-all duration-150">
+                                        <div class="flex items-center justify-between gap-2">
+                                            <div class="flex items-center gap-2.5">
+                                                <div :class="form.flags.is_zero_movement ? 'bg-amber-100 text-amber-500' : 'bg-slate-100 text-slate-400'" class="p-1.5 rounded-lg flex-shrink-0 transition-colors">
+                                                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
+                                                </div>
+                                                <span class="text-sm font-medium text-slate-700">Нулевой клиент</span>
+                                            </div>
+                                            <button type="button" @click="form.flags.is_zero_movement = !form.flags.is_zero_movement"
+                                                    :class="form.flags.is_zero_movement ? 'bg-amber-400' : 'bg-slate-200'"
+                                                    class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none">
+                                                <span :class="form.flags.is_zero_movement ? 'translate-x-5' : 'translate-x-0'" class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <!-- Сотрудники -->
+                                    <div :class="form.flags.has_employees ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-200'" class="p-3.5 rounded-xl border transition-all duration-150">
+                                        <div class="flex items-center justify-between gap-2">
+                                            <div class="flex items-center gap-2.5">
+                                                <div :class="form.flags.has_employees ? 'bg-emerald-100 text-emerald-500' : 'bg-slate-100 text-slate-400'" class="p-1.5 rounded-lg flex-shrink-0 transition-colors">
+                                                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                                                </div>
+                                                <span class="text-sm font-medium text-slate-700">Сотрудники</span>
+                                            </div>
+                                            <button type="button" @click="form.flags.has_employees = !form.flags.has_employees; if(!form.flags.has_employees) form.flags.employees_count = null"
+                                                    :class="form.flags.has_employees ? 'bg-emerald-500' : 'bg-slate-200'"
+                                                    class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none">
+                                                <span :class="form.flags.has_employees ? 'translate-x-5' : 'translate-x-0'" class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+                                            </button>
+                                        </div>
+                                        <div x-show="form.flags.has_employees" x-transition class="mt-2.5">
+                                            <input type="number" x-model.number="form.flags.employees_count" min="0" max="9999" placeholder="Количество"
+                                                   class="block w-full px-2.5 py-1.5 bg-white border border-emerald-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-400 placeholder-slate-400">
+                                        </div>
+                                    </div>
+                                    <!-- ККМ -->
+                                    <div :class="form.flags.has_kkm ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-200'" class="p-3.5 rounded-xl border transition-all duration-150">
+                                        <div class="flex items-center justify-between gap-2">
+                                            <div class="flex items-center gap-2.5">
+                                                <div :class="form.flags.has_kkm ? 'bg-blue-100 text-blue-500' : 'bg-slate-100 text-slate-400'" class="p-1.5 rounded-lg flex-shrink-0 transition-colors">
+                                                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" /></svg>
+                                                </div>
+                                                <span class="text-sm font-medium text-slate-700">ККМ / Касса</span>
+                                            </div>
+                                            <button type="button" @click="form.flags.has_kkm = !form.flags.has_kkm; if(!form.flags.has_kkm) form.flags.kkm_count = null"
+                                                    :class="form.flags.has_kkm ? 'bg-blue-500' : 'bg-slate-200'"
+                                                    class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none">
+                                                <span :class="form.flags.has_kkm ? 'translate-x-5' : 'translate-x-0'" class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+                                            </button>
+                                        </div>
+                                        <div x-show="form.flags.has_kkm" x-transition class="mt-2.5">
+                                            <input type="number" x-model.number="form.flags.kkm_count" min="0" max="9999" placeholder="Количество"
+                                                   class="block w-full px-2.5 py-1.5 bg-white border border-blue-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 placeholder-slate-400">
+                                        </div>
+                                    </div>
+                                    <!-- Маркетплейсы -->
+                                    <div :class="form.flags.has_marketplaces ? 'bg-violet-50 border-violet-200' : 'bg-white border-slate-200'" class="p-3.5 rounded-xl border transition-all duration-150">
+                                        <div class="flex items-center justify-between gap-2">
+                                            <div class="flex items-center gap-2.5">
+                                                <div :class="form.flags.has_marketplaces ? 'bg-violet-100 text-violet-500' : 'bg-slate-100 text-slate-400'" class="p-1.5 rounded-lg flex-shrink-0 transition-colors">
+                                                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" /></svg>
+                                                </div>
+                                                <span class="text-sm font-medium text-slate-700">Маркетплейсы</span>
+                                            </div>
+                                            <button type="button" @click="form.flags.has_marketplaces = !form.flags.has_marketplaces; if(!form.flags.has_marketplaces) form.flags.marketplaces_count = null"
+                                                    :class="form.flags.has_marketplaces ? 'bg-violet-500' : 'bg-slate-200'"
+                                                    class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none">
+                                                <span :class="form.flags.has_marketplaces ? 'translate-x-5' : 'translate-x-0'" class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+                                            </button>
+                                        </div>
+                                        <div x-show="form.flags.has_marketplaces" x-transition class="mt-2.5">
+                                            <input type="number" x-model.number="form.flags.marketplaces_count" min="0" max="9999" placeholder="Количество"
+                                                   class="block w-full px-2.5 py-1.5 bg-white border border-violet-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 placeholder-slate-400">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Режимы и особенности -->
+                            <div>
+                                <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Режимы и особенности</p>
+                                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                                    <!-- Импорт ЕАЭС -->
+                                    <div :class="form.flags.import_eaeu ? 'bg-teal-50 border-teal-200' : 'bg-white border-slate-200'" class="p-3 rounded-xl border transition-all duration-150 cursor-pointer select-none" @click="form.flags.import_eaeu = !form.flags.import_eaeu">
+                                        <div class="flex items-center justify-between mb-1.5">
+                                            <div :class="form.flags.import_eaeu ? 'bg-teal-100 text-teal-500' : 'bg-slate-100 text-slate-400'" class="p-1.5 rounded-lg transition-colors">
+                                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+                                            </div>
+                                            <div :class="form.flags.import_eaeu ? 'bg-teal-400' : 'bg-slate-200'" class="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 transition-colors">
+                                                <svg x-show="form.flags.import_eaeu" class="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                            </div>
+                                        </div>
+                                        <p :class="form.flags.import_eaeu ? 'text-teal-700' : 'text-slate-500'" class="text-xs font-medium leading-tight">Импорт ЕАЭС</p>
+                                    </div>
+                                    <!-- Импорт ГТД -->
+                                    <div :class="form.flags.import_third_countries ? 'bg-teal-50 border-teal-200' : 'bg-white border-slate-200'" class="p-3 rounded-xl border transition-all duration-150 cursor-pointer select-none" @click="form.flags.import_third_countries = !form.flags.import_third_countries">
+                                        <div class="flex items-center justify-between mb-1.5">
+                                            <div :class="form.flags.import_third_countries ? 'bg-teal-100 text-teal-500' : 'bg-slate-100 text-slate-400'" class="p-1.5 rounded-lg transition-colors">
+                                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+                                            </div>
+                                            <div :class="form.flags.import_third_countries ? 'bg-teal-400' : 'bg-slate-200'" class="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 transition-colors">
+                                                <svg x-show="form.flags.import_third_countries" class="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                            </div>
+                                        </div>
+                                        <p :class="form.flags.import_third_countries ? 'text-teal-700' : 'text-slate-500'" class="text-xs font-medium leading-tight">Импорт ГТД</p>
+                                    </div>
+                                    <!-- Экспорт -->
+                                    <div :class="form.flags.has_export ? 'bg-cyan-50 border-cyan-200' : 'bg-white border-slate-200'" class="p-3 rounded-xl border transition-all duration-150 cursor-pointer select-none" @click="form.flags.has_export = !form.flags.has_export">
+                                        <div class="flex items-center justify-between mb-1.5">
+                                            <div :class="form.flags.has_export ? 'bg-cyan-100 text-cyan-500' : 'bg-slate-100 text-slate-400'" class="p-1.5 rounded-lg transition-colors">
+                                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 7.5m0 0L7.5 12M12 7.5V21" /></svg>
+                                            </div>
+                                            <div :class="form.flags.has_export ? 'bg-cyan-400' : 'bg-slate-200'" class="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 transition-colors">
+                                                <svg x-show="form.flags.has_export" class="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                            </div>
+                                        </div>
+                                        <p :class="form.flags.has_export ? 'text-cyan-700' : 'text-slate-500'" class="text-xs font-medium leading-tight">Экспорт</p>
+                                    </div>
+                                    <!-- Режим ПВТ -->
+                                    <div :class="form.flags.pvt_mode ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-slate-200'" class="p-3 rounded-xl border transition-all duration-150 cursor-pointer select-none" @click="form.flags.pvt_mode = !form.flags.pvt_mode">
+                                        <div class="flex items-center justify-between mb-1.5">
+                                            <div :class="form.flags.pvt_mode ? 'bg-indigo-100 text-indigo-500' : 'bg-slate-100 text-slate-400'" class="p-1.5 rounded-lg transition-colors">
+                                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>
+                                            </div>
+                                            <div :class="form.flags.pvt_mode ? 'bg-indigo-400' : 'bg-slate-200'" class="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 transition-colors">
+                                                <svg x-show="form.flags.pvt_mode" class="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                            </div>
+                                        </div>
+                                        <p :class="form.flags.pvt_mode ? 'text-indigo-700' : 'text-slate-500'" class="text-xs font-medium leading-tight">Режим ПВТ</p>
+                                    </div>
+                                    <!-- Режим ПКИ -->
+                                    <div :class="form.flags.pki_mode ? 'bg-purple-50 border-purple-200' : 'bg-white border-slate-200'" class="p-3 rounded-xl border transition-all duration-150 cursor-pointer select-none" @click="form.flags.pki_mode = !form.flags.pki_mode">
+                                        <div class="flex items-center justify-between mb-1.5">
+                                            <div :class="form.flags.pki_mode ? 'bg-purple-100 text-purple-500' : 'bg-slate-100 text-slate-400'" class="p-1.5 rounded-lg transition-colors">
+                                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
+                                            </div>
+                                            <div :class="form.flags.pki_mode ? 'bg-purple-400' : 'bg-slate-200'" class="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 transition-colors">
+                                                <svg x-show="form.flags.pki_mode" class="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                            </div>
+                                        </div>
+                                        <p :class="form.flags.pki_mode ? 'text-purple-700' : 'text-slate-500'" class="text-xs font-medium leading-tight">Режим ПКИ</p>
+                                    </div>
+                                    <!-- Алкоголь -->
+                                    <div :class="form.flags.has_alcohol ? 'bg-rose-50 border-rose-200' : 'bg-white border-slate-200'" class="p-3 rounded-xl border transition-all duration-150 cursor-pointer select-none" @click="form.flags.has_alcohol = !form.flags.has_alcohol">
+                                        <div class="flex items-center justify-between mb-1.5">
+                                            <div :class="form.flags.has_alcohol ? 'bg-rose-100 text-rose-500' : 'bg-slate-100 text-slate-400'" class="p-1.5 rounded-lg transition-colors">
+                                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15m-1.8-.5H6M6.75 21h10.5" /></svg>
+                                            </div>
+                                            <div :class="form.flags.has_alcohol ? 'bg-rose-400' : 'bg-slate-200'" class="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 transition-colors">
+                                                <svg x-show="form.flags.has_alcohol" class="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                            </div>
+                                        </div>
+                                        <p :class="form.flags.has_alcohol ? 'text-rose-700' : 'text-slate-500'" class="text-xs font-medium leading-tight">Алкоголь</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Оператор ЭДО -->
+                            <div class="pt-1 border-t border-slate-100">
+                                <label class="block text-sm font-medium text-slate-700 mb-1">Оператор ЭДО / ЭСФ</label>
+                                <input type="text" x-model="form.flags.edo_operator"
+                                       class="block w-full sm:w-72 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                                       placeholder="Название оператора">
+                            </div>
+                        </div>
+                    </template>
+
                 </div>
             </div>
 
@@ -232,7 +634,7 @@
                 <div class="px-6 py-5">
                     <template x-if="!editing.contract">
                         <div>
-                            <dl class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-x-6 gap-y-4">
+                            <dl class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-4">
                                 <div>
                                     <dt class="text-sm font-medium text-slate-500">Тип обслуживания</dt>
                                     <dd class="mt-1 text-sm text-slate-900" x-text="serviceTypes[client.service_type] || '—'"></dd>
@@ -244,14 +646,6 @@
                                 <div>
                                     <dt class="text-sm font-medium text-slate-500">С кем составлен договор</dt>
                                     <dd class="mt-1 text-sm text-slate-900" x-text="client.contract_with || '—'"></dd>
-                                </div>
-                                <div>
-                                    <dt class="text-sm font-medium text-slate-500">Дата начала обслуживания</dt>
-                                    <dd class="mt-1 text-sm text-slate-900" x-text="formatDate(client.service_start_date) || '—'"></dd>
-                                </div>
-                                <div>
-                                    <dt class="text-sm font-medium text-slate-500">Дата завершения</dt>
-                                    <dd class="mt-1 text-sm text-slate-900" x-text="formatDate(client.service_end_date) || 'Бессрочно'"></dd>
                                 </div>
                                 <div>
                                     <dt class="text-sm font-medium text-slate-500">Ответственные лица</dt>
@@ -291,7 +685,7 @@
                     </template>
                     <template x-if="editing.contract">
                         <div class="space-y-4">
-                            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-x-6 gap-y-4">
+                            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-4">
                                 <div>
                                     <label class="block text-sm font-medium text-slate-700 mb-1">Тип обслуживания</label>
                                     <select x-model="form.contract.service_type" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
@@ -313,14 +707,6 @@
                                 <div>
                                     <label class="block text-sm font-medium text-slate-700 mb-1">С кем составлен договор</label>
                                     <input type="text" x-model="form.contract.contract_with" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-slate-700 mb-1">Дата начала</label>
-                                    <input type="date" x-model="form.contract.service_start_date" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-slate-700 mb-1">Дата завершения</label>
-                                    <input type="date" x-model="form.contract.service_end_date" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
                                 </div>
                                 <div>
                                     <label class="block text-sm font-medium text-slate-700 mb-1">Ответственные лица</label>
@@ -346,6 +732,95 @@
                             </div>
                         </div>
                     </template>
+                </div>
+            </div>
+
+            <!-- Документы клиента -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-100 flex items-center gap-3">
+                    <div class="p-2 bg-blue-100 rounded-lg">
+                        <svg class="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                    </div>
+                    <h2 class="text-lg font-semibold text-slate-800">Документы</h2>
+                </div>
+                <div class="px-6 py-5 space-y-4">
+                    <!-- Список документов -->
+                    <template x-if="clientDocuments.length > 0">
+                        <div class="space-y-2">
+                            <template x-for="doc in clientDocuments" :key="doc.id">
+                                <div class="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100 hover:border-slate-200 transition-colors">
+                                    <!-- Иконка типа -->
+                                    <div :class="docIconColor(doc.mime_type)" class="p-2 rounded-lg flex-shrink-0">
+                                        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" x-html="docIcon(doc.mime_type)"></svg>
+                                    </div>
+                                    <!-- Имя и размер -->
+                                    <div class="flex-1 min-w-0">
+                                        <p class="text-sm font-medium text-slate-800 truncate" x-text="doc.original_name"></p>
+                                        <p class="text-xs text-slate-400" x-text="formatFileSize(doc.size)"></p>
+                                    </div>
+                                    <!-- Кнопки действий -->
+                                    <div class="flex items-center gap-1 flex-shrink-0">
+                                        <button x-show="canPreview(doc.mime_type)"
+                                                @click="openPreview(doc)" type="button"
+                                                class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" title="Просмотр">
+                                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                                            </svg>
+                                        </button>
+                                        <a :href="'/storage/' + doc.path" target="_blank" download
+                                           class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" title="Скачать">
+                                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                            </svg>
+                                        </a>
+                                        <button @click="deleteDocument(doc.id)" type="button"
+                                                class="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all" title="Удалить">
+                                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                    <template x-if="clientDocuments.length === 0">
+                        <p class="text-sm text-slate-400">Документы не загружены</p>
+                    </template>
+
+                    <!-- Зона загрузки -->
+                    <div
+                        class="relative border-2 border-dashed border-slate-200 rounded-xl p-6 text-center hover:border-indigo-300 hover:bg-indigo-50/30 transition-all duration-150"
+                        :class="{'border-indigo-400 bg-indigo-50/40': uploadDragging}"
+                        @dragover.prevent="uploadDragging = true"
+                        @dragleave.prevent="uploadDragging = false"
+                        @drop.prevent="uploadDragging = false; uploadDocuments($event.dataTransfer.files)">
+                        <input type="file" multiple id="doc-upload-input"
+                               class="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                               @change="uploadDocuments($event.target.files); $event.target.value = ''">
+                        <div class="flex flex-col items-center gap-2">
+                            <div class="p-2.5 bg-slate-100 rounded-xl">
+                                <svg class="w-6 h-6 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                                </svg>
+                            </div>
+                            <template x-if="!uploadingDocs">
+                                <div>
+                                    <p class="text-sm font-medium text-slate-600">Перетащите файлы или нажмите для выбора</p>
+                                    <p class="text-xs text-slate-400 mt-0.5">PDF, DOC, XLS, PNG, JPG, ZIP и другие — до 20 МБ</p>
+                                </div>
+                            </template>
+                            <template x-if="uploadingDocs">
+                                <div class="flex items-center gap-2">
+                                    <svg class="w-4 h-4 text-indigo-500 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                                    <p class="text-sm text-indigo-600">Загружаем...</p>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -735,6 +1210,259 @@
                 </div>
             </div>
 
+            <!-- Контакты и связанные лица -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="p-2 bg-sky-100 rounded-lg">
+                            <svg class="w-5 h-5 text-sky-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                        </div>
+                        <h2 class="text-lg font-semibold text-slate-800">Контакты и связанные лица</h2>
+                    </div>
+                    <template x-if="!editing.contacts_info">
+                        <button @click="startEdit('contacts_info')" class="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" title="Редактировать">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                        </button>
+                    </template>
+                    <template x-if="editing.contacts_info">
+                        <div class="flex items-center gap-2">
+                            <button @click="saveSection('contacts_info')" :disabled="saving.contacts_info" class="inline-flex items-center px-3 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-all">
+                                <svg x-show="saving.contacts_info" class="w-4 h-4 mr-1 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                                <svg x-show="!saving.contacts_info" class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+                                Сохранить
+                            </button>
+                            <button @click="cancelEdit('contacts_info')" class="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all">
+                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                        </div>
+                    </template>
+                </div>
+                <div class="px-6 py-5">
+                    <!-- Режим просмотра -->
+                    <template x-if="!editing.contacts_info">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                            <!-- Контакты -->
+                            <div>
+                                <h3 class="text-sm font-medium text-slate-700 mb-3">Телефоны / Email / Чат</h3>
+                                <template x-if="client.contacts && client.contacts.length > 0">
+                                    <div class="space-y-2">
+                                        <template x-for="(contact, i) in client.contacts" :key="i">
+                                            <div class="flex items-start gap-3">
+                                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600 flex-shrink-0 mt-0.5" x-text="contactTypeLabel(contact.type)"></span>
+                                                <div>
+                                                    <span class="text-sm text-slate-900 font-mono" x-text="contact.value"></span>
+                                                    <span x-show="contact.note" class="ml-2 text-xs text-slate-400" x-text="contact.note"></span>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                                <template x-if="!client.contacts || client.contacts.length === 0">
+                                    <p class="text-sm text-slate-400">Не указаны</p>
+                                </template>
+                            </div>
+                            <!-- Связанные лица -->
+                            <div>
+                                <h3 class="text-sm font-medium text-slate-700 mb-3">Связанные лица</h3>
+                                <template x-if="client.related_persons && client.related_persons.length > 0">
+                                    <div class="space-y-3">
+                                        <template x-for="(person, i) in client.related_persons" :key="i">
+                                            <div class="p-3 bg-slate-50 rounded-xl border border-slate-100">
+                                                <div class="flex items-center gap-2 mb-1">
+                                                    <span class="text-sm font-medium text-slate-800" x-text="person.name"></span>
+                                                    <span x-show="person.role" class="text-xs text-slate-500" x-text="'· ' + person.role"></span>
+                                                </div>
+                                                <div class="flex flex-wrap gap-3">
+                                                    <span x-show="person.inn" class="text-xs text-slate-500 font-mono">ИНН: <span x-text="person.inn"></span></span>
+                                                    <span x-show="person.note" class="text-xs text-slate-400 italic" x-text="person.note"></span>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                                <template x-if="!client.related_persons || client.related_persons.length === 0">
+                                    <p class="text-sm text-slate-400">Не указаны</p>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
+                    <!-- Режим редактирования -->
+                    <template x-if="editing.contacts_info">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                            <!-- Контакты -->
+                            <div>
+                                <h3 class="text-sm font-medium text-slate-700 mb-3">Телефоны / Email / Чат</h3>
+                                <div class="space-y-2">
+                                    <template x-for="(contact, i) in form.contacts_info.contacts" :key="i">
+                                        <div class="flex items-start gap-2">
+                                            <select x-model="contact.type" class="px-2 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 flex-shrink-0">
+                                                <option value="phone">Тел.</option>
+                                                <option value="email">Email</option>
+                                                <option value="telegram">TG</option>
+                                                <option value="whatsapp">WA</option>
+                                                <option value="viber">Viber</option>
+                                                <option value="other">Другое</option>
+                                            </select>
+                                            <input type="text" x-model="contact.value" placeholder="Номер / адрес" class="flex-1 min-w-0 px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                            <input type="text" x-model="contact.note" placeholder="Примечание" class="w-24 px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                            <button type="button" @click="form.contacts_info.contacts.splice(i, 1)" class="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors flex-shrink-0">
+                                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                                            </button>
+                                        </div>
+                                    </template>
+                                </div>
+                                <button type="button" @click="form.contacts_info.contacts.push({type: 'phone', value: '', note: ''})" class="mt-2 w-full py-2 border-2 border-dashed border-slate-200 rounded-lg text-xs text-slate-500 hover:border-indigo-300 hover:text-indigo-600 transition-colors">
+                                    + Добавить контакт
+                                </button>
+                            </div>
+                            <!-- Связанные лица -->
+                            <div>
+                                <h3 class="text-sm font-medium text-slate-700 mb-3">Связанные лица</h3>
+                                <div class="space-y-3">
+                                    <template x-for="(person, i) in form.contacts_info.related_persons" :key="i">
+                                        <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 relative">
+                                            <button type="button" @click="form.contacts_info.related_persons.splice(i, 1)" class="absolute top-2 right-2 p-1 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors">
+                                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                                            </button>
+                                            <div class="grid grid-cols-2 gap-2 pr-6">
+                                                <div>
+                                                    <label class="block text-xs text-slate-500 mb-1">Имя <span class="text-red-500">*</span></label>
+                                                    <input type="text" x-model="person.name" placeholder="ФИО" class="block w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                                </div>
+                                                <div>
+                                                    <label class="block text-xs text-slate-500 mb-1">Роль</label>
+                                                    <input type="text" x-model="person.role" placeholder="Директор" class="block w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                                </div>
+                                                <div>
+                                                    <label class="block text-xs text-slate-500 mb-1">ИНН</label>
+                                                    <input type="text" x-model="person.inn" maxlength="14" placeholder="ИНН" class="block w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                                </div>
+                                                <div>
+                                                    <label class="block text-xs text-slate-500 mb-1">Примечание</label>
+                                                    <input type="text" x-model="person.note" placeholder="Доп. инфо" class="block w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                                <button type="button" @click="form.contacts_info.related_persons.push({name: '', role: '', inn: '', note: ''})" class="mt-2 w-full py-2 border-2 border-dashed border-slate-200 rounded-lg text-xs text-slate-500 hover:border-indigo-300 hover:text-indigo-600 transition-colors">
+                                    + Добавить связанное лицо
+                                </button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <!-- Дополнительно -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="p-2 bg-slate-100 rounded-lg">
+                            <svg class="w-5 h-5 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 12h.01M12 12h.01M19 12h.01M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z" />
+                            </svg>
+                        </div>
+                        <h2 class="text-lg font-semibold text-slate-800">Дополнительно</h2>
+                    </div>
+                    <template x-if="!editing.extras">
+                        <button @click="startEdit('extras')" class="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" title="Редактировать">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                        </button>
+                    </template>
+                    <template x-if="editing.extras">
+                        <div class="flex items-center gap-2">
+                            <button @click="saveSection('extras')" :disabled="saving.extras" class="inline-flex items-center px-3 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-all">
+                                <svg x-show="saving.extras" class="w-4 h-4 mr-1 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                                <svg x-show="!saving.extras" class="w-4 h-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+                                Сохранить
+                            </button>
+                            <button @click="cancelEdit('extras')" class="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all">
+                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
+                        </div>
+                    </template>
+                </div>
+                <div class="px-6 py-5">
+                    <!-- Режим просмотра -->
+                    <template x-if="!editing.extras">
+                        <div class="space-y-4">
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                                <div x-show="client.client_folder_url">
+                                    <dt class="text-sm font-medium text-slate-500 mb-1">Папка клиента</dt>
+                                    <dd>
+                                        <a :href="client.client_folder_url" target="_blank" class="inline-flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 hover:underline">
+                                            <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
+                                            Открыть папку
+                                        </a>
+                                    </dd>
+                                </div>
+                                <div x-show="client.access_instructions">
+                                    <dt class="text-sm font-medium text-slate-500 mb-1">Доступы / инструкции</dt>
+                                    <dd class="text-sm text-slate-700 whitespace-pre-wrap" x-text="client.access_instructions"></dd>
+                                </div>
+                            </div>
+                            <template x-if="client.extra_fields && client.extra_fields.length > 0">
+                                <div class="pt-4 border-t border-slate-100">
+                                    <h3 class="text-sm font-medium text-slate-700 mb-3">Дополнительные поля</h3>
+                                    <dl class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-3">
+                                        <template x-for="(field, i) in client.extra_fields" :key="i">
+                                            <div>
+                                                <dt class="text-xs font-medium text-slate-500" x-text="field.label"></dt>
+                                                <dd class="mt-0.5 text-sm text-slate-900" x-text="field.value || '—'"></dd>
+                                            </div>
+                                        </template>
+                                    </dl>
+                                </div>
+                            </template>
+                            <template x-if="!client.client_folder_url && !client.access_instructions && (!client.extra_fields || client.extra_fields.length === 0)">
+                                <p class="text-sm text-slate-400">Не заполнено</p>
+                            </template>
+                        </div>
+                    </template>
+                    <!-- Режим редактирования -->
+                    <template x-if="editing.extras">
+                        <div class="space-y-5">
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-700 mb-1">Папка клиента (ссылка)</label>
+                                    <input type="url" x-model="form.extras.client_folder_url" placeholder="https://drive.google.com/..."
+                                           class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-700 mb-1">Доступы / инструкции</label>
+                                    <textarea x-model="form.extras.access_instructions" rows="2" placeholder="Логины, пароли, инструкции..."
+                                              class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-none"></textarea>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="flex items-center justify-between mb-3">
+                                    <label class="text-sm font-medium text-slate-700">Дополнительные поля</label>
+                                </div>
+                                <div class="space-y-2">
+                                    <template x-for="(field, i) in form.extras.extra_fields" :key="i">
+                                        <div class="flex items-center gap-2">
+                                            <input type="text" x-model="field.label" placeholder="Название поля"
+                                                   class="w-40 flex-shrink-0 px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                            <input type="text" x-model="field.value" placeholder="Значение"
+                                                   class="flex-1 min-w-0 px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                            <button type="button" @click="form.extras.extra_fields.splice(i, 1)" class="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors flex-shrink-0">
+                                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                                            </button>
+                                        </div>
+                                    </template>
+                                </div>
+                                <button type="button" @click="form.extras.extra_fields.push({label: '', value: ''})" class="mt-2 w-full py-2 border-2 border-dashed border-slate-200 rounded-lg text-xs text-slate-500 hover:border-indigo-300 hover:text-indigo-600 transition-colors">
+                                    + Добавить поле
+                                </button>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
             <!-- Примечания -->
             <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
                 <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
@@ -767,32 +1495,80 @@
                 </div>
                 <div class="px-6 py-5">
                     <template x-if="!editing.notes">
-                        <div class="flex items-start gap-6">
-                            <div class="flex-1">
-                                <p class="text-sm text-slate-700 whitespace-pre-wrap" x-text="client.notes || 'Нет примечаний'"></p>
-                            </div>
-                            <div class="flex items-center shrink-0">
-                                <input type="checkbox" :checked="client.is_active" disabled class="w-4 h-4 text-indigo-600 border-slate-300 rounded">
-                                <span class="ml-2 text-sm text-slate-600">Активный клиент</span>
-                            </div>
-                        </div>
+                        <p class="text-sm text-slate-700 whitespace-pre-wrap" x-text="client.notes || 'Нет примечаний'"></p>
                     </template>
                     <template x-if="editing.notes">
-                        <div class="flex items-start gap-6">
-                            <div class="flex-1">
-                                <label class="block text-sm font-medium text-slate-700 mb-1">Примечания</label>
-                                <textarea x-model="form.notes.notes" rows="3" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-none"></textarea>
-                            </div>
-                            <div class="flex items-center shrink-0 pt-7">
-                                <input type="checkbox" x-model="form.notes.is_active" id="is_active" class="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500">
-                                <label for="is_active" class="ml-2 text-sm font-medium text-slate-700">Активный клиент</label>
-                            </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1">Примечания</label>
+                            <textarea x-model="form.notes.notes" rows="3" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-none"></textarea>
                         </div>
                     </template>
                 </div>
             </div>
 
     </div>
+
+    <!-- ==================== ПРЕДПРОСМОТР ДОКУМЕНТА ==================== -->
+    <template x-teleport="body">
+        <div x-show="showPreview" x-cloak
+             class="fixed inset-0 z-[60] flex items-center justify-center p-4"
+             @keydown.escape.window="closePreview()">
+
+            <!-- Backdrop -->
+            <div class="absolute inset-0 bg-slate-900/75 backdrop-blur-sm transition-opacity"
+                 @click="closePreview()"></div>
+
+            <!-- Modal -->
+            <div class="relative w-full max-w-5xl bg-white rounded-2xl shadow-2xl flex flex-col z-10 overflow-hidden"
+                 style="height: 90vh; max-height: 90vh;">
+
+                <!-- Шапка -->
+                <div class="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 flex-shrink-0 bg-white">
+                    <div class="flex items-center gap-3 min-w-0 flex-1">
+                        <div :class="docIconColor(previewDoc?.mime_type)" class="p-1.5 rounded-lg flex-shrink-0">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" x-html="docIcon(previewDoc?.mime_type)"></svg>
+                        </div>
+                        <div class="min-w-0">
+                            <p class="text-sm font-semibold text-slate-800 truncate" x-text="previewDoc?.original_name"></p>
+                            <p class="text-xs text-slate-400" x-text="formatFileSize(previewDoc?.size ?? 0)"></p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 flex-shrink-0 ml-4">
+                        <a :href="'/storage/' + previewDoc?.path" target="_blank" download
+                           class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                            Скачать
+                        </a>
+                        <button @click="closePreview()" type="button"
+                                class="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
+                            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Контент -->
+                <div class="flex-1 overflow-hidden bg-slate-100 relative">
+
+                    <!-- PDF -->
+                    <template x-if="previewDoc?.mime_type === 'application/pdf'">
+                        <iframe :src="'/storage/' + previewDoc.path + '#toolbar=1&navpanes=0&scrollbar=1'"
+                                class="w-full h-full border-0 block"
+                                type="application/pdf"></iframe>
+                    </template>
+
+                    <!-- Изображения -->
+                    <template x-if="previewDoc?.mime_type?.startsWith('image/')">
+                        <div class="w-full h-full flex items-center justify-center p-6 overflow-auto">
+                            <img :src="'/storage/' + previewDoc.path"
+                                 :alt="previewDoc.original_name"
+                                 class="max-w-full max-h-full object-contain rounded-xl shadow-md select-none">
+                        </div>
+                    </template>
+
+                </div>
+            </div>
+        </div>
+    </template>
 
     <!-- ==================== СМЕТА (превью) ==================== -->
     @php $estimate = \App\Models\Estimate::where('client_id', $client->id)->where('year', now()->year)->where('month', now()->month)->first(); @endphp
@@ -853,41 +1629,61 @@ function clientShow() {
         allEmployees: @json(\App\Models\Employee::active()->orderBy('full_name')->get()),
         serviceTypes: @json(\App\Models\Client::$serviceTypes),
         accountingMethods: @json(\App\Models\Client::$accountingMethods),
-        taxpayerCategories: @json(\App\Models\Client::$taxpayerCategories),
+        taxpayerCategoriesLegacy: @json(\App\Models\Client::$taxpayerCategories),
+        taxpayerCategories: @json(\App\Models\TaxpayerCategory::orderBy('name')->get()),
         connectionTypes: @json(\App\Models\Client::$connectionTypes),
+        organizationForms: @json(\App\Models\OrganizationForm::orderBy('name')->get()),
+        clientStatuses: @json(\App\Models\ClientStatus::orderBy('sort_order')->orderBy('name')->get()),
+        clientDocuments: @json($client->documents ?? []),
 
         showPasswords: false,
+        uploadDragging: false,
+        uploadingDocs: false,
+        showPreview: false,
+        previewDoc: null,
 
         editing: {
             basic: false,
+            status: false,
             tax: false,
+            flags: false,
             contract: false,
             attorney: false,
             eds: false,
             its: false,
             banks: false,
+            contacts_info: false,
+            extras: false,
             notes: false,
         },
 
         saving: {
             basic: false,
+            status: false,
             tax: false,
+            flags: false,
             contract: false,
             attorney: false,
             eds: false,
             its: false,
             banks: false,
+            contacts_info: false,
+            extras: false,
             notes: false,
         },
 
         form: {
             basic: {},
+            status: {},
             tax: {},
+            flags: {},
             contract: {},
             attorney: {},
             eds: {},
             its: {},
             banks: {},
+            contacts_info: {},
+            extras: {},
             notes: {},
         },
 
@@ -898,22 +1694,54 @@ function clientShow() {
         resetForms() {
             this.form.basic = {
                 name: this.client.name,
+                organization_form_id: this.client.organization_form_id ? String(this.client.organization_form_id) : '',
                 inn: this.client.inn,
                 director_inn: this.client.director_inn,
                 tax_office_code: this.client.tax_office_code,
                 activity_type_id: this.client.activity_type_id ? String(this.client.activity_type_id) : '',
             };
+            this.form.status = {
+                client_status_id: this.client.client_status_id ? String(this.client.client_status_id) : '',
+                service_start_date: this.client.service_start_date
+                    ? this.client.service_start_date.split('T')[0]
+                    : (this.client.created_at ? this.client.created_at.split('T')[0] : ''),
+                service_end_date: this.client.service_end_date ? this.client.service_end_date.split('T')[0] : '',
+            };
+            this.form.flags = {
+                is_zero_movement: this.client.is_zero_movement || false,
+                has_employees: this.client.has_employees || false,
+                employees_count: this.client.employees_count ?? null,
+                has_kkm: this.client.has_kkm || false,
+                kkm_count: this.client.kkm_count ?? null,
+                has_marketplaces: this.client.has_marketplaces || false,
+                marketplaces_count: this.client.marketplaces_count ?? null,
+                import_eaeu: this.client.import_eaeu || false,
+                import_third_countries: this.client.import_third_countries || false,
+                has_export: this.client.has_export || false,
+                pvt_mode: this.client.pvt_mode || false,
+                pki_mode: this.client.pki_mode || false,
+                has_alcohol: this.client.has_alcohol || false,
+                edo_operator: this.client.edo_operator || '',
+            };
+            this.form.contacts_info = {
+                contacts: JSON.parse(JSON.stringify(this.client.contacts || [])),
+                related_persons: JSON.parse(JSON.stringify(this.client.related_persons || [])),
+            };
+            this.form.extras = {
+                client_folder_url: this.client.client_folder_url || '',
+                access_instructions: this.client.access_instructions || '',
+                extra_fields: JSON.parse(JSON.stringify(this.client.extra_fields || [])),
+            };
             this.form.tax = {
                 tax_system_id: this.client.tax_system_id ? String(this.client.tax_system_id) : '',
                 accounting_method: this.client.accounting_method || '',
                 taxpayer_category: this.client.taxpayer_category || '',
+                taxpayer_category_id: this.client.taxpayer_category_id ? String(this.client.taxpayer_category_id) : '',
             };
             this.form.contract = {
                 service_type: this.client.service_type || '',
                 tariff_id: this.client.tariff_id ? String(this.client.tariff_id) : '',
                 contract_with: this.client.contract_with,
-                service_start_date: this.client.service_start_date?.split('T')[0],
-                service_end_date: this.client.service_end_date?.split('T')[0],
                 contract_url: this.client.contract_url,
                 requisites_url: this.client.requisites_url,
                 employees: this.client.employees?.map(e => String(e.id)) || [],
@@ -942,7 +1770,6 @@ function clientShow() {
             };
             this.form.notes = {
                 notes: this.client.notes,
-                is_active: this.client.is_active,
             };
         },
 
@@ -977,6 +1804,9 @@ function clientShow() {
 
                 if (data.success) {
                     this.client = data.client;
+                    if (data.client.documents) {
+                        this.clientDocuments = data.client.documents;
+                    }
                     this.editing[section] = false;
                     this.resetForms();
                 } else {
@@ -1021,6 +1851,120 @@ function clientShow() {
             const now = new Date();
             const daysUntil = (expires - now) / (1000 * 60 * 60 * 24);
             return daysUntil > 0 && daysUntil <= 30;
+        },
+
+        canPreview(mimeType) {
+            if (!mimeType) return false;
+            return mimeType === 'application/pdf' || mimeType.startsWith('image/');
+        },
+
+        openPreview(doc) {
+            this.previewDoc = doc;
+            this.showPreview = true;
+        },
+
+        closePreview() {
+            this.showPreview = false;
+            this.previewDoc = null;
+        },
+
+        contactTypeLabel(type) {
+            const labels = {
+                phone: 'Телефон', email: 'Email', telegram: 'Telegram',
+                whatsapp: 'WhatsApp', viber: 'Viber', other: 'Другое',
+            };
+            return labels[type] || type;
+        },
+
+        statusBadgeClass(color) {
+            const map = {
+                emerald: 'bg-emerald-100 text-emerald-700',
+                red: 'bg-red-100 text-red-700',
+                amber: 'bg-amber-100 text-amber-700',
+                blue: 'bg-blue-100 text-blue-700',
+                violet: 'bg-violet-100 text-violet-700',
+                indigo: 'bg-indigo-100 text-indigo-700',
+                teal: 'bg-teal-100 text-teal-700',
+                rose: 'bg-rose-100 text-rose-700',
+                orange: 'bg-orange-100 text-orange-700',
+                cyan: 'bg-cyan-100 text-cyan-700',
+                slate: 'bg-slate-100 text-slate-600',
+            };
+            return map[color] || 'bg-slate-100 text-slate-600';
+        },
+
+        async uploadDocuments(files) {
+            if (!files || files.length === 0) return;
+            this.uploadingDocs = true;
+            const formData = new FormData();
+            for (const file of files) {
+                formData.append('files[]', file);
+            }
+            formData.append('_token', document.querySelector('meta[name="csrf-token"]').content);
+            try {
+                const response = await fetch(`/clients/${this.client.id}/documents`, {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json' },
+                    body: formData,
+                });
+                const data = await response.json();
+                if (data.success) {
+                    this.clientDocuments = data.documents;
+                } else {
+                    alert(data.error || 'Ошибка загрузки');
+                }
+            } catch (e) {
+                console.error(e);
+                alert('Ошибка загрузки файлов');
+            }
+            this.uploadingDocs = false;
+        },
+
+        async deleteDocument(docId) {
+            if (!confirm('Удалить документ?')) return;
+            try {
+                const response = await fetch(`/clients/${this.client.id}/documents/${docId}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Accept': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                    },
+                });
+                const data = await response.json();
+                if (data.success) {
+                    this.clientDocuments = this.clientDocuments.filter(d => d.id !== docId);
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        },
+
+        formatFileSize(bytes) {
+            if (!bytes) return '0 Б';
+            const k = 1024;
+            const sizes = ['Б', 'КБ', 'МБ', 'ГБ'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        },
+
+        docIcon(mimeType) {
+            if (!mimeType) return '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />';
+            if (mimeType === 'application/pdf') return '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />';
+            if (mimeType.startsWith('image/')) return '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />';
+            if (mimeType.includes('spreadsheet') || mimeType.includes('excel') || mimeType.includes('csv')) return '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />';
+            if (mimeType.includes('word') || mimeType.includes('document')) return '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />';
+            if (mimeType.includes('zip') || mimeType.includes('rar') || mimeType.includes('archive')) return '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />';
+            return '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />';
+        },
+
+        docIconColor(mimeType) {
+            if (!mimeType) return 'bg-slate-100 text-slate-500';
+            if (mimeType === 'application/pdf') return 'bg-red-100 text-red-500';
+            if (mimeType.startsWith('image/')) return 'bg-violet-100 text-violet-500';
+            if (mimeType.includes('spreadsheet') || mimeType.includes('excel') || mimeType.includes('csv')) return 'bg-green-100 text-green-600';
+            if (mimeType.includes('word') || mimeType.includes('document')) return 'bg-blue-100 text-blue-500';
+            if (mimeType.includes('zip') || mimeType.includes('rar') || mimeType.includes('archive')) return 'bg-amber-100 text-amber-600';
+            return 'bg-slate-100 text-slate-500';
         },
     };
 }

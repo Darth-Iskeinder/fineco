@@ -2,7 +2,7 @@
 @section('page-title', $pageTitle)
 
 @section('settings-content')
-<div x-data="lookupPage('{{ $baseEndpoint }}', @json($items))" class="space-y-4">
+<div x-data="lookupPage('{{ $baseEndpoint }}', {{ Illuminate\Support\Js::from($items) }})" class="space-y-4">
 
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
         <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">

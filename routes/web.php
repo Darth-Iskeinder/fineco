@@ -60,6 +60,8 @@ Route::middleware('auth:employee')->group(function () {
         Route::put('/{client}', [ClientController::class, 'update'])->name('update');
         Route::patch('/{client}', [ClientController::class, 'updateSection'])->name('update-section');
         Route::delete('/{client}', [ClientController::class, 'destroy'])->name('destroy');
+        Route::post('/{client}/documents', [ClientController::class, 'uploadDocument'])->name('documents.upload');
+        Route::delete('/{client}/documents/{document}', [ClientController::class, 'deleteDocument'])->name('documents.delete');
         Route::get('/{client}/estimate/edit', [EstimateController::class, 'edit'])->name('estimate.edit');
         Route::get('/{client}/estimate', [EstimateController::class, 'show'])->name('estimate.show');
         Route::post('/{client}/estimate', [EstimateController::class, 'save'])->name('estimate.save');
