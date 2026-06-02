@@ -25,7 +25,8 @@ $monthNames = ['', 'Январь', 'Февраль', 'Март', 'Апрель',
     {{ json_encode($estimate->updated_at?->format('d.m.Y H:i')) }},
     {{ json_encode($allServices) }},
     {{ $year }},
-    {{ $month }}
+    {{ $month }},
+    {{ json_encode($specialFlags) }}
 )">
 
     <!-- Хлебные крошки -->
@@ -103,109 +104,32 @@ $monthNames = ['', 'Январь', 'Февраль', 'Март', 'Апрель',
         @endif
 
         <!-- Блок: Услуги по тарифу (всегда постоянные) -->
-        <template x-if="tariffBPs.length > 0">
+        <template x-if="regularBPs.length > 0">
             <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
                 <div class="px-6 py-3 bg-slate-50 border-b border-slate-100 flex items-center gap-3">
                     <h2 class="text-sm font-semibold text-slate-600 uppercase tracking-wider">Услуги по тарифу</h2>
                     <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">Постоянные</span>
                 </div>
                 <div class="divide-y divide-slate-100">
-                    <template x-for="(bp, bpIdx) in tariffBPs" :key="bp.service_id">
-                        <div>
-                            <!-- Строка БП -->
-                            <div class="flex items-center gap-4 px-6 py-4"
-                                 :class="bp.enabled ? '' : 'opacity-50'">
-                                <!-- Toggle -->
-                                <button type="button" @click="bp.enabled = !bp.enabled"
-                                        class="toggle-btn flex-shrink-0 w-11 h-6 rounded-full relative"
-                                        :class="bp.enabled ? 'bg-indigo-600' : 'bg-slate-200'">
-                                    <span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200"
-                                          :style="bp.enabled ? 'transform: translateX(20px)' : ''"></span>
-                                </button>
-
-                                <div class="flex-1 min-w-0">
-                                    <div class="flex items-center gap-2">
-                                        <p class="text-sm font-medium text-slate-800" x-text="bp.name"></p>
-                                        <template x-if="bp.children.length > 0">
-                                            <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-500 flex-shrink-0">
-                                                <svg class="w-3 h-3 transition-transform duration-200" :class="bp.enabled ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                                                <span x-text="bp.children.length + ' подп.'"></span>
-                                            </span>
-                                        </template>
-                                    </div>
-                                    <p class="text-xs text-slate-400 mt-0.5" x-show="bp.periodicity" x-text="bp.periodicity"></p>
-                                </div>
-
-                                <template x-if="bp.allows_quantity && bp.enabled && !bp.children.some(c => c.enabled)">
-                                    <div class="flex items-center gap-1.5">
-                                        <span class="text-xs text-slate-500">Кол-во:</span>
-                                        <div class="flex items-center border border-slate-200 rounded-lg overflow-hidden">
-                                            <button type="button" @click="bp.quantity = Math.max(1, bp.quantity - 1)"
-                                                    class="px-2 py-1 text-slate-500 hover:bg-slate-100 text-sm leading-none select-none">−</button>
-                                            <span class="px-3 py-1 text-sm min-w-[2rem] text-center" x-text="bp.quantity"></span>
-                                            <button type="button" @click="bp.quantity++"
-                                                    class="px-2 py-1 text-slate-500 hover:bg-slate-100 text-sm leading-none select-none">+</button>
-                                        </div>
-                                    </div>
-                                </template>
-
-                                <div class="text-right flex-shrink-0">
-                                    <template x-if="bp.children.length === 0">
-                                        <span class="text-sm font-semibold text-slate-800" x-text="fmt(bp.cost * (bp.allows_quantity ? bp.quantity : 1))"></span>
-                                    </template>
-                                    <template x-if="bp.children.length > 0 && !bp.enabled">
-                                        <span class="text-sm font-semibold text-slate-400">—</span>
-                                    </template>
-                                    <template x-if="bp.children.length > 0 && bp.enabled && !bp.children.some(c => c.enabled)">
-                                        <span class="text-xs text-slate-400 italic">выберите подпункты</span>
-                                    </template>
-                                    <template x-if="bp.children.length > 0 && bp.enabled && bp.children.some(c => c.enabled)">
-                                        <span class="text-sm font-semibold text-slate-800" x-text="fmt(bpTotal(bp))"></span>
-                                    </template>
-                                </div>
-                            </div>
-
-                            <!-- Подпункты -->
-                            <template x-if="bp.enabled && bp.children.length > 0">
-                                <div class="bg-slate-50/60 border-t border-slate-100 pl-14 pr-6 py-2 space-y-1">
-                                    <template x-for="(child, cIdx) in bp.children" :key="child.service_id">
-                                        <div class="flex items-center gap-4 py-2"
-                                             :class="child.enabled ? '' : 'opacity-50'">
-                                            <button type="button" @click="child.enabled = !child.enabled"
-                                                    class="toggle-btn flex-shrink-0 w-9 h-5 rounded-full relative"
-                                                    :class="child.enabled ? 'bg-indigo-500' : 'bg-slate-200'">
-                                                <span class="absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200"
-                                                      :style="child.enabled ? 'transform: translateX(16px)' : ''"></span>
-                                            </button>
-
-                                            <div class="flex-1 min-w-0">
-                                                <p class="text-sm text-slate-700" x-text="child.name"></p>
-                                                <p class="text-xs text-slate-400" x-show="child.periodicity" x-text="child.periodicity"></p>
-                                            </div>
-
-                                            <template x-if="child.allows_quantity && child.enabled">
-                                                <div class="flex items-center gap-1.5">
-                                                    <span class="text-xs text-slate-500">Кол-во:</span>
-                                                    <div class="flex items-center border border-slate-200 rounded-lg overflow-hidden">
-                                                        <button type="button" @click="child.quantity = Math.max(1, child.quantity - 1)"
-                                                                class="px-2 py-1 text-slate-500 hover:bg-slate-100 text-sm leading-none select-none">−</button>
-                                                        <span class="px-3 py-1 text-sm min-w-[2rem] text-center" x-text="child.quantity"></span>
-                                                        <button type="button" @click="child.quantity++"
-                                                                class="px-2 py-1 text-slate-500 hover:bg-slate-100 text-sm leading-none select-none">+</button>
-                                                    </div>
-                                                </div>
-                                            </template>
-
-                                            <span class="text-sm text-slate-600 flex-shrink-0"
-                                                  x-text="fmt(child.cost * (child.allows_quantity ? child.quantity : 1))"></span>
-                                        </div>
-                                    </template>
-                                </div>
-                            </template>
-                        </div>
-                    </template>
+                    @include('clients.partials.estimate-bp-rows', ['list' => 'regularBPs'])
                 </div>
             </div>
+        </template>
+
+        <!-- Блоки: БП по особым условиям клиента (ПВТ, ПКИ, Маркетплейсы, ...) -->
+        <template x-for="f in specialFlags" :key="f.key">
+            <template x-if="flagBPs(f.key).length > 0">
+                <div class="bg-white rounded-2xl shadow-sm border overflow-hidden" :class="'border-' + f.color + '-200'">
+                    <div class="px-6 py-3 border-b flex items-center gap-3" :class="'bg-' + f.color + '-50 border-' + f.color + '-100'">
+                        <h2 class="text-sm font-semibold uppercase tracking-wider" :class="'text-' + f.color + '-700'" x-text="f.label"></h2>
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" :class="'bg-' + f.color + '-100 text-' + f.color + '-700'">Постоянные</span>
+                        <span class="text-xs" :class="'text-' + f.color + '-500'" x-text="'подтянуто по условию: ' + f.label"></span>
+                    </div>
+                    <div class="divide-y divide-slate-100">
+                        @include('clients.partials.estimate-bp-rows', ['list' => 'flagBPs(f.key)'])
+                    </div>
+                </div>
+            </template>
         </template>
 
         <template x-if="tariffBPs.length === 0">
@@ -444,7 +368,7 @@ $monthNames = ['', 'Январь', 'Февраль', 'Март', 'Апрель',
 </div>
 
 <script>
-function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedAt, allServices, year, month) {
+function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedAt, allServices, year, month, specialFlags) {
     return {
         clientId,
         tariffBPs,
@@ -452,6 +376,7 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
         notes: initialNotes,
         updatedAt: initialUpdatedAt,
         allServices,
+        specialFlags,
         year,
         month,
 
@@ -514,6 +439,16 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
             const child = (extra.children || []).find(c => c.service_id === childServiceId);
             if (child) child.quantity = parseInt(val) || 1;
         },
+
+        // Первое (по порядку конфига) условие, которым помечен БП, иначе null
+        primaryFlag(bp) {
+            for (const f of this.specialFlags) {
+                if (bp[f.key]) return f.key;
+            }
+            return null;
+        },
+        get regularBPs() { return this.tariffBPs.filter(bp => !this.primaryFlag(bp)); },
+        flagBPs(key) { return this.tariffBPs.filter(bp => this.primaryFlag(bp) === key); },
 
         bpTotal(bp) {
             if (!bp.enabled) return 0;

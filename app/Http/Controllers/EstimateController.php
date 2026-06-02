@@ -48,46 +48,78 @@ class EstimateController extends Controller
             ->filter(fn($c) => $c->service_id !== null)
             ->keyBy('service_id');
 
+        $clientTaxSystemId = $client->tax_system_id;
+
+        // БП применим к клиенту по режиму налогообложения
+        $matchesTaxSystem = fn($s) => !$clientTaxSystemId                  // у клиента не задан РН — показываем всё
+            || $s->taxSystems->isEmpty()                                   // у БП ещё нет РН — показываем (обратная совмест.)
+            || $s->taxSystems->contains('id', $clientTaxSystemId);         // РН клиента совпадает
+
+        $flagKeys = array_keys(Service::SPECIAL_FLAGS);
+
+        // Сборка структуры БП с состоянием тоглов
+        $buildBpData = function ($bp) use ($isFirstLoad, $savedByServiceId, $savedChildByServiceId, $flagKeys) {
+            $savedItem = $savedByServiceId->get($bp->id);
+            $bpData = [
+                'service_id'     => $bp->id,
+                'name'           => $bp->name,
+                'cost'           => (float) $bp->cost,
+                'periodicity'    => $bp->periodicity ?? '',
+                'allows_quantity'=> $bp->allows_quantity,
+                'enabled'        => $isFirstLoad ? true : $savedByServiceId->has($bp->id),
+                'quantity'       => $savedItem ? (int) $savedItem->quantity : 1,
+                'children'       => [],
+            ];
+
+            foreach ($flagKeys as $fk) {
+                $bpData[$fk] = (bool) $bp->$fk;
+            }
+
+            foreach ($bp->children as $child) {
+                $savedChild = $savedChildByServiceId->get($child->id);
+                $bpData['children'][] = [
+                    'service_id'     => $child->id,
+                    'name'           => $child->name,
+                    'cost'           => (float) $child->cost,
+                    'periodicity'    => $child->periodicity ?? '',
+                    'allows_quantity'=> $child->allows_quantity,
+                    'enabled'        => $isFirstLoad ? false : $savedChildByServiceId->has($child->id),
+                    'quantity'       => $savedChild ? (int) $savedChild->quantity : 1,
+                ];
+            }
+
+            return $bpData;
+        };
+
         // Build tariff BPs with toggle state
         $tariffBPs = [];
+        $includedServiceIds = [];
         if ($client->tariff_id) {
-            $clientTaxSystemId = $client->tax_system_id;
             $rootServices = $client->tariff->services
-                ->filter(fn($s) => !$s->parent_id
-                    && (
-                        !$clientTaxSystemId                              // у клиента не задан РН — показываем всё
-                        || $s->taxSystems->isEmpty()                     // у БП ещё нет РН — показываем (обратная совмест.)
-                        || $s->taxSystems->contains('id', $clientTaxSystemId) // РН клиента совпадает
-                    ))
+                ->filter(fn($s) => !$s->parent_id && $matchesTaxSystem($s))
                 ->values();
 
             foreach ($rootServices as $bp) {
-                $savedItem = $savedByServiceId->get($bp->id);
-                $bpData = [
-                    'service_id'     => $bp->id,
-                    'name'           => $bp->name,
-                    'cost'           => (float) $bp->cost,
-                    'periodicity'    => $bp->periodicity ?? '',
-                    'allows_quantity'=> $bp->allows_quantity,
-                    'enabled'        => $isFirstLoad ? true : $savedByServiceId->has($bp->id),
-                    'quantity'       => $savedItem ? (int) $savedItem->quantity : 1,
-                    'children'       => [],
-                ];
+                $tariffBPs[] = $buildBpData($bp);
+                $includedServiceIds[$bp->id] = true;
+            }
+        }
 
-                foreach ($bp->children as $child) {
-                    $savedChild = $savedChildByServiceId->get($child->id);
-                    $bpData['children'][] = [
-                        'service_id'     => $child->id,
-                        'name'           => $child->name,
-                        'cost'           => (float) $child->cost,
-                        'periodicity'    => $child->periodicity ?? '',
-                        'allows_quantity'=> $child->allows_quantity,
-                        'enabled'        => $isFirstLoad ? false : $savedChildByServiceId->has($child->id),
-                        'quantity'       => $savedChild ? (int) $savedChild->quantity : 1,
-                    ];
-                }
+        // БП по особым условиям: для каждого условия, включённого у клиента, подтягиваем
+        // помеченные этим условием активные БП, которые ещё не добавлены. Без РН-фильтра.
+        foreach (Service::SPECIAL_FLAGS as $col => $cfg) {
+            if (!$client->{$cfg['client']}) {
+                continue;
+            }
 
-                $tariffBPs[] = $bpData;
+            $flagServices = Service::with('children')
+                ->roots()->active()->where($col, true)->ordered()->get()
+                ->filter(fn($s) => !isset($includedServiceIds[$s->id]))
+                ->values();
+
+            foreach ($flagServices as $bp) {
+                $tariffBPs[] = $buildBpData($bp);
+                $includedServiceIds[$bp->id] = true;
             }
         }
 
@@ -142,8 +174,10 @@ class EstimateController extends Controller
                 ])->values()->toArray(),
             ])->values()->toArray();
 
+        $specialFlags = Service::specialFlagsList();
+
         return view('clients.estimate', compact(
-            'client', 'estimate', 'tariffBPs', 'extras', 'allServices',
+            'client', 'estimate', 'tariffBPs', 'extras', 'allServices', 'specialFlags',
             'year', 'month', 'prevYear', 'prevMonth', 'hasPrevious', 'estimateHasItems'
         ));
     }

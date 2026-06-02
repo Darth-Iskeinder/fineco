@@ -126,6 +126,7 @@ class SettingsController extends Controller
         return view('settings.services', [
             'taxSystems' => TaxSystem::ordered()->get(),
             'services' => Service::with(['taxSystems', 'children'])->roots()->ordered()->get(),
+            'specialFlags' => Service::specialFlagsList(),
         ]);
     }
 
@@ -416,7 +417,7 @@ class SettingsController extends Controller
         // Новый бизнес-процесс ставим в начало списка (сортировка по sort_order ASC)
         $minSortOrder = (int) Service::roots()->min('sort_order');
 
-        $service = Service::create([
+        $service = Service::create(array_merge([
             'name'               => $request->name,
             'description'        => $request->description,
             'sphere'             => $request->sphere ?: null,
@@ -436,7 +437,7 @@ class SettingsController extends Controller
             'is_active'          => true,
             'allows_quantity'    => $request->boolean('allows_quantity', false),
             'sort_order'         => $request->input('sort_order', $minSortOrder - 1),
-        ]);
+        ], $this->serviceFlagValues($request)));
 
         $service->taxSystems()->sync($request->input('tax_systems', []));
 
@@ -493,7 +494,7 @@ class SettingsController extends Controller
             'children.*.allows_quantity'    => 'boolean',
         ]);
 
-        $service->update([
+        $service->update(array_merge([
             'name'               => $request->name,
             'description'        => $request->description,
             'sphere'             => $request->sphere ?: null,
@@ -512,7 +513,7 @@ class SettingsController extends Controller
             'comment'            => $request->comment ?: null,
             'allows_quantity'    => $request->boolean('allows_quantity', false),
             'sort_order'         => $request->input('sort_order', $service->sort_order),
-        ]);
+        ], $this->serviceFlagValues($request)));
 
         $service->taxSystems()->sync($request->input('tax_systems', []));
 
@@ -565,9 +566,29 @@ class SettingsController extends Controller
         ]);
     }
 
+    /** Значения флагов условий для сохранения (по конфигу Service::SPECIAL_FLAGS). */
+    private function serviceFlagValues(Request $request): array
+    {
+        $values = [];
+        foreach (array_keys(Service::SPECIAL_FLAGS) as $col) {
+            $values[$col] = $request->boolean($col, false);
+        }
+        return $values;
+    }
+
+    /** Значения флагов условий для JSON-ответа. */
+    private function serviceFlagsForJson(Service $service): array
+    {
+        $values = [];
+        foreach (array_keys(Service::SPECIAL_FLAGS) as $col) {
+            $values[$col] = (bool) $service->{$col};
+        }
+        return $values;
+    }
+
     private function formatServiceForJson(Service $service): array
     {
-        return [
+        return array_merge([
             'id'              => $service->id,
             'parent_id'       => $service->parent_id,
             'tax_systems'     => $service->taxSystems->map(fn($ts) => [
@@ -595,7 +616,7 @@ class SettingsController extends Controller
                 'sort_order'      => $c->sort_order,
                 'children'        => [],
             ])->values(),
-        ];
+        ], $this->serviceFlagsForJson($service));
     }
 
     // =============================================

@@ -411,6 +411,19 @@
                                     <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="client.has_alcohol ? 'bg-rose-500' : 'bg-slate-300'"></span>
                                     Алкоголь / ГосАлко
                                 </span>
+                                <template x-for="opt in [
+                                    { key: 'has_insurance_policy', label: 'ИП страховой полис' },
+                                    { key: 'has_mbt', label: 'МБТ' },
+                                    { key: 'has_crypto_exchange', label: 'Криптообменник' },
+                                    { key: 'has_payment_aggregators', label: 'Платёжные агрегаторы' },
+                                    { key: 'has_production', label: 'Производство' },
+                                    { key: 'has_management_report', label: 'Управленческий отчёт' },
+                                ]" :key="opt.key">
+                                    <span x-show="client[opt.key]" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border bg-indigo-50 text-indigo-700 border-indigo-200">
+                                        <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-indigo-500"></span>
+                                        <span x-text="opt.label"></span>
+                                    </span>
+                                </template>
                             </div>
                             <!-- Оператор ЭДО -->
                             <template x-if="client.edo_operator">
@@ -584,6 +597,27 @@
                                         </div>
                                         <p :class="form.flags.has_alcohol ? 'text-rose-700' : 'text-slate-500'" class="text-xs font-medium leading-tight">Алкоголь</p>
                                     </div>
+                                </div>
+                            </div>
+
+                            <!-- Прочие условия (компактные тоглы) -->
+                            <div class="pt-3 border-t border-slate-100">
+                                <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Прочие условия</p>
+                                <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                                    <template x-for="opt in [
+                                        { key: 'has_insurance_policy', label: 'ИП страховой полис' },
+                                        { key: 'has_mbt', label: 'МБТ' },
+                                        { key: 'has_crypto_exchange', label: 'Криптообменник' },
+                                        { key: 'has_payment_aggregators', label: 'Платёжные агрегаторы' },
+                                        { key: 'has_production', label: 'Производство' },
+                                        { key: 'has_management_report', label: 'Управленческий отчёт' },
+                                    ]" :key="opt.key">
+                                        <label class="flex items-center gap-2 cursor-pointer px-2.5 py-1.5 rounded-lg border text-sm transition-colors select-none"
+                                               :class="form.flags[opt.key] ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-slate-200 hover:bg-slate-50'">
+                                            <input type="checkbox" x-model="form.flags[opt.key]" class="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500">
+                                            <span class="text-slate-700 leading-tight" x-text="opt.label"></span>
+                                        </label>
+                                    </template>
                                 </div>
                             </div>
 
@@ -1747,6 +1781,12 @@ function clientShow() {
                 pvt_mode: this.client.pvt_mode || false,
                 pki_mode: this.client.pki_mode || false,
                 has_alcohol: this.client.has_alcohol || false,
+                has_insurance_policy: this.client.has_insurance_policy || false,
+                has_mbt: this.client.has_mbt || false,
+                has_crypto_exchange: this.client.has_crypto_exchange || false,
+                has_payment_aggregators: this.client.has_payment_aggregators || false,
+                has_production: this.client.has_production || false,
+                has_management_report: this.client.has_management_report || false,
                 edo_operator: this.client.edo_operator || '',
             };
             this.form.contacts_info = {

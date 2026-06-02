@@ -3,7 +3,8 @@
 
 @section('settings-content')
 @php
-$servicesJson = $services->map(fn($s) => [
+$flagKeys = array_keys(\App\Models\Service::SPECIAL_FLAGS);
+$servicesJson = $services->map(fn($s) => array_merge([
     'id'              => $s->id,
     'parent_id'       => $s->parent_id,
     'tax_systems'     => $s->taxSystems->map(fn($ts) => ['id' => $ts->id, 'name' => $ts->name])->values(),
@@ -38,7 +39,7 @@ $servicesJson = $services->map(fn($s) => [
         'sort_order'      => $c->sort_order,
         'children'        => [],
     ])->values(),
-]);
+], collect($flagKeys)->mapWithKeys(fn($k) => [$k => (bool) $s->$k])->all()))->values();
 @endphp
 
 <div x-data="servicesPage()" class="space-y-4">
@@ -117,6 +118,9 @@ $servicesJson = $services->map(fn($s) => [
                             <td class="px-4 py-3 text-sm font-semibold text-slate-900 whitespace-nowrap">
                                 <span x-text="row.svc.name"></span>
                                 <span x-show="row.svc.allows_quantity" class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">кол-во</span>
+                                <template x-for="f in specialFlags" :key="f.key">
+                                    <span x-show="row.svc[f.key]" class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium" :class="'bg-' + f.color + '-100 text-' + f.color + '-700'" x-text="f.label"></span>
+                                </template>
                             </td>
                             <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="row.svc.sphere || '—'"></td>
                             <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="row.svc.service_group || '—'"></td>
@@ -269,10 +273,10 @@ $servicesJson = $services->map(fn($s) => [
                                     <div>
                                         <label class="block text-sm font-medium text-slate-700 mb-1">
                                             Стоимость (сом)
-                                            <span x-show="!serviceForm.use_tiered_pricing" class="text-red-500">*</span>
+                                            <span class="text-red-500">*</span>
                                         </label>
-                                        <input type="number" x-model="serviceForm.cost" :required="!serviceForm.use_tiered_pricing" :disabled="serviceForm.use_tiered_pricing" min="0"
-                                               class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed">
+                                        <input type="number" x-model="serviceForm.cost" required min="0"
+                                               class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
                                     </div>
                                 </template>
                                 <template x-if="serviceForm.children.length > 0">
@@ -333,37 +337,21 @@ $servicesJson = $services->map(fn($s) => [
                                         <input type="checkbox" x-model="serviceForm.allows_quantity" class="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500">
                                         <span class="text-sm font-medium text-slate-700">Можно указывать количество <span class="text-slate-400 font-normal">(напр. кол-во операций)</span></span>
                                     </label>
-                                    <label class="flex items-center gap-2 cursor-pointer">
-                                        <input type="checkbox" x-model="serviceForm.use_tiered_pricing" class="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500">
-                                        <span class="text-sm font-medium text-slate-700">Ступенчатая цена</span>
-                                    </label>
                                 </div>
                             </template>
 
-                            <template x-if="serviceForm.use_tiered_pricing">
-                                <div class="border border-indigo-200 rounded-xl p-3 bg-indigo-50/30 space-y-2">
-                                    <div class="flex items-center justify-between">
-                                        <span class="text-xs font-semibold text-slate-600 uppercase tracking-wide">Ступени цен</span>
-                                        <button type="button" @click="addPricingRule()" class="inline-flex items-center text-xs text-indigo-600 hover:text-indigo-800 font-medium">
-                                            <svg class="w-3.5 h-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-                                            Добавить ступень
-                                        </button>
+                            <template x-if="!serviceForm.parent_id">
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Особые условия</label>
+                                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                                        <template x-for="f in specialFlags" :key="f.key">
+                                            <label class="flex items-center gap-2 cursor-pointer px-2.5 py-1.5 rounded-lg border text-sm transition-colors select-none"
+                                                   :class="serviceForm.flags[f.key] ? ('bg-' + f.color + '-50 border-' + f.color + '-200') : 'bg-white border-slate-200 hover:bg-slate-50'">
+                                                <input type="checkbox" x-model="serviceForm.flags[f.key]" class="w-4 h-4 border-slate-300 rounded" :class="'text-' + f.color + '-600 focus:ring-' + f.color + '-500'">
+                                                <span class="text-slate-700 leading-tight" x-text="f.label"></span>
+                                            </label>
+                                        </template>
                                     </div>
-                                    <template x-if="serviceForm.pricing_rules.length === 0">
-                                        <p class="text-xs text-slate-400 py-1">Добавьте хотя бы одну ступень цены</p>
-                                    </template>
-                                    <template x-for="(rule, ridx) in serviceForm.pricing_rules" :key="ridx">
-                                        <div class="flex items-center gap-2">
-                                            <span class="text-xs text-slate-500 whitespace-nowrap">До</span>
-                                            <input type="number" x-model.number="rule.max_qty" min="1" placeholder="кол-во" class="w-24 px-2 py-1.5 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                                            <span class="text-xs text-slate-500 whitespace-nowrap">шт. =</span>
-                                            <input type="number" x-model.number="rule.price" min="0" placeholder="цена" class="flex-1 px-2 py-1.5 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                                            <span class="text-xs text-slate-500">сом</span>
-                                            <button type="button" @click="serviceForm.pricing_rules.splice(ridx, 1)" class="p-1 text-slate-300 hover:text-red-500 transition-colors rounded">
-                                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                                            </button>
-                                        </div>
-                                    </template>
                                 </div>
                             </template>
 
@@ -482,6 +470,7 @@ function servicesPage() {
     return {
         services: @json($servicesJson),
         taxSystems: @json($taxSystems),
+        specialFlags: @json($specialFlags),
         selectedRowId: null,
 
         sphereFilter: '',
@@ -537,7 +526,18 @@ function servicesPage() {
             cost: 0, pricing_rules: [], use_tiered_pricing: false,
             periodicity: '', due_day: null, deadline_days: null, execution_minutes: null,
             closing_rule: '', check_type: '', billing: '', comment: '',
-            allows_quantity: false, children: [],
+            allows_quantity: false, flags: {}, children: [],
+        },
+
+        blankFlags() {
+            const o = {};
+            this.specialFlags.forEach(f => o[f.key] = false);
+            return o;
+        },
+        flagsFromSvc(svc) {
+            const o = {};
+            this.specialFlags.forEach(f => o[f.key] = !!svc[f.key]);
+            return o;
         },
 
         showDeleteModal: false,
@@ -562,6 +562,7 @@ function servicesPage() {
                     closing_rule: svc.closing_rule || '', check_type: svc.check_type || '',
                     billing: svc.billing || '', comment: svc.comment || '',
                     allows_quantity: svc.allows_quantity || false,
+                    flags: this.flagsFromSvc(svc),
                     children: (svc.children || []).map(c => ({ id: c.id, name: c.name, cost: c.cost, periodicity: c.periodicity || '', allows_quantity: c.allows_quantity || false })),
                 };
             } else {
@@ -571,7 +572,7 @@ function servicesPage() {
                     cost: 0, pricing_rules: [], use_tiered_pricing: false,
                     periodicity: '', due_day: null, deadline_days: null, execution_minutes: null,
                     closing_rule: '', check_type: '', billing: '', comment: '',
-                    allows_quantity: false, children: [],
+                    allows_quantity: false, flags: this.blankFlags(), children: [],
                 };
             }
             this.showServiceModal = true;
@@ -602,11 +603,14 @@ function servicesPage() {
             }
             this.savingService = true;
             const url = this.serviceForm.id ? `/settings/services/${this.serviceForm.id}` : '/settings/services';
+            // Флаги условий выравниваем в плоский payload (is_pvt, is_marketplaces, ...)
+            const { flags, ...rest } = this.serviceForm;
+            const payload = { ...rest, ...flags };
             try {
                 const r = await fetch(url, {
                     method: this.serviceForm.id ? 'PUT' : 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content, 'Accept': 'application/json' },
-                    body: JSON.stringify(this.serviceForm),
+                    body: JSON.stringify(payload),
                 });
                 const d = await r.json();
                 if (d.success) {

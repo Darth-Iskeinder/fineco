@@ -215,6 +215,12 @@ class ClientController extends Controller
                 'pvt_mode' => ['boolean'],
                 'pki_mode' => ['boolean'],
                 'has_alcohol' => ['boolean'],
+                'has_insurance_policy' => ['boolean'],
+                'has_mbt' => ['boolean'],
+                'has_crypto_exchange' => ['boolean'],
+                'has_payment_aggregators' => ['boolean'],
+                'has_production' => ['boolean'],
+                'has_management_report' => ['boolean'],
                 'edo_operator' => ['nullable', 'string', 'max:255'],
             ],
             'contacts_info' => [
