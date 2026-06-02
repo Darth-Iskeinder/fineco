@@ -115,7 +115,7 @@ class ClientController extends Controller
     {
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
-            'inn' => ['required', 'string', 'regex:/^\d{10}(\d{2})?$/', Rule::unique('clients')->ignore($client->id)],
+            'inn' => ['required', 'string', 'digits:14', Rule::unique('clients')->ignore($client->id)],
             'tax_system_id' => ['nullable', 'exists:tax_systems,id'],
             'tariff_id' => ['nullable', 'exists:tariffs,id'],
             'is_active' => ['boolean'],
@@ -124,7 +124,7 @@ class ClientController extends Controller
             'employees.*' => ['exists:employees,id'],
         ], [
             'inn.required' => 'Введите ИНН',
-            'inn.regex' => 'ИНН должен содержать 10 или 12 цифр',
+            'inn.digits' => 'ИНН должен содержать 14 цифр',
             'inn.unique' => 'Клиент с таким ИНН уже существует',
         ]);
 
@@ -179,7 +179,8 @@ class ClientController extends Controller
                 'employees.*' => ['exists:employees,id'],
             ],
             'attorney' => [
-                'power_of_attorney_name' => ['nullable', 'string', 'max:255'],
+                'power_of_attorney_name' => ['nullable', 'array'],
+                'power_of_attorney_name.*' => ['string', 'max:255'],
                 'power_of_attorney_expires' => ['nullable', 'date'],
             ],
             'eds' => [

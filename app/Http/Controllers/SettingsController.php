@@ -125,8 +125,7 @@ class SettingsController extends Controller
     {
         return view('settings.services', [
             'taxSystems' => TaxSystem::ordered()->get(),
-            'tariffs' => Tariff::ordered()->get(),
-            'services' => Service::with(['tariffs', 'taxSystems', 'children.tariffs'])->roots()->ordered()->get(),
+            'services' => Service::with(['taxSystems', 'children'])->roots()->ordered()->get(),
         ]);
     }
 
@@ -403,11 +402,7 @@ class SettingsController extends Controller
             'billing'                       => 'nullable|string|max:255',
             'comment'                       => 'nullable|string',
             'allows_quantity'               => 'boolean',
-            'sort_order'                    => 'integer|min:0',
-            'tariffs'                       => 'required|array|min:1',
-            'tariffs.*.id'                  => 'required|exists:tariffs,id',
-            'tariffs.*.free_limit'          => 'nullable|integer|min:0',
-            'tariffs.*.price_override'      => 'nullable|numeric|min:0',
+            'sort_order'                    => 'integer',
             'pricing_rules'                 => 'nullable|array',
             'pricing_rules.*.max_qty'       => 'required|integer|min:1',
             'pricing_rules.*.price'         => 'required|numeric|min:0',
@@ -417,6 +412,9 @@ class SettingsController extends Controller
             'children.*.periodicity'        => 'nullable|string|max:100',
             'children.*.allows_quantity'    => 'boolean',
         ]);
+
+        // Новый бизнес-процесс ставим в начало списка (сортировка по sort_order ASC)
+        $minSortOrder = (int) Service::roots()->min('sort_order');
 
         $service = Service::create([
             'name'               => $request->name,
@@ -437,10 +435,9 @@ class SettingsController extends Controller
             'comment'            => $request->comment ?: null,
             'is_active'          => true,
             'allows_quantity'    => $request->boolean('allows_quantity', false),
-            'sort_order'         => $request->input('sort_order', 0),
+            'sort_order'         => $request->input('sort_order', $minSortOrder - 1),
         ]);
 
-        $service->tariffs()->sync($this->buildTariffSyncData($request->input('tariffs', [])));
         $service->taxSystems()->sync($request->input('tax_systems', []));
 
         foreach ($request->input('children', []) as $idx => $childData) {
@@ -454,7 +451,7 @@ class SettingsController extends Controller
             ]);
         }
 
-        $service->load(['tariffs', 'taxSystems', 'children']);
+        $service->load(['taxSystems', 'children']);
 
         return response()->json([
             'success' => true,
@@ -485,10 +482,6 @@ class SettingsController extends Controller
             'comment'                       => 'nullable|string',
             'allows_quantity'               => 'boolean',
             'sort_order'                    => 'integer|min:0',
-            'tariffs'                       => 'required|array|min:1',
-            'tariffs.*.id'                  => 'required|exists:tariffs,id',
-            'tariffs.*.free_limit'          => 'nullable|integer|min:0',
-            'tariffs.*.price_override'      => 'nullable|numeric|min:0',
             'pricing_rules'                 => 'nullable|array',
             'pricing_rules.*.max_qty'       => 'required|integer|min:1',
             'pricing_rules.*.price'         => 'required|numeric|min:0',
@@ -521,7 +514,6 @@ class SettingsController extends Controller
             'sort_order'         => $request->input('sort_order', $service->sort_order),
         ]);
 
-        $service->tariffs()->sync($this->buildTariffSyncData($request->input('tariffs', [])));
         $service->taxSystems()->sync($request->input('tax_systems', []));
 
         // Sync children: keep those with id, create new, delete removed
@@ -551,7 +543,7 @@ class SettingsController extends Controller
             }
         }
 
-        $service->load(['tariffs', 'taxSystems', 'children']);
+        $service->load(['taxSystems', 'children']);
 
         return response()->json([
             'success' => true,
@@ -573,20 +565,6 @@ class SettingsController extends Controller
         ]);
     }
 
-    private function buildTariffSyncData(array $tariffs): array
-    {
-        $sync = [];
-        foreach ($tariffs as $t) {
-            $sync[$t['id']] = [
-                'free_limit'     => (int) ($t['free_limit'] ?? 0),
-                'price_override' => isset($t['price_override']) && $t['price_override'] !== ''
-                                        ? (float) $t['price_override']
-                                        : null,
-            ];
-        }
-        return $sync;
-    }
-
     private function formatServiceForJson(Service $service): array
     {
         return [
@@ -605,12 +583,6 @@ class SettingsController extends Controller
             'is_active'       => $service->is_active,
             'allows_quantity' => $service->allows_quantity,
             'sort_order'      => $service->sort_order,
-            'tariffs'         => $service->tariffs->map(fn($t) => [
-                'id'             => $t->id,
-                'name'           => $t->name,
-                'free_limit'     => (int) $t->pivot->free_limit,
-                'price_override' => $t->pivot->price_override !== null ? (float) $t->pivot->price_override : null,
-            ])->values(),
             'children'        => $service->children->map(fn($c) => [
                 'id'              => $c->id,
                 'parent_id'       => $c->parent_id,
@@ -621,7 +593,6 @@ class SettingsController extends Controller
                 'is_active'       => $c->is_active,
                 'allows_quantity' => $c->allows_quantity,
                 'sort_order'      => $c->sort_order,
-                'tariffs'         => [],
                 'children'        => [],
             ])->values(),
         ];

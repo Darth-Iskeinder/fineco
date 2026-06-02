@@ -26,12 +26,6 @@ $servicesJson = $services->map(fn($s) => [
     'is_active'         => $s->is_active,
     'allows_quantity'   => $s->allows_quantity,
     'sort_order'        => $s->sort_order,
-    'tariffs'         => $s->tariffs->map(fn($t) => [
-        'id'             => $t->id,
-        'name'           => $t->name,
-        'free_limit'     => (int) $t->pivot->free_limit,
-        'price_override' => $t->pivot->price_override !== null ? (float) $t->pivot->price_override : null,
-    ])->values(),
     'children'        => $s->children->map(fn($c) => [
         'id'              => $c->id,
         'parent_id'       => $c->parent_id,
@@ -42,7 +36,6 @@ $servicesJson = $services->map(fn($s) => [
         'is_active'       => $c->is_active,
         'allows_quantity' => $c->allows_quantity,
         'sort_order'      => $c->sort_order,
-        'tariffs'         => [],
         'children'        => [],
     ])->values(),
 ]);
@@ -61,9 +54,35 @@ $servicesJson = $services->map(fn($s) => [
                 Добавить БП
             </button>
         </div>
-        <div class="overflow-x-auto">
+        <div class="px-6 py-3 border-b border-slate-100 flex flex-wrap items-center gap-4 bg-slate-50/40">
+            <div class="relative">
+                <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 pointer-events-none">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z"/></svg>
+                </span>
+                <input type="text" x-model="searchQuery" placeholder="Поиск по бизнес-процессам…"
+                       class="w-64 pl-9 pr-8 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                <button x-show="searchQuery" @click="searchQuery = ''" class="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-600">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div class="flex items-center gap-2">
+                <label class="text-sm text-slate-600">Сфера:</label>
+                <select x-model="sphereFilter" class="px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                    <option value="">Все сферы</option>
+                    <template x-for="sph in sphereOptions" :key="sph">
+                        <option :value="sph" x-text="sph"></option>
+                    </template>
+                </select>
+            </div>
+            <label class="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
+                <input type="checkbox" x-model="groupBySphere" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/20">
+                Группировать по сферам
+            </label>
+            <span class="text-xs text-slate-400" x-show="sphereFilter || searchQuery.trim()" x-text="visibleServices.length + ' из ' + services.length"></span>
+        </div>
+        <div class="overflow-auto" style="max-height: calc(100vh - 13rem);">
             <table class="min-w-full divide-y divide-slate-200">
-                <thead class="bg-slate-50">
+                <thead class="bg-slate-50 sticky top-0 z-10 [&_th]:bg-slate-50">
                     <tr>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Бизнес процесс</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Сфера</th>
@@ -71,7 +90,6 @@ $servicesJson = $services->map(fn($s) => [
                         {{-- TODO: колонка "Бизнес процесс" (поле business_process) удалена — дублировала "Название", рассмотреть удаление поля из таблицы --}}
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Категория</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Режим НО</th>
-                        {{-- TODO: колонка "Тарифы" скрыта — возможно не нужна в таблице БП, рассмотреть удаление связи tariffs из services --}}
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Периодичность</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Дедлайн (дн.)</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">План (мин.)</th>
@@ -83,50 +101,61 @@ $servicesJson = $services->map(fn($s) => [
                         <th class="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Действия</th>
                     </tr>
                 </thead>
-                <template x-for="svc in services" :key="svc.id">
+                <template x-for="row in displayRows" :key="row.key">
                     <tbody class="bg-white divide-y divide-slate-100">
-                        <tr class="hover:bg-slate-50">
-                            <td class="px-4 py-3 text-sm font-semibold text-slate-900 whitespace-nowrap">
-                                <span x-text="svc.name"></span>
-                                <span x-show="svc.allows_quantity" class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">кол-во</span>
+                        <tr x-show="row.type === 'header'" class="bg-slate-100/70">
+                            <td colspan="13" class="px-4 py-2 text-sm font-semibold text-slate-700">
+                                <span x-text="row.sphere"></span>
+                                <span class="ml-1 font-normal text-slate-400" x-text="'(' + row.count + ')'"></span>
                             </td>
-                            <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="svc.sphere || '—'"></td>
-                            <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="svc.service_group || '—'"></td>
+                        </tr>
+
+                        <tr x-show="row.type === 'service'"
+                            @click="selectedRowId = (selectedRowId === 's' + row.svc.id ? null : 's' + row.svc.id)"
+                            :class="selectedRowId === 's' + row.svc.id ? 'bg-indigo-50/70 ring-1 ring-inset ring-indigo-200' : 'hover:bg-slate-50'"
+                            class="cursor-pointer">
+                            <td class="px-4 py-3 text-sm font-semibold text-slate-900 whitespace-nowrap">
+                                <span x-text="row.svc.name"></span>
+                                <span x-show="row.svc.allows_quantity" class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">кол-во</span>
+                            </td>
+                            <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="row.svc.sphere || '—'"></td>
+                            <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="row.svc.service_group || '—'"></td>
                             {{-- TODO: ячейка "Бизнес процесс" (поле business_process) удалена — дублировала "Название", рассмотреть удаление поля из таблицы --}}
-                            <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="svc.category || '—'"></td>
+                            <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="row.svc.category || '—'"></td>
                             <td class="px-4 py-3 text-sm text-slate-600">
                                 <div class="flex flex-wrap gap-1">
-                                    <template x-if="svc.tax_systems && svc.tax_systems.length > 0">
-                                        <template x-for="ts in svc.tax_systems" :key="ts.id">
+                                    <template x-if="row.svc.tax_systems && row.svc.tax_systems.length > 0">
+                                        <template x-for="ts in row.svc.tax_systems" :key="ts.id">
                                             <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700" x-text="ts.name"></span>
                                         </template>
                                     </template>
-                                    <template x-if="!svc.tax_systems || svc.tax_systems.length === 0"><span class="text-slate-400">—</span></template>
+                                    <template x-if="!row.svc.tax_systems || row.svc.tax_systems.length === 0"><span class="text-slate-400">—</span></template>
                                 </div>
                             </td>
-                            {{-- TODO: ячейка тарифов скрыта — см. комментарий в thead --}}
-                            <td class="px-4 py-3 whitespace-nowrap text-sm text-slate-500" x-text="svc.periodicity || '—'"></td>
-                            <td class="px-4 py-3 whitespace-nowrap text-sm text-slate-500" x-text="svc.deadline_days ? svc.deadline_days + ' дн.' : '—'"></td>
-                            <td class="px-4 py-3 whitespace-nowrap text-sm text-slate-500" x-text="svc.execution_minutes ? svc.execution_minutes + ' мин.' : '—'"></td>
-                            <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="svc.closing_rule || '—'"></td>
-                            <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="svc.check_type || '—'"></td>
-                            <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="svc.billing || '—'"></td>
+                            <td class="px-4 py-3 whitespace-nowrap text-sm text-slate-500" x-text="row.svc.periodicity || '—'"></td>
+                            <td class="px-4 py-3 whitespace-nowrap text-sm text-slate-500" x-text="row.svc.deadline_days ? row.svc.deadline_days + ' дн.' : '—'"></td>
+                            <td class="px-4 py-3 whitespace-nowrap text-sm text-slate-500" x-text="row.svc.execution_minutes ? row.svc.execution_minutes + ' мин.' : '—'"></td>
+                            <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="row.svc.closing_rule || '—'"></td>
+                            <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="row.svc.check_type || '—'"></td>
+                            <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="row.svc.billing || '—'"></td>
                             {{-- TODO: ячейка "Стоимость" скрыта — возможно не нужна в таблице БП, рассмотреть удаление поля cost из services --}}
-                            <td class="px-4 py-3 text-sm text-slate-500 max-w-[160px] truncate" x-text="svc.comment || '—'"></td>
+                            <td class="px-4 py-3 text-sm text-slate-500 max-w-[160px] truncate" x-text="row.svc.comment || '—'"></td>
                             <td class="px-4 py-3 whitespace-nowrap text-right">
                                 <div class="flex items-center justify-end gap-1">
-                                    <button @click="openServiceModal(svc)" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Редактировать">
+                                    <button @click="openServiceModal(row.svc)" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Редактировать">
                                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                                     </button>
-                                    <button @click="openDeleteModal(svc)" class="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Удалить">
+                                    <button @click="openDeleteModal(row.svc)" class="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Удалить">
                                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                                     </button>
                                 </div>
                             </td>
                         </tr>
 
-                        <template x-for="child in (svc.children || [])" :key="child.id">
-                            <tr class="bg-slate-50/50 hover:bg-slate-50">
+                        <template x-for="child in (row.type === 'service' ? (row.svc.children || []) : [])" :key="child.id">
+                            <tr @click="selectedRowId = (selectedRowId === 'c' + child.id ? null : 'c' + child.id)"
+                                :class="selectedRowId === 'c' + child.id ? 'bg-indigo-100/70 ring-1 ring-inset ring-indigo-200' : 'bg-slate-50/50 hover:bg-slate-50'"
+                                class="cursor-pointer">
                                 <td class="pl-10 pr-4 py-2.5 text-sm text-slate-600 whitespace-nowrap">
                                     <div class="flex items-center gap-1.5">
                                         <svg class="w-3 h-3 text-slate-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
@@ -139,8 +168,7 @@ $servicesJson = $services->map(fn($s) => [
                                 {{-- TODO: ячейка "Бизнес процесс" удалена — см. комментарий в thead --}}
                                 <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
                                 <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
-                                {{-- TODO: ячейка тарифов скрыта — см. комментарий в thead --}}
-                                <td class="px-4 py-2.5 whitespace-nowrap text-sm text-slate-400" x-text="child.periodicity || '—'"></td>
+                                    <td class="px-4 py-2.5 whitespace-nowrap text-sm text-slate-400" x-text="child.periodicity || '—'"></td>
                                 <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
                                 <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
                                 <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
@@ -153,7 +181,7 @@ $servicesJson = $services->map(fn($s) => [
                                         <button @click="openServiceModal(child)" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Редактировать">
                                             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                                         </button>
-                                        <button @click="openDeleteModal(child, svc.id)" class="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Удалить">
+                                        <button @click="openDeleteModal(child, row.svc.id)" class="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Удалить">
                                             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                                         </button>
                                     </div>
@@ -162,8 +190,8 @@ $servicesJson = $services->map(fn($s) => [
                         </template>
                     </tbody>
                 </template>
-                <tbody x-show="services.length === 0">
-                    <tr><td colspan="13" class="px-6 py-10 text-center text-slate-400">Нет бизнес-процессов. Нажмите «Добавить БП» чтобы создать первый.</td></tr>
+                <tbody x-show="displayRows.length === 0">
+                    <tr><td colspan="13" class="px-6 py-10 text-center text-slate-400" x-text="services.length === 0 ? 'Нет бизнес-процессов. Нажмите «Добавить БП» чтобы создать первый.' : 'Нет бизнес-процессов в выбранной сфере.'"></td></tr>
                 </tbody>
             </table>
         </div>
@@ -356,33 +384,6 @@ $servicesJson = $services->map(fn($s) => [
                             </template>
 
                             <template x-if="!serviceForm.parent_id">
-                                <div class="space-y-2">
-                                    <label class="block text-sm font-medium text-slate-700">Тарифы <span class="text-red-500">*</span></label>
-                                    <p x-show="serviceFormErrors.tariffs" class="text-xs text-red-500">Выберите хотя бы один тариф</p>
-                                    <template x-for="tariff in tariffs" :key="tariff.id">
-                                        <div class="border rounded-xl overflow-hidden transition-colors" :class="isTariffSelected(tariff.id) ? 'border-indigo-300' : 'border-slate-200'">
-                                            <label class="flex items-center gap-2 cursor-pointer px-3 py-2 transition-colors" :class="isTariffSelected(tariff.id) ? 'bg-indigo-50 hover:bg-indigo-100' : 'hover:bg-slate-50'">
-                                                <input type="checkbox" :checked="isTariffSelected(tariff.id)" @change="toggleTariff(tariff)" class="w-3.5 h-3.5 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500">
-                                                <span class="text-sm font-medium text-slate-700" x-text="tariff.name"></span>
-                                            </label>
-                                            <template x-if="isTariffSelected(tariff.id)">
-                                                <div class="px-3 pb-3 pt-2 bg-indigo-50/50 border-t border-indigo-100 grid grid-cols-2 gap-3">
-                                                    <div>
-                                                        <label class="block text-xs font-medium text-slate-500 mb-1">Бесплатный лимит (шт.)</label>
-                                                        <input type="number" :value="getTariffPivot(tariff.id).free_limit" @input="updateTariffPivot(tariff.id, 'free_limit', $event.target.value)" min="0" placeholder="0" class="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                                                    </div>
-                                                    <div>
-                                                        <label class="block text-xs font-medium text-slate-500 mb-1">Цена сверх лимита (сом)</label>
-                                                        <input type="number" :value="getTariffPivot(tariff.id).price_override ?? ''" @input="updateTariffPivot(tariff.id, 'price_override', $event.target.value)" min="0" placeholder="— как у услуги —" class="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                                                    </div>
-                                                </div>
-                                            </template>
-                                        </div>
-                                    </template>
-                                </div>
-                            </template>
-
-                            <template x-if="!serviceForm.parent_id">
                                 <div class="border-t border-slate-100 pt-4">
                                     <div class="flex items-center justify-between mb-3">
                                         <label class="text-sm font-semibold text-slate-700">Подпункты</label>
@@ -481,19 +482,62 @@ function servicesPage() {
     return {
         services: @json($servicesJson),
         taxSystems: @json($taxSystems),
-        tariffs: @json($tariffs),
+        selectedRowId: null,
+
+        sphereFilter: '',
+        searchQuery: '',
+        groupBySphere: false,
+
+        get sphereOptions() {
+            return [...new Set(this.services.map(s => s.sphere).filter(Boolean))]
+                .sort((a, b) => a.localeCompare(b, 'ru'));
+        },
+        serviceMatchesSearch(s, q) {
+            const fields = [s.name, s.sphere, s.service_group, s.category, s.business_process];
+            if (fields.some(f => (f || '').toLowerCase().includes(q))) return true;
+            return (s.children || []).some(c => (c.name || '').toLowerCase().includes(q));
+        },
+        get visibleServices() {
+            let list = this.services;
+            if (this.sphereFilter) {
+                list = list.filter(s => (s.sphere || '') === this.sphereFilter);
+            }
+            const q = this.searchQuery.trim().toLowerCase();
+            if (q) {
+                list = list.filter(s => this.serviceMatchesSearch(s, q));
+            }
+            return list;
+        },
+        get displayRows() {
+            const list = this.visibleServices;
+            if (!this.groupBySphere) {
+                return list.map(svc => ({ type: 'service', svc, key: 's' + svc.id }));
+            }
+            const groups = {}, order = [];
+            list.forEach(svc => {
+                const key = svc.sphere || 'Без сферы';
+                if (!groups[key]) { groups[key] = []; order.push(key); }
+                groups[key].push(svc);
+            });
+            const rows = [];
+            order.forEach(sphere => {
+                rows.push({ type: 'header', sphere, count: groups[sphere].length, key: 'h:' + sphere });
+                groups[sphere].forEach(svc => rows.push({ type: 'service', svc, key: 's' + svc.id }));
+            });
+            return rows;
+        },
 
         showServiceModal: false,
         savingService: false,
         showDueDayPicker: false,
-        serviceFormErrors: { tax_systems: false, tariffs: false },
+        serviceFormErrors: { tax_systems: false },
         serviceForm: {
             id: null, parent_id: null, tax_systems: [], name: '', description: '',
             sphere: '', service_group: '', business_process: '', category: '',
             cost: 0, pricing_rules: [], use_tiered_pricing: false,
             periodicity: '', due_day: null, deadline_days: null, execution_minutes: null,
             closing_rule: '', check_type: '', billing: '', comment: '',
-            allows_quantity: false, tariffs: [], children: [],
+            allows_quantity: false, children: [],
         },
 
         showDeleteModal: false,
@@ -503,7 +547,7 @@ function servicesPage() {
         toast: { show: false, message: '', type: 'success' },
 
         openServiceModal(svc = null) {
-            this.serviceFormErrors = { tax_systems: false, tariffs: false };
+            this.serviceFormErrors = { tax_systems: false };
             if (svc) {
                 const rules = svc.pricing_rules || [];
                 this.serviceForm = {
@@ -518,7 +562,6 @@ function servicesPage() {
                     closing_rule: svc.closing_rule || '', check_type: svc.check_type || '',
                     billing: svc.billing || '', comment: svc.comment || '',
                     allows_quantity: svc.allows_quantity || false,
-                    tariffs: (svc.tariffs || []).map(t => ({ id: t.id, free_limit: t.free_limit ?? 0, price_override: t.price_override ?? null })),
                     children: (svc.children || []).map(c => ({ id: c.id, name: c.name, cost: c.cost, periodicity: c.periodicity || '', allows_quantity: c.allows_quantity || false })),
                 };
             } else {
@@ -528,7 +571,7 @@ function servicesPage() {
                     cost: 0, pricing_rules: [], use_tiered_pricing: false,
                     periodicity: '', due_day: null, deadline_days: null, execution_minutes: null,
                     closing_rule: '', check_type: '', billing: '', comment: '',
-                    allows_quantity: false, tariffs: [], children: [],
+                    allows_quantity: false, children: [],
                 };
             }
             this.showServiceModal = true;
@@ -550,25 +593,12 @@ function servicesPage() {
             this.serviceFormErrors.tax_systems = false;
         },
 
-        isTariffSelected(id) { return this.serviceForm.tariffs.some(t => t.id === id); },
-        getTariffPivot(id) { return this.serviceForm.tariffs.find(t => t.id === id) || { free_limit: 0, price_override: null }; },
-        toggleTariff(tariff) {
-            if (this.isTariffSelected(tariff.id)) this.serviceForm.tariffs = this.serviceForm.tariffs.filter(t => t.id !== tariff.id);
-            else this.serviceForm.tariffs.push({ id: tariff.id, free_limit: 0, price_override: null });
-            this.serviceFormErrors.tariffs = false;
-        },
-        updateTariffPivot(id, field, value) {
-            const entry = this.serviceForm.tariffs.find(t => t.id === id);
-            if (!entry) return;
-            entry[field] = field === 'price_override' ? (value === '' ? null : parseFloat(value)) : (parseInt(value) || 0);
-        },
         addPricingRule() { this.serviceForm.pricing_rules.push({ max_qty: '', price: '' }); },
 
         async submitServiceForm() {
             if (!this.serviceForm.parent_id) {
                 this.serviceFormErrors.tax_systems = this.serviceForm.tax_systems.length === 0;
-                this.serviceFormErrors.tariffs = this.serviceForm.tariffs.length === 0;
-                if (this.serviceFormErrors.tax_systems || this.serviceFormErrors.tariffs) return;
+                if (this.serviceFormErrors.tax_systems) return;
             }
             this.savingService = true;
             const url = this.serviceForm.id ? `/settings/services/${this.serviceForm.id}` : '/settings/services';
@@ -593,7 +623,7 @@ function servicesPage() {
                         if (item.parent_id) {
                             const parent = this.services.find(s => s.id === item.parent_id);
                             if (parent) { if (!parent.children) parent.children = []; parent.children.push(item); }
-                        } else { this.services.push(item); }
+                        } else { this.services.unshift(item); }
                     }
                     this.showServiceModal = false; this.showDueDayPicker = false;
                 } else { this.showToast(d.message || 'Ошибка сохранения', 'error'); }

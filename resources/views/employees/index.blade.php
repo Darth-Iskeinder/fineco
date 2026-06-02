@@ -8,6 +8,7 @@
     showCreateModal: false,
     showDeleteModal: false,
     deleteEmployee: null,
+    selectedRowId: null,
     allModules: @js($modules->map(fn($m) => ['id' => $m->id, 'name' => $m->display_name])),
     createSelectedIds: [],
     adminRoleId: 1,
@@ -150,7 +151,9 @@
                 </thead>
                 <tbody class="divide-y divide-slate-100">
                     <template x-for="employee in employees" :key="employee.id">
-                        <tr class="hover:bg-slate-50/50 transition-colors duration-150">
+                        <tr @click="selectedRowId = (selectedRowId === employee.id ? null : employee.id)"
+                            :class="selectedRowId === employee.id ? 'bg-indigo-50/70 ring-1 ring-inset ring-indigo-200' : 'hover:bg-slate-50/50'"
+                            class="cursor-pointer transition-colors duration-150">
                             <td class="px-6 py-4 whitespace-nowrap">
                                 <div class="flex items-center">
                                     <div class="w-9 h-9 bg-gradient-to-br from-violet-100 to-indigo-100 rounded-xl flex items-center justify-center mr-3">

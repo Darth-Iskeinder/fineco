@@ -160,6 +160,9 @@
                 <thead>
                     <tr class="bg-slate-50/80 border-b border-slate-200/50">
                         <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                            №
+                        </th>
+                        <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                             Название
                         </th>
                         <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
@@ -183,8 +186,11 @@
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
-                    <template x-for="client in clients" :key="client.id">
+                    <template x-for="(client, index) in clients" :key="client.id">
                         <tr class="hover:bg-slate-50/50 transition-colors duration-150">
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="text-sm text-slate-500" x-text="index + 1"></div>
+                            </td>
                             <td class="px-6 py-4 whitespace-nowrap">
                                 <a :href="'/clients/' + client.id" class="flex items-center group">
                                     <div class="w-9 h-9 bg-gradient-to-br from-emerald-100 to-teal-100 rounded-xl flex items-center justify-center mr-3">

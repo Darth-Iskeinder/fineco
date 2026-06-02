@@ -859,7 +859,18 @@
                         <dl class="grid grid-cols-2 gap-x-6 gap-y-4">
                             <div>
                                 <dt class="text-sm font-medium text-slate-500">Доверенность на имя</dt>
-                                <dd class="mt-1 text-sm text-slate-900" x-text="client.power_of_attorney_name || '—'"></dd>
+                                <dd class="mt-1">
+                                    <template x-if="Array.isArray(client.power_of_attorney_name) && client.power_of_attorney_name.length > 0">
+                                        <div class="flex flex-wrap gap-1.5">
+                                            <template x-for="poaName in client.power_of_attorney_name" :key="poaName">
+                                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700" x-text="poaName"></span>
+                                            </template>
+                                        </div>
+                                    </template>
+                                    <template x-if="!Array.isArray(client.power_of_attorney_name) || client.power_of_attorney_name.length === 0">
+                                        <span class="text-sm text-slate-900">—</span>
+                                    </template>
+                                </dd>
                             </div>
                             <div>
                                 <dt class="text-sm font-medium text-slate-500">Срок действия</dt>
@@ -871,7 +882,22 @@
                         <div class="grid grid-cols-2 gap-x-6 gap-y-4">
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-1">Доверенность на имя</label>
-                                <input type="text" x-model="form.attorney.power_of_attorney_name" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                <div class="flex flex-wrap gap-1.5 mb-2" x-show="form.attorney.power_of_attorney_name.length > 0">
+                                    <template x-for="poaName in form.attorney.power_of_attorney_name" :key="poaName">
+                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700">
+                                            <span x-text="poaName"></span>
+                                            <button type="button" @click="form.attorney.power_of_attorney_name = form.attorney.power_of_attorney_name.filter(n => n !== poaName)" class="text-indigo-400 hover:text-indigo-700">
+                                                <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                                            </button>
+                                        </span>
+                                    </template>
+                                </div>
+                                <select @change="if($event.target.value && !form.attorney.power_of_attorney_name.includes($event.target.value)) form.attorney.power_of_attorney_name.push($event.target.value); $event.target.value = ''" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                    <option value="">+ Добавить сотрудника</option>
+                                    <template x-for="emp in allEmployees" :key="emp.id">
+                                        <option :value="emp.full_name" :disabled="form.attorney.power_of_attorney_name.includes(emp.full_name)" x-text="emp.full_name"></option>
+                                    </template>
+                                </select>
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-1">Срок действия</label>
@@ -1747,7 +1773,9 @@ function clientShow() {
                 employees: this.client.employees?.map(e => String(e.id)) || [],
             };
             this.form.attorney = {
-                power_of_attorney_name: this.client.power_of_attorney_name,
+                power_of_attorney_name: Array.isArray(this.client.power_of_attorney_name)
+                    ? [...this.client.power_of_attorney_name]
+                    : (this.client.power_of_attorney_name ? [this.client.power_of_attorney_name] : []),
                 power_of_attorney_expires: this.client.power_of_attorney_expires?.split('T')[0],
             };
             this.form.eds = {

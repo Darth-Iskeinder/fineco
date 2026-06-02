@@ -115,6 +115,7 @@ class Client extends Model
         'power_of_attorney_expires' => 'date',
         'eds_expires' => 'date',
         // JSON поля
+        'power_of_attorney_name' => 'array',
         'founding_docs_urls' => 'array',
         'contacts' => 'array',
         'related_persons' => 'array',
