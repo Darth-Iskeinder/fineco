@@ -2,7 +2,7 @@
 @section('page-title', $pageTitle)
 
 @section('settings-content')
-<div x-data="lookupPage('{{ $baseEndpoint }}', {{ Illuminate\Support\Js::from($items) }})" class="space-y-4">
+<div x-data="lookupPage('{{ $baseEndpoint }}', {{ Illuminate\Support\Js::from($items) }}, {{ Illuminate\Support\Js::from($fields ?? []) }})" class="space-y-4">
 
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
         <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
@@ -22,6 +22,9 @@
                 <thead class="bg-slate-50">
                     <tr>
                         <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Название</th>
+                        <template x-for="f in fields" :key="f.key">
+                            <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider" x-text="f.label"></th>
+                        </template>
                         <th class="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Действия</th>
                     </tr>
                 </thead>
@@ -29,6 +32,9 @@
                     <template x-for="item in items" :key="item.id">
                         <tr class="hover:bg-slate-50">
                             <td class="px-6 py-4 text-sm font-medium text-slate-900" x-text="item.name"></td>
+                            <template x-for="f in fields" :key="f.key">
+                                <td class="px-6 py-4 text-sm text-slate-500" x-text="displayValue(f, item[f.key])"></td>
+                            </template>
                             <td class="px-6 py-4 text-right">
                                 <div class="flex items-center justify-end gap-1">
                                     <button @click="openEdit(item)" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors">
@@ -42,7 +48,7 @@
                         </tr>
                     </template>
                     <template x-if="items.length === 0">
-                        <tr><td colspan="2" class="px-6 py-10 text-center text-slate-400">Нет данных</td></tr>
+                        <tr><td :colspan="2 + fields.length" class="px-6 py-10 text-center text-slate-400">Нет данных</td></tr>
                     </template>
                 </tbody>
             </table>
@@ -62,10 +68,23 @@
                         </button>
                     </div>
                     <form @submit.prevent="submit()">
-                        <div>
-                            <label class="block text-sm font-medium text-slate-700 mb-1">Название <span class="text-red-500">*</span></label>
-                            <input type="text" x-model="form.name" required autofocus
-                                class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-1">Название <span class="text-red-500">*</span></label>
+                                <input type="text" x-model="form.name" required autofocus
+                                    class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                            </div>
+                            <template x-for="f in fields" :key="f.key">
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-700 mb-1" x-text="f.label"></label>
+                                    <select x-model="form[f.key]" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
+                                        <option value="">— не выбрано —</option>
+                                        <template x-for="opt in Object.entries(f.options || {})" :key="opt[0]">
+                                            <option :value="opt[0]" x-text="opt[1]"></option>
+                                        </template>
+                                    </select>
+                                </div>
+                            </template>
                         </div>
                         <div class="flex justify-end gap-3 mt-6 pt-6 border-t border-slate-100">
                             <button type="button" @click="closeModal()" class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50">Отмена</button>
@@ -121,9 +140,10 @@
 </div>
 
 <script>
-function lookupPage(baseEndpoint, initialItems) {
+function lookupPage(baseEndpoint, initialItems, fields = []) {
     return {
         items: initialItems,
+        fields: fields,
         showModal: false, isEditing: false, editingId: null, saving: false,
         form: { name: '' },
         showDeleteModal: false, deleteItem: null, deleting: false,
@@ -131,8 +151,19 @@ function lookupPage(baseEndpoint, initialItems) {
 
         csrf() { return document.querySelector('meta[name="csrf-token"]').content; },
 
-        openCreate() { this.isEditing = false; this.editingId = null; this.form = { name: '' }; this.showModal = true; },
-        openEdit(item) { this.isEditing = true; this.editingId = item.id; this.form = { name: item.name }; this.showModal = true; },
+        blankForm(item = null) {
+            const f = { name: item ? item.name : '' };
+            this.fields.forEach(fl => { f[fl.key] = item ? (item[fl.key] ?? '') : ''; });
+            return f;
+        },
+        displayValue(field, value) {
+            if (value === null || value === undefined || value === '') return '—';
+            if (field.type === 'select' && field.options) return field.options[value] ?? value;
+            return value;
+        },
+
+        openCreate() { this.isEditing = false; this.editingId = null; this.form = this.blankForm(); this.showModal = true; },
+        openEdit(item) { this.isEditing = true; this.editingId = item.id; this.form = this.blankForm(item); this.showModal = true; },
         closeModal() { this.showModal = false; },
         openDelete(item) { this.deleteItem = item; this.showDeleteModal = true; },
 

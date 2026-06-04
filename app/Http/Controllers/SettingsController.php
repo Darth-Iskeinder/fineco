@@ -4,12 +4,15 @@ namespace App\Http\Controllers;
 
 use App\Models\AccountingMethod;
 use App\Models\ActivityType;
+use App\Models\Category;
 use App\Models\CheckType;
 use App\Models\ClientStatus;
 use App\Models\OrganizationForm;
 use App\Models\Periodicity;
 use App\Models\Rate;
+use App\Models\ServiceGroup;
 use App\Models\ServiceType;
+use App\Models\Sphere;
 use App\Models\TaxpayerCategory;
 use App\Models\Service;
 use App\Models\Tariff;
@@ -29,24 +32,24 @@ class SettingsController extends Controller
     // ПРОСТЫЕ СПРАВОЧНИКИ (общий паттерн)
     // =============================================
 
-    private function lookupView(string $title, string $endpoint, $items, string $description = '')
+    private function lookupView(string $title, string $endpoint, $items, string $description = '', array $fields = [])
     {
-        return view('settings.lookup', compact('title', 'description', 'items') + [
+        return view('settings.lookup', compact('title', 'description', 'items', 'fields') + [
             'pageTitle'    => $title,
             'baseEndpoint' => $endpoint,
         ]);
     }
 
-    private function lookupStore(Request $request, string $model): \Illuminate\Http\JsonResponse
+    private function lookupStore(Request $request, string $model, array $rules = []): \Illuminate\Http\JsonResponse
     {
-        $validated = $request->validate(['name' => 'required|string|max:255']);
+        $validated = $request->validate(['name' => 'required|string|max:255'] + $rules);
         $item = $model::create($validated);
         return response()->json(['success' => true, 'item' => $item]);
     }
 
-    private function lookupUpdate(Request $request, $record): \Illuminate\Http\JsonResponse
+    private function lookupUpdate(Request $request, $record, array $rules = []): \Illuminate\Http\JsonResponse
     {
-        $validated = $request->validate(['name' => 'required|string|max:255']);
+        $validated = $request->validate(['name' => 'required|string|max:255'] + $rules);
         $record->update($validated);
         return response()->json(['success' => true, 'item' => $record->fresh()]);
     }
@@ -62,7 +65,12 @@ class SettingsController extends Controller
     public function taxpayerCategoriesPage()  { return $this->lookupView('Категория налогоплательщика', '/settings/taxpayer-categories',   TaxpayerCategory::orderBy('name')->get()); }
     public function accountingMethodsPage()   { return $this->lookupView('Метод учёта',                 '/settings/accounting-methods',    AccountingMethod::orderBy('name')->get()); }
     public function serviceTypesPage()        { return $this->lookupView('Тип обслуживания',            '/settings/service-types',         ServiceType::orderBy('name')->get()); }
-    public function periodicitiesPage()       { return $this->lookupView('Периодичность',               '/settings/periodicities',         Periodicity::orderBy('name')->get()); }
+    public function categoriesPage()          { return $this->lookupView('Категория',                   '/settings/categories',            Category::orderBy('name')->get()); }
+    public function spheresPage()             { return $this->lookupView('Сфера',                       '/settings/spheres',               Sphere::orderBy('name')->get()); }
+    public function groupsPage()              { return $this->lookupView('Группа',                      '/settings/groups',                ServiceGroup::orderBy('name')->get()); }
+    public function periodicitiesPage()       { return $this->lookupView('Периодичность',               '/settings/periodicities',         Periodicity::orderBy('name')->get(), 'Тип определяет поведение полей «Месяц» и «День» при создании БП', [
+        ['key' => 'kind', 'label' => 'Тип', 'type' => 'select', 'options' => Periodicity::KINDS],
+    ]); }
     public function checkTypesPage()          { return $this->lookupView('Проверка',                    '/settings/check-types',           CheckType::orderBy('name')->get()); }
 
     public function storeOrganizationForm(Request $r)                { return $this->lookupStore($r, OrganizationForm::class); }
@@ -85,8 +93,20 @@ class SettingsController extends Controller
     public function updateServiceType(Request $r, ServiceType $serviceType)                { return $this->lookupUpdate($r, $serviceType); }
     public function destroyServiceType(ServiceType $serviceType)                           { return $this->lookupDestroy($serviceType); }
 
-    public function storePeriodicity(Request $r)                     { return $this->lookupStore($r, Periodicity::class); }
-    public function updatePeriodicity(Request $r, Periodicity $periodicity)                { return $this->lookupUpdate($r, $periodicity); }
+    public function storeCategory(Request $r)                        { return $this->lookupStore($r, Category::class); }
+    public function updateCategory(Request $r, Category $category)                         { return $this->lookupUpdate($r, $category); }
+    public function destroyCategory(Category $category)                                    { return $this->lookupDestroy($category); }
+
+    public function storeSphere(Request $r)                          { return $this->lookupStore($r, Sphere::class); }
+    public function updateSphere(Request $r, Sphere $sphere)                               { return $this->lookupUpdate($r, $sphere); }
+    public function destroySphere(Sphere $sphere)                                          { return $this->lookupDestroy($sphere); }
+
+    public function storeGroup(Request $r)                           { return $this->lookupStore($r, ServiceGroup::class); }
+    public function updateGroup(Request $r, ServiceGroup $serviceGroup)                    { return $this->lookupUpdate($r, $serviceGroup); }
+    public function destroyGroup(ServiceGroup $serviceGroup)                               { return $this->lookupDestroy($serviceGroup); }
+
+    public function storePeriodicity(Request $r)                     { return $this->lookupStore($r, Periodicity::class, ['kind' => 'nullable|string|in:weekly,monthly,quarterly,yearly']); }
+    public function updatePeriodicity(Request $r, Periodicity $periodicity)                { return $this->lookupUpdate($r, $periodicity, ['kind' => 'nullable|string|in:weekly,monthly,quarterly,yearly']); }
     public function destroyPeriodicity(Periodicity $periodicity)                           { return $this->lookupDestroy($periodicity); }
 
     public function storeCheckType(Request $r)                       { return $this->lookupStore($r, CheckType::class); }
@@ -127,6 +147,10 @@ class SettingsController extends Controller
             'taxSystems' => TaxSystem::ordered()->get(),
             'services' => Service::with(['taxSystems', 'children'])->roots()->ordered()->get(),
             'specialFlags' => Service::specialFlagsList(),
+            'periodicities' => Periodicity::orderBy('name')->get(['name', 'kind'])->values(),
+            'categories' => Category::orderBy('name')->pluck('name')->values(),
+            'spheres' => Sphere::orderBy('name')->pluck('name')->values(),
+            'groups' => ServiceGroup::orderBy('name')->pluck('name')->values(),
         ]);
     }
 
@@ -396,10 +420,16 @@ class SettingsController extends Controller
             'cost'                          => 'required|numeric|min:0',
             'periodicity'                   => 'nullable|string|max:100',
             'due_day'                       => 'nullable|integer|min:1|max:31',
+            'start_month'                   => 'nullable|array',
+            'start_month.*'                 => 'integer|min:1|max:12',
+            'start_day'                     => 'nullable|array',
+            'start_day.*'                   => 'integer|min:1|max:31',
             'deadline_days'                 => 'nullable|integer|min:0',
             'execution_minutes'             => 'nullable|integer|min:0',
             'closing_rule'                  => 'nullable|string|max:255',
+            'requires_document'             => 'boolean',
             'check_type'                    => 'nullable|string|max:255',
+            'requires_review'               => 'boolean',
             'billing'                       => 'nullable|string|max:255',
             'comment'                       => 'nullable|string',
             'allows_quantity'               => 'boolean',
@@ -428,10 +458,14 @@ class SettingsController extends Controller
             'pricing_rules'      => $request->input('pricing_rules') ?: null,
             'periodicity'        => $request->periodicity,
             'due_day'            => $request->input('due_day') ?: null,
+            'start_month'        => $request->input('start_month') ?: null,
+            'start_day'          => $request->input('start_day') ?: null,
             'deadline_days'      => $request->input('deadline_days') ?: null,
             'execution_minutes'  => $request->input('execution_minutes') ?: null,
             'closing_rule'       => $request->closing_rule ?: null,
+            'requires_document'  => $request->boolean('requires_document', false),
             'check_type'         => $request->check_type ?: null,
+            'requires_review'    => $request->boolean('requires_review', false),
             'billing'            => $request->billing ?: null,
             'comment'            => $request->comment ?: null,
             'is_active'          => true,
@@ -475,10 +509,16 @@ class SettingsController extends Controller
             'cost'                          => 'required|numeric|min:0',
             'periodicity'                   => 'nullable|string|max:100',
             'due_day'                       => 'nullable|integer|min:1|max:31',
+            'start_month'                   => 'nullable|array',
+            'start_month.*'                 => 'integer|min:1|max:12',
+            'start_day'                     => 'nullable|array',
+            'start_day.*'                   => 'integer|min:1|max:31',
             'deadline_days'                 => 'nullable|integer|min:0',
             'execution_minutes'             => 'nullable|integer|min:0',
             'closing_rule'                  => 'nullable|string|max:255',
+            'requires_document'             => 'boolean',
             'check_type'                    => 'nullable|string|max:255',
+            'requires_review'               => 'boolean',
             'billing'                       => 'nullable|string|max:255',
             'comment'                       => 'nullable|string',
             'allows_quantity'               => 'boolean',
@@ -505,10 +545,14 @@ class SettingsController extends Controller
             'pricing_rules'      => $request->input('pricing_rules') ?: null,
             'periodicity'        => $request->periodicity,
             'due_day'            => $request->input('due_day') ?: null,
+            'start_month'        => $request->input('start_month') ?: null,
+            'start_day'          => $request->input('start_day') ?: null,
             'deadline_days'      => $request->input('deadline_days') ?: null,
             'execution_minutes'  => $request->input('execution_minutes') ?: null,
             'closing_rule'       => $request->closing_rule ?: null,
+            'requires_document'  => $request->boolean('requires_document', false),
             'check_type'         => $request->check_type ?: null,
+            'requires_review'    => $request->boolean('requires_review', false),
             'billing'            => $request->billing ?: null,
             'comment'            => $request->comment ?: null,
             'allows_quantity'    => $request->boolean('allows_quantity', false),
@@ -597,10 +641,25 @@ class SettingsController extends Controller
             ])->values(),
             'name'            => $service->name,
             'description'     => $service->description,
+            'sphere'           => $service->sphere,
+            'service_group'    => $service->service_group,
+            'business_process' => $service->business_process,
+            'category'         => $service->category,
             'cost'            => $service->cost,
             'pricing_rules'   => $service->pricing_rules ?? [],
             'periodicity'     => $service->periodicity,
             'due_day'         => $service->due_day,
+            'start_month'       => $service->start_month,
+            'start_day'         => $service->start_day,
+            'deadline'          => $service->deadlineLabels(),
+            'deadline_days'     => $service->deadline_days,
+            'execution_minutes' => $service->execution_minutes,
+            'closing_rule'      => $service->closing_rule,
+            'requires_document' => $service->requires_document,
+            'check_type'        => $service->check_type,
+            'requires_review'   => $service->requires_review,
+            'billing'           => $service->billing,
+            'comment'           => $service->comment,
             'is_active'       => $service->is_active,
             'allows_quantity' => $service->allows_quantity,
             'sort_order'      => $service->sort_order,

@@ -59,6 +59,21 @@
                       {{ request()->routeIs('settings.service-types') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
                 Тип обслуживания
             </a>
+            <a href="{{ route('settings.categories') }}"
+               class="block px-3 py-2 rounded-lg text-sm transition-colors
+                      {{ request()->routeIs('settings.categories') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
+                Категория
+            </a>
+            <a href="{{ route('settings.spheres') }}"
+               class="block px-3 py-2 rounded-lg text-sm transition-colors
+                      {{ request()->routeIs('settings.spheres') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
+                Сфера
+            </a>
+            <a href="{{ route('settings.groups') }}"
+               class="block px-3 py-2 rounded-lg text-sm transition-colors
+                      {{ request()->routeIs('settings.groups') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
+                Группа
+            </a>
             <a href="{{ route('settings.periodicities') }}"
                class="block px-3 py-2 rounded-lg text-sm transition-colors
                       {{ request()->routeIs('settings.periodicities') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">

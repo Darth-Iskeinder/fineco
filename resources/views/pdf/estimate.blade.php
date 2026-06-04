@@ -32,14 +32,9 @@
 </head>
 <body>
 
-@php
-$monthNames = ['', 'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
-$periodLabel = $monthNames[$estimate->month] . ' ' . $estimate->year;
-@endphp
-
 <div class="header">
     <h1>Смета на бухгалтерские услуги</h1>
-    <p>Период: {{ $periodLabel }} &nbsp;·&nbsp; Сформировано: {{ now()->format('d.m.Y') }}</p>
+    <p>Сформировано: {{ now()->format('d.m.Y') }}</p>
 </div>
 
 <div class="meta">

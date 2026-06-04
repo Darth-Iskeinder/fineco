@@ -8,12 +8,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Estimate extends Model
 {
-    protected $fillable = ['client_id', 'year', 'month', 'total', 'notes'];
+    protected $fillable = ['client_id', 'total', 'notes'];
 
     protected $casts = [
         'total' => 'decimal:2',
-        'year'  => 'integer',
-        'month' => 'integer',
     ];
 
     public function client(): BelongsTo

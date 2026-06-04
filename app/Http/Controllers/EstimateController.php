@@ -13,15 +13,11 @@ class EstimateController extends Controller
 {
     public function edit(Request $request, Client $client)
     {
-        $year  = (int) $request->get('year',  now()->year);
-        $month = (int) $request->get('month', now()->month);
-        $year  = max(2020, min(2030, $year));
-        $month = max(1, min(12, $month));
+        $client->load(['taxSystem']);
 
-        $client->load(['taxSystem', 'tariff.services.taxSystems', 'tariff.services.children']);
-
+        // Одна смета на клиента
         $estimate = Estimate::firstOrCreate(
-            ['client_id' => $client->id, 'year' => $year, 'month' => $month],
+            ['client_id' => $client->id],
             ['total' => 0]
         );
 
@@ -31,15 +27,7 @@ class EstimateController extends Controller
         $tariffItemIds = $tariffItems->pluck('id');
         $isFirstLoad   = $tariffItems->isEmpty();
 
-        $prevMonth = $month === 1 ? 12 : $month - 1;
-        $prevYear  = $month === 1 ? $year - 1 : $year;
-
         $estimateHasItems = $estimate->items()->exists();
-        $hasPrevious = Estimate::where('client_id', $client->id)
-            ->where('year', $prevYear)
-            ->where('month', $prevMonth)
-            ->whereHas('items', fn($q) => $q->where('type', 'recurring'))
-            ->exists();
 
         // Enabled service_ids from saved estimate
         $savedByServiceId      = $tariffItems->keyBy('service_id');
@@ -91,18 +79,22 @@ class EstimateController extends Controller
             return $bpData;
         };
 
-        // Build tariff BPs with toggle state
+        // «Особый» БП — помеченный хотя бы одним особым условием (ПВТ, ВЭД, …).
+        // Такие тянутся только по флагу клиента (ниже), а не по РН.
+        $hasAnyFlag = fn($s) => collect($flagKeys)->contains(fn($k) => (bool) $s->$k);
+
+        // Обычные БП (без особых условий), применимые по режиму налогообложения,
+        // подтягиваются из всего активного каталога — независимо от тарифа.
         $tariffBPs = [];
         $includedServiceIds = [];
-        if ($client->tariff_id) {
-            $rootServices = $client->tariff->services
-                ->filter(fn($s) => !$s->parent_id && $matchesTaxSystem($s))
-                ->values();
+        $rootServices = Service::with(['taxSystems', 'children'])
+            ->roots()->active()->ordered()->get()
+            ->filter(fn($s) => $matchesTaxSystem($s) && !$hasAnyFlag($s))
+            ->values();
 
-            foreach ($rootServices as $bp) {
-                $tariffBPs[] = $buildBpData($bp);
-                $includedServiceIds[$bp->id] = true;
-            }
+        foreach ($rootServices as $bp) {
+            $tariffBPs[] = $buildBpData($bp);
+            $includedServiceIds[$bp->id] = true;
         }
 
         // БП по особым условиям: для каждого условия, включённого у клиента, подтягиваем
@@ -178,19 +170,13 @@ class EstimateController extends Controller
 
         return view('clients.estimate', compact(
             'client', 'estimate', 'tariffBPs', 'extras', 'allServices', 'specialFlags',
-            'year', 'month', 'prevYear', 'prevMonth', 'hasPrevious', 'estimateHasItems'
+            'estimateHasItems'
         ));
     }
 
     public function show(Request $request, Client $client)
     {
-        $year  = (int) $request->get('year',  now()->year);
-        $month = (int) $request->get('month', now()->month);
-
-        $estimate = Estimate::where('client_id', $client->id)
-            ->where('year', $year)
-            ->where('month', $month)
-            ->first();
+        $estimate = Estimate::where('client_id', $client->id)->first();
 
         if (!$estimate) {
             return response()->json(['id' => null, 'total' => 0, 'notes' => '', 'updated_at' => null]);
@@ -207,8 +193,6 @@ class EstimateController extends Controller
     public function save(Request $request, Client $client)
     {
         $request->validate([
-            'year'                                 => 'nullable|integer|min:2020|max:2030',
-            'month'                                => 'nullable|integer|min:1|max:12',
             'notes'                                => 'nullable|string|max:1000',
             'tariff_bps'                           => 'nullable|array',
             'tariff_bps.*.service_id'              => 'required|integer',
@@ -224,11 +208,8 @@ class EstimateController extends Controller
             'extras.*.quantity'                    => 'nullable|integer|min:1',
         ]);
 
-        $year  = (int) $request->input('year',  now()->year);
-        $month = (int) $request->input('month', now()->month);
-
         $estimate = Estimate::firstOrCreate(
-            ['client_id' => $client->id, 'year' => $year, 'month' => $month],
+            ['client_id' => $client->id],
             ['total' => 0]
         );
 
@@ -353,87 +334,11 @@ class EstimateController extends Controller
         ]);
     }
 
-    public function generate(Request $request, Client $client)
-    {
-        $year  = (int) $request->input('year',  now()->year);
-        $month = (int) $request->input('month', now()->month);
-        $year  = max(2020, min(2030, $year));
-        $month = max(1, min(12, $month));
-
-        $prevMonth = $month === 1 ? 12 : $month - 1;
-        $prevYear  = $month === 1 ? $year - 1 : $year;
-
-        $estimate = Estimate::firstOrCreate(
-            ['client_id' => $client->id, 'year' => $year, 'month' => $month],
-            ['total' => 0]
-        );
-
-        if ($estimate->items()->exists()) {
-            return response()->json(['success' => false, 'message' => 'Смета уже содержит позиции']);
-        }
-
-        $prevEstimate = Estimate::where('client_id', $client->id)
-            ->where('year', $prevYear)
-            ->where('month', $prevMonth)
-            ->first();
-
-        if (!$prevEstimate) {
-            return response()->json(['success' => false, 'message' => 'Нет сметы за прошлый месяц']);
-        }
-
-        $total = 0;
-        $recurringItems = $prevEstimate->items()
-            ->whereNull('parent_id')
-            ->where('type', 'recurring')
-            ->orderBy('sort_order')
-            ->with(['children' => fn($q) => $q->where('type', 'recurring')->orderBy('sort_order')])
-            ->get();
-
-        foreach ($recurringItems as $item) {
-            $newItem = $estimate->items()->create([
-                'service_id'  => $item->service_id,
-                'type'        => 'recurring',
-                'name'        => $item->name,
-                'periodicity' => $item->periodicity,
-                'cost'        => $item->cost,
-                'quantity'    => $item->quantity,
-                'total'       => $item->total,
-                'sort_order'  => $item->sort_order,
-            ]);
-
-            foreach ($item->children as $child) {
-                $estimate->items()->create([
-                    'parent_id'   => $newItem->id,
-                    'service_id'  => $child->service_id,
-                    'type'        => 'recurring',
-                    'name'        => $child->name,
-                    'periodicity' => $child->periodicity,
-                    'cost'        => $child->cost,
-                    'quantity'    => $child->quantity,
-                    'total'       => $child->total,
-                    'sort_order'  => $child->sort_order,
-                ]);
-            }
-
-            $total += $item->total;
-        }
-
-        $estimate->total = $total;
-        $estimate->save();
-
-        return response()->json(['success' => true]);
-    }
-
     public function pdf(Request $request, Client $client)
     {
-        $year  = (int) $request->get('year',  now()->year);
-        $month = (int) $request->get('month', now()->month);
-
         $client->load(['taxSystem', 'tariff']);
         $estimate = Estimate::with(['rootItems.children'])
             ->where('client_id', $client->id)
-            ->where('year', $year)
-            ->where('month', $month)
             ->first();
 
         if (!$estimate) {
@@ -443,8 +348,7 @@ class EstimateController extends Controller
         $pdf = Pdf::loadView('pdf.estimate', compact('client', 'estimate'))
             ->setPaper('a4', 'portrait');
 
-        $filename = 'smeta_' . preg_replace('/[^a-zA-Z0-9]/', '_', $client->name)
-            . '_' . $year . '_' . str_pad($month, 2, '0', STR_PAD_LEFT) . '.pdf';
+        $filename = 'smeta_' . preg_replace('/[^a-zA-Z0-9]/', '_', $client->name) . '.pdf';
 
         return $pdf->download($filename);
     }

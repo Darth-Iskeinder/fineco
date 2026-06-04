@@ -5,16 +5,31 @@
 
 @section('content')
 <div x-data="{
-    showCreateModal: {{ $errors->any() ? 'true' : 'false' }},
+    showCreateModal: {{ $errors->createClient->isNotEmpty() ? 'true' : 'false' }},
     showEditModal: false,
     showDeleteModal: false,
     deleteClient: null,
     editClient: null,
+
+    init() {
+        @if($errors->updateClient->isNotEmpty())
+            // Валидация при редактировании не прошла — переоткрываем именно модалку
+            // редактирования с введёнными значениями, чтобы случайно не создать дубль.
+            const base = this.clients.find(c => c.id === {{ (int) old('client_id') }}) || { id: {{ (int) old('client_id') }} };
+            this.editClient = {
+                ...base,
+                name: @json(old('name')),
+                inn: @json(old('inn')),
+                tax_system_id: @json(old('tax_system_id')),
+                tariff_id: @json(old('tariff_id')),
+                responsible_employee_id: @json(old('responsible_employee_id')) ?? '',
+            };
+            this.showEditModal = true;
+        @endif
+    },
     allEmployees: @js($employees->map(fn($e) => ['id' => $e->id, 'name' => $e->full_name])),
     taxSystems: @js($taxSystems->map(fn($t) => ['id' => $t->id, 'name' => $t->name])),
     tariffs: @js($tariffs->map(fn($t) => ['id' => $t->id, 'name' => $t->name])),
-    createSelectedEmployeeIds: [],
-    editSelectedEmployeeIds: [],
 
     // Live search
     searchQuery: '',
@@ -27,8 +42,8 @@
         'tariff_id' => $c->tariff_id,
         'tariff_name' => $c->tariff?->name ?? '—',
         'is_active' => $c->is_active,
-        'employee_ids' => $c->employees->pluck('id')->toArray(),
-        'employees_list' => $c->employees->pluck('full_name')->implode(', ') ?: '—',
+        'responsible_employee_id' => $c->responsible_employee_id,
+        'responsible_name' => $c->responsibleEmployee?->full_name ?? '—',
     ])),
     loading: false,
     searchTimeout: null,
@@ -56,43 +71,11 @@
         this.searchClients();
     },
 
-    // Create modal methods
-    createAddEmployee(id) {
-        if (!this.createSelectedEmployeeIds.includes(id)) {
-            this.createSelectedEmployeeIds.push(id);
-        }
-    },
-    createRemoveEmployee(id) {
-        this.createSelectedEmployeeIds = this.createSelectedEmployeeIds.filter(i => i !== id);
-    },
-    createGetSelectedEmployees() {
-        return this.allEmployees.filter(e => this.createSelectedEmployeeIds.includes(e.id));
-    },
-    createGetAvailableEmployees() {
-        return this.allEmployees.filter(e => !this.createSelectedEmployeeIds.includes(e.id));
-    },
-    resetCreateForm() {
-        this.createSelectedEmployeeIds = [];
-    },
+    resetCreateForm() {},
 
-    // Edit modal methods
-    editAddEmployee(id) {
-        if (!this.editSelectedEmployeeIds.includes(id)) {
-            this.editSelectedEmployeeIds.push(id);
-        }
-    },
-    editRemoveEmployee(id) {
-        this.editSelectedEmployeeIds = this.editSelectedEmployeeIds.filter(i => i !== id);
-    },
-    editGetSelectedEmployees() {
-        return this.allEmployees.filter(e => this.editSelectedEmployeeIds.includes(e.id));
-    },
-    editGetAvailableEmployees() {
-        return this.allEmployees.filter(e => !this.editSelectedEmployeeIds.includes(e.id));
-    },
     openEditModal(client) {
-        this.editClient = client;
-        this.editSelectedEmployeeIds = client.employee_ids || [];
+        // Нормализуем под select: null → '' (иначе пункт «Не назначено» не выберется)
+        this.editClient = { ...client, responsible_employee_id: client.responsible_employee_id ?? '' };
         this.showEditModal = true;
     }
 }">
@@ -175,7 +158,7 @@
                             Тарифный план
                         </th>
                         <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                            Сотрудники
+                            Ответственный
                         </th>
                         <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                             Статус
@@ -209,7 +192,7 @@
                                 <div class="text-sm text-slate-600" x-text="client.tariff_name"></div>
                             </td>
                             <td class="px-6 py-4">
-                                <div class="text-sm text-slate-600 max-w-[200px] truncate" x-text="client.employees_list" :title="client.employees_list"></div>
+                                <div class="text-sm text-slate-600 max-w-[200px] truncate" x-text="client.responsible_name" :title="client.responsible_name"></div>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
                                 <span x-show="client.is_active" class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-emerald-100 text-emerald-700">
@@ -308,10 +291,10 @@
 
                 <form action="{{ route('clients.store') }}" method="POST" class="overflow-y-auto max-h-[calc(90vh-140px)]">
                     @csrf
-                    @if($errors->any())
+                    @if($errors->createClient->isNotEmpty())
                         <div class="mx-6 mt-4 p-4 bg-red-50 border border-red-200/50 rounded-xl">
                             <ul class="text-sm text-red-700 space-y-1">
-                                @foreach($errors->all() as $error)
+                                @foreach($errors->createClient->all() as $error)
                                     <li>{{ $error }}</li>
                                 @endforeach
                             </ul>
@@ -351,39 +334,14 @@
                             </div>
 
                             <div class="sm:col-span-2">
-                                <label class="block text-sm font-medium text-slate-700 mb-3">Закрепленные сотрудники</label>
-                                <div class="mb-4">
-                                    <p class="text-xs text-slate-500 mb-2">Выбранные сотрудники:</p>
-                                    <div class="flex flex-wrap gap-2 min-h-[42px] p-3 bg-slate-50/50 border border-slate-200 rounded-xl">
-                                        <template x-for="employee in createGetSelectedEmployees()" :key="employee.id">
-                                            <span class="inline-flex items-center px-3 py-1.5 bg-gradient-to-r from-violet-500 to-indigo-600 text-white text-sm font-medium rounded-lg shadow-sm">
-                                                <span x-text="employee.name"></span>
-                                                <button type="button" @click="createRemoveEmployee(employee.id)" class="ml-2 hover:bg-white/20 rounded-full p-0.5 transition-colors duration-150">
-                                                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                                                    </svg>
-                                                </button>
-                                                <input type="hidden" name="employees[]" :value="employee.id">
-                                            </span>
-                                        </template>
-                                        <span x-show="createGetSelectedEmployees().length === 0" class="text-sm text-slate-400 italic">Нет закрепленных сотрудников</span>
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <p class="text-xs text-slate-500 mb-2">Доступные сотрудники:</p>
-                                    <div class="flex flex-wrap gap-2 min-h-[42px] p-3 bg-slate-50/50 border border-slate-200 rounded-xl">
-                                        <template x-for="employee in createGetAvailableEmployees()" :key="employee.id">
-                                            <button type="button" @click="createAddEmployee(employee.id)" class="inline-flex items-center px-3 py-1.5 bg-white border border-slate-200 text-slate-700 text-sm font-medium rounded-lg hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 transition-all duration-150">
-                                                <svg class="w-3.5 h-3.5 mr-1.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                                                </svg>
-                                                <span x-text="employee.name"></span>
-                                            </button>
-                                        </template>
-                                        <span x-show="createGetAvailableEmployees().length === 0" class="text-sm text-slate-400 italic">Все сотрудники выбраны</span>
-                                    </div>
-                                </div>
+                                <label for="create_responsible" class="block text-sm font-medium text-slate-700 mb-2">Ответственное лицо</label>
+                                <select name="responsible_employee_id" id="create_responsible" class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
+                                    <option value="">Не назначено</option>
+                                    <template x-for="employee in allEmployees" :key="employee.id">
+                                        <option :value="employee.id" :selected="'{{ old('responsible_employee_id') }}' == employee.id" x-text="employee.name"></option>
+                                    </template>
+                                </select>
+                                <p class="mt-1 text-xs text-slate-500">На это лицо будут ассайниться все БП клиента</p>
                             </div>
 
                             <div class="sm:col-span-2">
@@ -453,6 +411,16 @@
                 <form :action="'/clients/' + editClient?.id" method="POST" class="overflow-y-auto max-h-[calc(90vh-140px)]">
                     @csrf
                     @method('PUT')
+                    <input type="hidden" name="client_id" :value="editClient?.id">
+                    @if($errors->updateClient->isNotEmpty())
+                        <div class="mx-6 mt-4 p-4 bg-red-50 border border-red-200/50 rounded-xl">
+                            <ul class="text-sm text-red-700 space-y-1">
+                                @foreach($errors->updateClient->all() as $error)
+                                    <li>{{ $error }}</li>
+                                @endforeach
+                            </ul>
+                        </div>
+                    @endif
                     <div class="px-6 py-6">
                         <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
                             <div class="sm:col-span-2">
@@ -462,7 +430,7 @@
 
                             <div>
                                 <label for="edit_inn" class="block text-sm font-medium text-slate-700 mb-2">ИНН <span class="text-red-500">*</span></label>
-                                <input type="text" name="inn" id="edit_inn" :value="editClient?.inn" required maxlength="12" class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200 font-mono">
+                                <input type="text" name="inn" id="edit_inn" :value="editClient?.inn" required maxlength="14" class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200 font-mono">
                             </div>
 
                             <div>
@@ -486,39 +454,14 @@
                             </div>
 
                             <div class="sm:col-span-2">
-                                <label class="block text-sm font-medium text-slate-700 mb-3">Закрепленные сотрудники</label>
-                                <div class="mb-4">
-                                    <p class="text-xs text-slate-500 mb-2">Выбранные сотрудники:</p>
-                                    <div class="flex flex-wrap gap-2 min-h-[42px] p-3 bg-slate-50/50 border border-slate-200 rounded-xl">
-                                        <template x-for="employee in editGetSelectedEmployees()" :key="employee.id">
-                                            <span class="inline-flex items-center px-3 py-1.5 bg-gradient-to-r from-violet-500 to-indigo-600 text-white text-sm font-medium rounded-lg shadow-sm">
-                                                <span x-text="employee.name"></span>
-                                                <button type="button" @click="editRemoveEmployee(employee.id)" class="ml-2 hover:bg-white/20 rounded-full p-0.5 transition-colors duration-150">
-                                                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-                                                    </svg>
-                                                </button>
-                                                <input type="hidden" name="employees[]" :value="employee.id">
-                                            </span>
-                                        </template>
-                                        <span x-show="editGetSelectedEmployees().length === 0" class="text-sm text-slate-400 italic">Нет закрепленных сотрудников</span>
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <p class="text-xs text-slate-500 mb-2">Доступные сотрудники:</p>
-                                    <div class="flex flex-wrap gap-2 min-h-[42px] p-3 bg-slate-50/50 border border-slate-200 rounded-xl">
-                                        <template x-for="employee in editGetAvailableEmployees()" :key="employee.id">
-                                            <button type="button" @click="editAddEmployee(employee.id)" class="inline-flex items-center px-3 py-1.5 bg-white border border-slate-200 text-slate-700 text-sm font-medium rounded-lg hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 transition-all duration-150">
-                                                <svg class="w-3.5 h-3.5 mr-1.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                                                </svg>
-                                                <span x-text="employee.name"></span>
-                                            </button>
-                                        </template>
-                                        <span x-show="editGetAvailableEmployees().length === 0" class="text-sm text-slate-400 italic">Все сотрудники выбраны</span>
-                                    </div>
-                                </div>
+                                <label for="edit_responsible" class="block text-sm font-medium text-slate-700 mb-2">Ответственное лицо</label>
+                                <select name="responsible_employee_id" id="edit_responsible" x-model="editClient.responsible_employee_id" class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
+                                    <option value="">Не назначено</option>
+                                    <template x-for="employee in allEmployees" :key="employee.id">
+                                        <option :value="employee.id" x-text="employee.name"></option>
+                                    </template>
+                                </select>
+                                <p class="mt-1 text-xs text-slate-500">На это лицо будут ассайниться все БП клиента</p>
                             </div>
 
                             <div class="sm:col-span-2">
@@ -612,7 +555,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function setupInnMask(input) {
         if (!input) return;
         input.addEventListener('input', function(e) {
-            e.target.value = e.target.value.replace(/\D/g, '').slice(0, 12);
+            e.target.value = e.target.value.replace(/\D/g, '').slice(0, 14);
         });
     }
 

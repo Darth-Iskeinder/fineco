@@ -13,7 +13,7 @@ class BuhSmetaController extends Controller
     public function index(Request $request)
     {
         $clients = Client::active()
-            ->with(['taxSystem', 'tariff', 'employees'])
+            ->with(['taxSystem', 'tariff', 'responsibleEmployee'])
             ->orderBy('name')
             ->get();
 

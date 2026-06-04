@@ -9,14 +9,6 @@
 .toggle-btn { transition: background-color .2s; }
 </style>
 
-@php
-$prevMonth  = $month === 1 ? 12 : $month - 1;
-$prevYear   = $month === 1 ? $year - 1 : $year;
-$nextMonth  = $month === 12 ? 1 : $month + 1;
-$nextYear   = $month === 12 ? $year + 1 : $year;
-$monthNames = ['', 'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
-@endphp
-
 <div x-data="estimatePage(
     {{ $client->id }},
     {{ json_encode($tariffBPs) }},
@@ -24,8 +16,6 @@ $monthNames = ['', 'Январь', 'Февраль', 'Март', 'Апрель',
     {{ json_encode($estimate->notes ?? '') }},
     {{ json_encode($estimate->updated_at?->format('d.m.Y H:i')) }},
     {{ json_encode($allServices) }},
-    {{ $year }},
-    {{ $month }},
     {{ json_encode($specialFlags) }}
 )">
 
@@ -50,22 +40,7 @@ $monthNames = ['', 'Январь', 'Февраль', 'Март', 'Апрель',
         </div>
         <div class="flex items-center gap-2 flex-wrap justify-end">
 
-            <!-- Навигация по месяцам -->
-            <div class="flex items-center bg-white border border-slate-200 rounded-xl px-1 py-1">
-                <a href="/clients/{{ $client->id }}/estimate/edit?year={{ $prevYear }}&month={{ $prevMonth }}"
-                   class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors">
-                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
-                </a>
-                <span class="text-sm font-semibold text-slate-800 px-3 min-w-[130px] text-center">
-                    {{ $monthNames[$month] }} {{ $year }}
-                </span>
-                <a href="/clients/{{ $client->id }}/estimate/edit?year={{ $nextYear }}&month={{ $nextMonth }}"
-                   class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors">
-                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                </a>
-            </div>
-
-            <a href="/clients/{{ $client->id }}/estimate/pdf?year={{ $year }}&month={{ $month }}" target="_blank"
+            <a href="/clients/{{ $client->id }}/estimate/pdf" target="_blank"
                class="inline-flex items-center px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors">
                 <svg class="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
@@ -84,24 +59,6 @@ $monthNames = ['', 'Январь', 'Февраль', 'Март', 'Апрель',
     </div>
 
     <div class="space-y-4">
-
-        <!-- Кнопка "Сформировать из прошлого месяца" -->
-        @if($hasPrevious && !$estimateHasItems)
-        <div class="bg-violet-50 border border-violet-200 rounded-2xl p-5 flex items-center justify-between">
-            <div>
-                <p class="text-sm font-semibold text-violet-900">Смета за {{ $monthNames[$month] }} {{ $year }} пустая</p>
-                <p class="text-xs text-violet-600 mt-0.5">Перенести постоянные услуги из {{ $monthNames[$prevMonth] }} {{ $prevYear }}?</p>
-            </div>
-            <button type="button" @click="generate()" :disabled="generating"
-                    class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-60 transition-colors flex-shrink-0 ml-4">
-                <svg x-show="generating" class="w-4 h-4 mr-1.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                </svg>
-                <span x-text="generating ? 'Формируем...' : 'Сформировать'"></span>
-            </button>
-        </div>
-        @endif
 
         <!-- Блок: Услуги по тарифу (всегда постоянные) -->
         <template x-if="regularBPs.length > 0">
@@ -368,7 +325,7 @@ $monthNames = ['', 'Январь', 'Февраль', 'Март', 'Апрель',
 </div>
 
 <script>
-function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedAt, allServices, year, month, specialFlags) {
+function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedAt, allServices, specialFlags) {
     return {
         clientId,
         tariffBPs,
@@ -377,11 +334,8 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
         updatedAt: initialUpdatedAt,
         allServices,
         specialFlags,
-        year,
-        month,
 
         saving: false,
-        generating: false,
         toastShow: false,
         toastMsg: '',
         toastType: 'success',
@@ -500,30 +454,6 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
             this.showExtraModal = false;
         },
 
-        async generate() {
-            this.generating = true;
-            try {
-                const res = await fetch('/clients/' + this.clientId + '/estimate/generate', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]').content,
-                        'Accept': 'application/json',
-                    },
-                    body: JSON.stringify({ year: this.year, month: this.month }),
-                });
-                const data = await res.json();
-                if (data.success) {
-                    window.location.reload();
-                } else {
-                    this.showToast(data.message || 'Ошибка', 'error');
-                }
-            } catch(e) {
-                this.showToast('Ошибка: ' + e.message, 'error');
-            }
-            this.generating = false;
-        },
-
         async save() {
             this.saving = true;
             try {
@@ -535,8 +465,6 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
                         'Accept': 'application/json',
                     },
                     body: JSON.stringify({
-                        year:       this.year,
-                        month:      this.month,
                         notes:      this.notes,
                         tariff_bps: this.tariffBPs,
                         extras:     this.extras,

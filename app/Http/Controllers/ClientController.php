@@ -16,7 +16,7 @@ class ClientController extends Controller
 {
     public function index(Request $request)
     {
-        $clients = Client::with(['taxSystem', 'tariff', 'employees'])
+        $clients = Client::with(['taxSystem', 'tariff', 'responsibleEmployee'])
             ->search($request->search)
             ->orderBy('created_at', 'desc')
             ->paginate(15)
@@ -35,7 +35,7 @@ class ClientController extends Controller
     {
         $search = $request->get('q', '');
 
-        $clients = Client::with(['taxSystem', 'tariff', 'employees'])
+        $clients = Client::with(['taxSystem', 'tariff', 'responsibleEmployee'])
             ->search($search)
             ->orderBy('created_at', 'desc')
             ->limit(50)
@@ -50,8 +50,8 @@ class ClientController extends Controller
                     'tariff_id' => $client->tariff_id,
                     'tariff_name' => $client->tariff?->name ?? '—',
                     'is_active' => $client->is_active,
-                    'employee_ids' => $client->employees->pluck('id')->toArray(),
-                    'employees_list' => $client->employees->pluck('full_name')->implode(', ') ?: '—',
+                    'responsible_employee_id' => $client->responsible_employee_id,
+                    'responsible_name' => $client->responsibleEmployee?->full_name ?? '—',
                 ];
             });
 
@@ -66,6 +66,7 @@ class ClientController extends Controller
             'activityType',
             'tariff',
             'employees',
+            'responsibleEmployee',
             'clientStatus',
             'taxpayerCategoryModel',
             'documents',
@@ -78,15 +79,14 @@ class ClientController extends Controller
 
     public function store(Request $request)
     {
-        $validated = $request->validate([
+        $validated = $request->validateWithBag('createClient', [
             'name' => ['required', 'string', 'max:255'],
             'inn' => ['required', 'string', 'max:14', 'unique:clients,inn'],
             'tax_system_id' => ['nullable', 'exists:tax_systems,id'],
             'tariff_id' => ['nullable', 'exists:tariffs,id'],
+            'responsible_employee_id' => ['nullable', 'exists:employees,id'],
             'is_active' => ['boolean'],
             'notes' => ['nullable', 'string'],
-            'employees' => ['array'],
-            'employees.*' => ['exists:employees,id'],
         ], [
             'inn.required' => 'Введите ИНН',
             'inn.unique' => 'Клиент с таким ИНН уже существует',
@@ -97,14 +97,11 @@ class ClientController extends Controller
             'inn' => $validated['inn'],
             'tax_system_id' => $validated['tax_system_id'] ?? null,
             'tariff_id' => $validated['tariff_id'] ?? null,
+            'responsible_employee_id' => $validated['responsible_employee_id'] ?? null,
             'is_active' => $validated['is_active'] ?? true,
             'notes' => $validated['notes'] ?? null,
             'service_start_date' => $validated['service_start_date'] ?? now()->toDateString(),
         ]);
-
-        if (!empty($validated['employees'])) {
-            $client->employees()->sync($validated['employees']);
-        }
 
         return redirect()
             ->route('clients.show', $client)
@@ -113,18 +110,16 @@ class ClientController extends Controller
 
     public function update(Request $request, Client $client)
     {
-        $validated = $request->validate([
+        $validated = $request->validateWithBag('updateClient', [
             'name' => ['required', 'string', 'max:255'],
-            'inn' => ['required', 'string', 'digits:14', Rule::unique('clients')->ignore($client->id)],
+            'inn' => ['required', 'string', 'max:14', Rule::unique('clients')->ignore($client->id)],
             'tax_system_id' => ['nullable', 'exists:tax_systems,id'],
             'tariff_id' => ['nullable', 'exists:tariffs,id'],
+            'responsible_employee_id' => ['nullable', 'exists:employees,id'],
             'is_active' => ['boolean'],
             'notes' => ['nullable', 'string'],
-            'employees' => ['array'],
-            'employees.*' => ['exists:employees,id'],
         ], [
             'inn.required' => 'Введите ИНН',
-            'inn.digits' => 'ИНН должен содержать 14 цифр',
             'inn.unique' => 'Клиент с таким ИНН уже существует',
         ]);
 
@@ -133,11 +128,10 @@ class ClientController extends Controller
             'inn' => $validated['inn'],
             'tax_system_id' => $validated['tax_system_id'] ?? null,
             'tariff_id' => $validated['tariff_id'] ?? null,
+            'responsible_employee_id' => $validated['responsible_employee_id'] ?? null,
             'is_active' => $request->boolean('is_active'),
             'notes' => $validated['notes'] ?? null,
         ]);
-
-        $client->employees()->sync($validated['employees'] ?? []);
 
         return redirect()
             ->route('clients.index')
@@ -175,8 +169,7 @@ class ClientController extends Controller
                 'contract_url' => ['nullable', 'string', 'max:500'],
                 'requisites_url' => ['nullable', 'string', 'max:500'],
                 'founding_docs_urls' => ['nullable', 'array'],
-                'employees' => ['nullable', 'array'],
-                'employees.*' => ['exists:employees,id'],
+                'responsible_employee_id' => ['nullable', 'exists:employees,id'],
             ],
             'attorney' => [
                 'power_of_attorney_name' => ['nullable', 'array'],
@@ -278,6 +271,7 @@ class ClientController extends Controller
             'activityType',
             'tariff',
             'employees',
+            'responsibleEmployee',
             'clientStatus',
             'taxpayerCategoryModel',
             'documents',

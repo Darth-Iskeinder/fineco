@@ -65,7 +65,6 @@ Route::middleware('auth:employee')->group(function () {
         Route::get('/{client}/estimate/edit', [EstimateController::class, 'edit'])->name('estimate.edit');
         Route::get('/{client}/estimate', [EstimateController::class, 'show'])->name('estimate.show');
         Route::post('/{client}/estimate', [EstimateController::class, 'save'])->name('estimate.save');
-        Route::post('/{client}/estimate/generate', [EstimateController::class, 'generate'])->name('estimate.generate');
         Route::get('/{client}/estimate/pdf', [EstimateController::class, 'pdf'])->name('estimate.pdf');
     });
 
@@ -160,6 +159,24 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/service-types', [SettingsController::class, 'storeServiceType'])->name('service-types.store');
         Route::put('/service-types/{serviceType}', [SettingsController::class, 'updateServiceType'])->name('service-types.update');
         Route::delete('/service-types/{serviceType}', [SettingsController::class, 'destroyServiceType'])->name('service-types.destroy');
+
+        // Категория
+        Route::get('/categories', [SettingsController::class, 'categoriesPage'])->name('categories');
+        Route::post('/categories', [SettingsController::class, 'storeCategory'])->name('categories.store');
+        Route::put('/categories/{category}', [SettingsController::class, 'updateCategory'])->name('categories.update');
+        Route::delete('/categories/{category}', [SettingsController::class, 'destroyCategory'])->name('categories.destroy');
+
+        // Сфера
+        Route::get('/spheres', [SettingsController::class, 'spheresPage'])->name('spheres');
+        Route::post('/spheres', [SettingsController::class, 'storeSphere'])->name('spheres.store');
+        Route::put('/spheres/{sphere}', [SettingsController::class, 'updateSphere'])->name('spheres.update');
+        Route::delete('/spheres/{sphere}', [SettingsController::class, 'destroySphere'])->name('spheres.destroy');
+
+        // Группа
+        Route::get('/groups', [SettingsController::class, 'groupsPage'])->name('groups');
+        Route::post('/groups', [SettingsController::class, 'storeGroup'])->name('groups.store');
+        Route::put('/groups/{serviceGroup}', [SettingsController::class, 'updateGroup'])->name('groups.update');
+        Route::delete('/groups/{serviceGroup}', [SettingsController::class, 'destroyGroup'])->name('groups.destroy');
 
         // Периодичность
         Route::get('/periodicities', [SettingsController::class, 'periodicitiesPage'])->name('periodicities');

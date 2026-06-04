@@ -59,6 +59,7 @@ class Client extends Model
         'service_type',
         'price',
         'tariff_id',
+        'responsible_employee_id',
         'contract_with',
         'service_start_date',
         'service_end_date',
@@ -264,6 +265,11 @@ class Client extends Model
         return $this->belongsTo(TaxpayerCategory::class, 'taxpayer_category_id');
     }
 
+    public function responsibleEmployee(): BelongsTo
+    {
+        return $this->belongsTo(Employee::class, 'responsible_employee_id');
+    }
+
     public function documents(): HasMany
     {
         return $this->hasMany(ClientDocument::class)->orderBy('created_at', 'desc');
@@ -386,10 +392,10 @@ class Client extends Model
     }
 
     /**
-     * Получить список ответственных сотрудников (имена)
+     * Имя ответственного лица.
      */
     public function getResponsibleNamesAttribute(): string
     {
-        return $this->employees->pluck('full_name')->join(', ') ?: '—';
+        return $this->responsibleEmployee?->full_name ?: '—';
     }
 }

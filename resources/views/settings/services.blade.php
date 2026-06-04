@@ -18,10 +18,15 @@ $servicesJson = $services->map(fn($s) => array_merge([
     'pricing_rules'   => $s->pricing_rules ?? [],
     'periodicity'       => $s->periodicity,
     'due_day'           => $s->due_day,
+    'start_month'       => $s->start_month,
+    'start_day'         => $s->start_day,
+    'deadline'          => $s->deadlineLabels(),
     'deadline_days'     => $s->deadline_days,
     'execution_minutes' => $s->execution_minutes,
     'closing_rule'      => $s->closing_rule,
+    'requires_document' => $s->requires_document,
     'check_type'        => $s->check_type,
+    'requires_review'   => $s->requires_review,
     'billing'           => $s->billing,
     'comment'           => $s->comment,
     'is_active'         => $s->is_active,
@@ -92,7 +97,7 @@ $servicesJson = $services->map(fn($s) => array_merge([
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Категория</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Режим НО</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Периодичность</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Дедлайн (дн.)</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Дедлайн</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">План (мин.)</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Правило закрытия</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Проверка</th>
@@ -137,10 +142,25 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                 </div>
                             </td>
                             <td class="px-4 py-3 whitespace-nowrap text-sm text-slate-500" x-text="row.svc.periodicity || '—'"></td>
-                            <td class="px-4 py-3 whitespace-nowrap text-sm text-slate-500" x-text="row.svc.deadline_days ? row.svc.deadline_days + ' дн.' : '—'"></td>
+                            <td class="px-4 py-3 whitespace-nowrap text-sm">
+                                <div class="flex flex-wrap gap-1">
+                                    <template x-for="(d, di) in (row.svc.deadline || [])" :key="di">
+                                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600" x-text="d"></span>
+                                    </template>
+                                    <span x-show="!row.svc.deadline || row.svc.deadline.length === 0" class="text-slate-400">—</span>
+                                </div>
+                            </td>
                             <td class="px-4 py-3 whitespace-nowrap text-sm text-slate-500" x-text="row.svc.execution_minutes ? row.svc.execution_minutes + ' мин.' : '—'"></td>
-                            <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="row.svc.closing_rule || '—'"></td>
-                            <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="row.svc.check_type || '—'"></td>
+                            <td class="px-4 py-3 text-sm whitespace-nowrap">
+                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                                      :class="row.svc.requires_document ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'"
+                                      x-text="row.svc.requires_document ? 'С документом' : 'Без документа'"></span>
+                            </td>
+                            <td class="px-4 py-3 text-sm whitespace-nowrap">
+                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                                      :class="row.svc.requires_review ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'"
+                                      x-text="row.svc.requires_review ? 'Проверка' : 'Самоконтроль'"></span>
+                            </td>
                             <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="row.svc.billing || '—'"></td>
                             {{-- TODO: ячейка "Стоимость" скрыта — возможно не нужна в таблице БП, рассмотреть удаление поля cost из services --}}
                             <td class="px-4 py-3 text-sm text-slate-500 max-w-[160px] truncate" x-text="row.svc.comment || '—'"></td>
@@ -228,23 +248,39 @@ $servicesJson = $services->map(fn($s) => array_merge([
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
                                     <label class="block text-sm font-medium text-slate-700 mb-1">Сфера</label>
-                                    <input type="text" x-model="serviceForm.sphere" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                    <select x-model="serviceForm.sphere" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
+                                        <option value="">— не указана —</option>
+                                        <template x-if="serviceForm.sphere && !spheres.includes(serviceForm.sphere)">
+                                            <option :value="serviceForm.sphere" x-text="serviceForm.sphere"></option>
+                                        </template>
+                                        <template x-for="sph in spheres" :key="sph">
+                                            <option :value="sph" x-text="sph"></option>
+                                        </template>
+                                    </select>
                                 </div>
                                 <div>
                                     <label class="block text-sm font-medium text-slate-700 mb-1">Группа</label>
-                                    <input type="text" x-model="serviceForm.service_group" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-slate-700 mb-1">Бизнес процесс</label>
-                                    <input type="text" x-model="serviceForm.business_process" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                    <select x-model="serviceForm.service_group" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
+                                        <option value="">— не указана —</option>
+                                        <template x-if="serviceForm.service_group && !groups.includes(serviceForm.service_group)">
+                                            <option :value="serviceForm.service_group" x-text="serviceForm.service_group"></option>
+                                        </template>
+                                        <template x-for="g in groups" :key="g">
+                                            <option :value="g" x-text="g"></option>
+                                        </template>
+                                    </select>
                                 </div>
                                 <div>
                                     <label class="block text-sm font-medium text-slate-700 mb-1">Категория</label>
-                                    <input type="text" x-model="serviceForm.category" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-slate-700 mb-1">Дедлайн (дней)</label>
-                                    <input type="number" x-model="serviceForm.deadline_days" min="0" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                    <select x-model="serviceForm.category" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
+                                        <option value="">— не указана —</option>
+                                        <template x-if="serviceForm.category && !categories.includes(serviceForm.category)">
+                                            <option :value="serviceForm.category" x-text="serviceForm.category"></option>
+                                        </template>
+                                        <template x-for="c in categories" :key="c">
+                                            <option :value="c" x-text="c"></option>
+                                        </template>
+                                    </select>
                                 </div>
                                 <div>
                                     <label class="block text-sm font-medium text-slate-700 mb-1">План выполнения (мин.)</label>
@@ -252,84 +288,109 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                 </div>
                                 <div>
                                     <label class="block text-sm font-medium text-slate-700 mb-1">Правило закрытия</label>
-                                    <input type="text" x-model="serviceForm.closing_rule" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                    <div class="flex items-center gap-2">
+                                        <button type="button" @click="serviceForm.requires_document = !serviceForm.requires_document"
+                                                :class="serviceForm.requires_document ? 'bg-indigo-600' : 'bg-slate-300'"
+                                                class="relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500/20">
+                                            <span :class="serviceForm.requires_document ? 'translate-x-6' : 'translate-x-1'" class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform"></span>
+                                        </button>
+                                        <span class="text-sm text-slate-700" x-text="serviceForm.requires_document ? 'С документом' : 'Без документа'"></span>
+                                    </div>
+                                    <p class="mt-1 text-xs text-slate-400" x-text="serviceForm.requires_document ? 'Для закрытия нужно прикрепить документ' : 'Можно закрыть без документа'"></p>
                                 </div>
                                 <div>
                                     <label class="block text-sm font-medium text-slate-700 mb-1">Проверка</label>
-                                    <input type="text" x-model="serviceForm.check_type" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                    <div class="flex items-center gap-2">
+                                        <button type="button" @click="serviceForm.requires_review = !serviceForm.requires_review"
+                                                :class="serviceForm.requires_review ? 'bg-indigo-600' : 'bg-slate-300'"
+                                                class="relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500/20">
+                                            <span :class="serviceForm.requires_review ? 'translate-x-6' : 'translate-x-1'" class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform"></span>
+                                        </button>
+                                        <span class="text-sm text-slate-700" x-text="serviceForm.requires_review ? 'Обязательная проверка' : 'Самоконтроль'"></span>
+                                    </div>
+                                    <p class="mt-1 text-xs text-slate-400" x-text="serviceForm.requires_review ? 'Задачу закрывает аудитор после проверки' : 'Задача закрывается сразу после «выполнено»'"></p>
                                 </div>
                                 <div>
                                     <label class="block text-sm font-medium text-slate-700 mb-1">Биллинг</label>
                                     <input type="text" x-model="serviceForm.billing" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
                                 </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-slate-700 mb-1">Комментарий</label>
-                                    <input type="text" x-model="serviceForm.comment" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                                </div>
                             </div>
 
                             <div class="grid grid-cols-2 gap-4">
-                                <template x-if="serviceForm.children.length === 0">
-                                    <div>
-                                        <label class="block text-sm font-medium text-slate-700 mb-1">
-                                            Стоимость (сом)
-                                            <span class="text-red-500">*</span>
-                                        </label>
-                                        <input type="number" x-model="serviceForm.cost" required min="0"
-                                               class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                                    </div>
-                                </template>
-                                <template x-if="serviceForm.children.length > 0">
-                                    <div class="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg">
-                                        <svg class="w-4 h-4 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                                        <span class="text-xs text-amber-700">Стоимость формируется из подпунктов</span>
-                                    </div>
-                                </template>
-                                <div :class="serviceForm.children.length > 0 ? 'col-span-2' : ''">
+                                <div class="col-span-2">
                                     <label class="block text-sm font-medium text-slate-700 mb-1">Периодичность</label>
-                                    <select x-model="serviceForm.periodicity" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
+                                    <select x-model="serviceForm.periodicity" @change="onPeriodicityChange()" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
                                         <option value="">— не указана —</option>
-                                        <option value="Ежемесячный">Ежемесячный</option>
-                                        <option value="Ежеквартальный">Ежеквартальный</option>
-                                        <option value="Ежегодный">Ежегодный</option>
-                                        <option value="Разовый">Разовый</option>
+                                        <template x-for="p in periodicities" :key="p.name">
+                                            <option :value="p.name" x-text="p.name"></option>
+                                        </template>
                                     </select>
                                 </div>
-                            </div>
 
-                            <template x-if="!serviceForm.parent_id">
-                                <div>
-                                    <label class="block text-sm font-medium text-slate-700 mb-1">Срок выполнения</label>
-                                    <div class="relative">
-                                        <button type="button" @click="showDueDayPicker = !showDueDayPicker"
-                                                class="w-full flex items-center justify-between px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white hover:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors">
-                                            <span :class="serviceForm.due_day ? 'text-slate-800' : 'text-slate-400'" x-text="serviceForm.due_day ? 'До ' + serviceForm.due_day + ' числа каждого месяца' : '— не указан —'"></span>
-                                            <svg class="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                                        </button>
-                                        <div x-show="showDueDayPicker" @click.away="showDueDayPicker = false"
-                                             class="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-xl p-3" style="display:none">
-                                            <div class="flex items-center justify-between mb-2 px-1">
-                                                <span class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Выберите число</span>
-                                                <button type="button" @click="serviceForm.due_day = null; showDueDayPicker = false" class="text-xs text-slate-400 hover:text-red-500 transition-colors">Очистить</button>
-                                            </div>
-                                            <div class="grid grid-cols-7 mb-1">
-                                                <template x-for="d in ['Пн','Вт','Ср','Чт','Пт','Сб','Вс']" :key="d">
-                                                    <div class="text-center text-xs text-slate-400 font-medium py-1" x-text="d"></div>
-                                                </template>
-                                            </div>
-                                            <div class="grid grid-cols-7 gap-0.5">
-                                                <template x-for="day in Array.from({length: 31}, (_, i) => i + 1)" :key="day">
-                                                    <button type="button" @click="serviceForm.due_day = day; showDueDayPicker = false"
-                                                            :class="serviceForm.due_day === day ? 'bg-indigo-600 text-white font-semibold' : 'text-slate-700 hover:bg-indigo-50 hover:text-indigo-600'"
-                                                            class="h-8 w-full rounded-lg text-sm transition-colors" x-text="day"></button>
-                                                </template>
-                                                <template x-for="_ in [1,2,3,4]" :key="'e' + _"><div></div></template>
+                                {{-- Месяц: теги месяцев для ежеквартально/ежегодно, иначе недоступно --}}
+                                <div class="col-span-2">
+                                    <label class="block text-sm font-medium text-slate-700 mb-1">
+                                        Месяц
+                                        <span x-show="monthFieldEnabled && monthMultiple" class="text-slate-400 font-normal">(можно выбрать несколько)</span>
+                                    </label>
+                                    <template x-if="monthFieldEnabled">
+                                        <div class="flex flex-wrap gap-1.5">
+                                            <template x-for="(m, i) in months" :key="i">
+                                                <button type="button" @click="toggleMonth(i + 1)"
+                                                        :class="isMonthSelected(i + 1) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'"
+                                                        class="px-2.5 py-1 rounded-lg border text-xs font-medium transition-colors" x-text="m"></button>
+                                            </template>
+                                        </div>
+                                    </template>
+                                    <template x-if="!monthFieldEnabled">
+                                        <div class="flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-400">
+                                            <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+                                            <span x-text="monthDisabledHint"></span>
+                                        </div>
+                                    </template>
+                                </div>
+
+                                {{-- День: дни недели тегами для еженедельно, иначе день месяца --}}
+                                <div class="col-span-2">
+                                    <label class="block text-sm font-medium text-slate-700 mb-1">
+                                        День
+                                        <span x-show="dayIsWeekday" class="text-slate-400 font-normal">(дни недели, можно несколько)</span>
+                                    </label>
+                                    <template x-if="dayIsWeekday">
+                                        <div class="flex flex-wrap gap-1.5">
+                                            <template x-for="w in weekdays" :key="w.n">
+                                                <button type="button" @click="toggleWeekday(w.n)"
+                                                        :class="isWeekdaySelected(w.n) ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'"
+                                                        class="px-3 py-1 rounded-lg border text-xs font-medium transition-colors" x-text="w.label"></button>
+                                            </template>
+                                        </div>
+                                    </template>
+                                    <template x-if="!dayIsWeekday">
+                                        <div class="relative">
+                                            <button type="button" @click="showStartDayPicker = !showStartDayPicker"
+                                                    class="w-full flex items-center justify-between px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white hover:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-colors">
+                                                <span :class="dayOfMonth ? 'text-slate-800' : 'text-slate-400'" x-text="dayOfMonth ? dayOfMonth + ' число' : '— выберите число —'"></span>
+                                                <svg class="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                                            </button>
+                                            <div x-show="showStartDayPicker" @click.away="showStartDayPicker = false"
+                                                 class="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-xl p-3" style="display:none">
+                                                <div class="flex items-center justify-between mb-2 px-1">
+                                                    <span class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Выберите число</span>
+                                                    <button type="button" @click="dayOfMonth = ''; showStartDayPicker = false" class="text-xs text-slate-400 hover:text-red-500 transition-colors">Очистить</button>
+                                                </div>
+                                                <div class="grid grid-cols-7 gap-0.5">
+                                                    <template x-for="day in Array.from({length: 31}, (_, i) => i + 1)" :key="day">
+                                                        <button type="button" @click="dayOfMonth = day; showStartDayPicker = false"
+                                                                :class="dayOfMonth === day ? 'bg-indigo-600 text-white font-semibold' : 'text-slate-700 hover:bg-indigo-50 hover:text-indigo-600'"
+                                                                class="h-8 w-full rounded-lg text-sm transition-colors" x-text="day"></button>
+                                                    </template>
+                                                    <template x-for="_ in [1,2,3,4]" :key="'e' + _"><div></div></template>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                    <p class="mt-1 text-xs text-slate-400">Сотрудник получит напоминание за 2–3 дня до этой даты</p>
+                                    </template>
                                 </div>
-                            </template>
+                            </div>
 
                             <template x-if="serviceForm.children.length === 0">
                                 <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
@@ -393,10 +454,9 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                                     <input type="number" x-model.number="child.cost" min="0" placeholder="Стоимость" class="px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
                                                     <select x-model="child.periodicity" class="px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
                                                         <option value="">— периодичность —</option>
-                                                        <option value="Ежемесячный">Ежемесячный</option>
-                                                        <option value="Ежеквартальный">Ежеквартальный</option>
-                                                        <option value="Ежегодный">Ежегодный</option>
-                                                        <option value="Разовый">Разовый</option>
+                                                        <template x-for="p in periodicities" :key="p.name">
+                                                            <option :value="p.name" x-text="p.name"></option>
+                                                        </template>
                                                     </select>
                                                     <label class="col-span-2 flex items-center gap-1.5 cursor-pointer">
                                                         <input type="checkbox" x-model="child.allows_quantity" class="w-3.5 h-3.5 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500">
@@ -471,11 +531,51 @@ function servicesPage() {
         services: @json($servicesJson),
         taxSystems: @json($taxSystems),
         specialFlags: @json($specialFlags),
+        periodicities: @json($periodicities),
+        categories: @json($categories),
+        spheres: @json($spheres),
+        groups: @json($groups),
         selectedRowId: null,
 
         sphereFilter: '',
         searchQuery: '',
         groupBySphere: false,
+
+        months: ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'],
+        weekdays: [{n:1,label:'Пн'},{n:2,label:'Вт'},{n:3,label:'Ср'},{n:4,label:'Чт'},{n:5,label:'Пт'},{n:6,label:'Сб'},{n:7,label:'Вс'}],
+
+        // Тип выбранной периодичности (kind) определяет поведение полей «Месяц»/«День»
+        get selectedKind() {
+            const p = this.periodicities.find(x => x.name === this.serviceForm.periodicity);
+            return p ? p.kind : null;
+        },
+        get monthFieldEnabled() { return ['quarterly','yearly'].includes(this.selectedKind); },
+        get monthMultiple() { return this.selectedKind === 'quarterly'; }, // ежегодно — только один месяц
+        get dayIsWeekday() { return this.selectedKind === 'weekly'; },
+        get monthDisabledHint() {
+            if (!this.serviceForm.periodicity) return 'Сначала выберите периодичность';
+            if (this.selectedKind === 'monthly') return 'Недоступно для «Ежемесячно»';
+            if (this.selectedKind === 'weekly') return 'Недоступно для «Еженедельно»';
+            return 'Недоступно для этой периодичности';
+        },
+        isMonthSelected(n) { return (this.serviceForm.start_month || []).includes(n); },
+        toggleMonth(n) {
+            const arr = this.serviceForm.start_month || [];
+            if (this.monthMultiple) {
+                this.serviceForm.start_month = arr.includes(n) ? arr.filter(x => x !== n) : [...arr, n].sort((a, b) => a - b);
+            } else {
+                this.serviceForm.start_month = arr.includes(n) ? [] : [n]; // ежегодно: один месяц
+            }
+        },
+        isWeekdaySelected(n) { return (this.serviceForm.start_day || []).includes(n); },
+        toggleWeekday(n) {
+            const arr = this.serviceForm.start_day || [];
+            this.serviceForm.start_day = arr.includes(n) ? arr.filter(x => x !== n) : [...arr, n].sort((a, b) => a - b);
+        },
+        get dayOfMonth() { return (this.serviceForm.start_day && this.serviceForm.start_day.length) ? this.serviceForm.start_day[0] : ''; },
+        set dayOfMonth(v) { this.serviceForm.start_day = v ? [parseInt(v)] : []; },
+        // При смене периодичности типы месяца/дня меняются — сбрасываем прежний выбор
+        onPeriodicityChange() { this.serviceForm.start_month = []; this.serviceForm.start_day = []; },
 
         get sphereOptions() {
             return [...new Set(this.services.map(s => s.sphere).filter(Boolean))]
@@ -519,13 +619,14 @@ function servicesPage() {
         showServiceModal: false,
         savingService: false,
         showDueDayPicker: false,
+        showStartDayPicker: false,
         serviceFormErrors: { tax_systems: false },
         serviceForm: {
             id: null, parent_id: null, tax_systems: [], name: '', description: '',
             sphere: '', service_group: '', business_process: '', category: '',
             cost: 0, pricing_rules: [], use_tiered_pricing: false,
-            periodicity: '', due_day: null, deadline_days: null, execution_minutes: null,
-            closing_rule: '', check_type: '', billing: '', comment: '',
+            periodicity: '', due_day: null, start_month: [], start_day: [], deadline_days: null, execution_minutes: null,
+            closing_rule: '', requires_document: false, check_type: '', requires_review: false, billing: '', comment: '',
             allows_quantity: false, flags: {}, children: [],
         },
 
@@ -558,8 +659,9 @@ function servicesPage() {
                     business_process: svc.business_process || '', category: svc.category || '',
                     cost: svc.cost, pricing_rules: rules, use_tiered_pricing: rules.length > 0,
                     periodicity: svc.periodicity || '', due_day: svc.due_day || null,
+                    start_month: Array.isArray(svc.start_month) ? svc.start_month : [], start_day: Array.isArray(svc.start_day) ? svc.start_day : [],
                     deadline_days: svc.deadline_days || null, execution_minutes: svc.execution_minutes || null,
-                    closing_rule: svc.closing_rule || '', check_type: svc.check_type || '',
+                    closing_rule: svc.closing_rule || '', requires_document: !!svc.requires_document, check_type: svc.check_type || '', requires_review: !!svc.requires_review,
                     billing: svc.billing || '', comment: svc.comment || '',
                     allows_quantity: svc.allows_quantity || false,
                     flags: this.flagsFromSvc(svc),
@@ -570,8 +672,8 @@ function servicesPage() {
                     id: null, parent_id: null, tax_systems: [], name: '', description: '',
                     sphere: '', service_group: '', business_process: '', category: '',
                     cost: 0, pricing_rules: [], use_tiered_pricing: false,
-                    periodicity: '', due_day: null, deadline_days: null, execution_minutes: null,
-                    closing_rule: '', check_type: '', billing: '', comment: '',
+                    periodicity: '', due_day: null, start_month: [], start_day: [], deadline_days: null, execution_minutes: null,
+                    closing_rule: '', requires_document: false, check_type: '', requires_review: false, billing: '', comment: '',
                     allows_quantity: false, flags: this.blankFlags(), children: [],
                 };
             }

@@ -13,7 +13,7 @@
         'ownership_form_label' => $c->ownership_form_label,
         'tax_system_name' => $c->taxSystem?->name ?? '—',
         'tariff_name' => $c->tariff?->name ?? '—',
-        'employees' => $c->employees->pluck('full_name')->implode(', ') ?: '—',
+        'responsible' => $c->responsibleEmployee?->full_name ?? '—',
     ])),
     searchQuery: '',
 
@@ -71,7 +71,7 @@
                         <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">ИНН</th>
                         <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">СНО</th>
                         <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Тарифный план</th>
-                        <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Сотрудники</th>
+                        <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Ответственный</th>
                         <th scope="col" class="relative px-6 py-4"><span class="sr-only">Перейти</span></th>
                     </tr>
                 </thead>
@@ -97,7 +97,7 @@
                                 <div class="text-sm text-slate-600" x-text="client.tariff_name"></div>
                             </td>
                             <td class="px-6 py-4">
-                                <div class="text-sm text-slate-600 max-w-[200px] truncate" x-text="client.employees" :title="client.employees"></div>
+                                <div class="text-sm text-slate-600 max-w-[200px] truncate" x-text="client.responsible" :title="client.responsible"></div>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-right">
                                 <svg class="w-5 h-5 text-slate-400 ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">

@@ -22,9 +22,9 @@ class AppServiceProvider extends ServiceProvider
                 $month    = now()->month;
                 $warnDay  = $today + 3;
 
-                $clientIds = DB::table('client_employee')
-                    ->where('employee_id', $employee->id)
-                    ->pluck('client_id');
+                $clientIds = DB::table('clients')
+                    ->where('responsible_employee_id', $employee->id)
+                    ->pluck('id');
 
                 $completedIds = DB::table('buh_task_logs')
                     ->where('employee_id', $employee->id)
@@ -36,8 +36,6 @@ class AppServiceProvider extends ServiceProvider
                 $plannedUrgent = DB::table('estimate_items')
                     ->join('estimates', 'estimate_items.estimate_id', '=', 'estimates.id')
                     ->whereIn('estimates.client_id', $clientIds)
-                    ->where('estimates.year', $year)
-                    ->where('estimates.month', $month)
                     ->whereNull('estimate_items.parent_id')
                     ->whereNotNull('estimate_items.due_day')
                     ->where('estimate_items.due_day', '<=', $warnDay)

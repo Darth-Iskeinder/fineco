@@ -21,26 +21,22 @@ class BuhTasksController extends Controller
         $year  = max(2020, min(2030, $year));
         $month = max(1, min(12, $month));
 
-        // Клиенты сотрудника с активными сметами за выбранный период
-        $clients = $employee->clients()
+        // Клиенты, за которых сотрудник ответственный, с непустой сметой (одна на клиента)
+        $clients = $employee->responsibleClients()
             ->with([
                 'estimates' => fn($q) => $q
-                    ->where('year', $year)
-                    ->where('month', $month)
                     ->with(['rootItems' => fn($q) => $q
                         ->whereNull('parent_id')
                         ->orderBy('sort_order'),
                     ]),
             ])
             ->whereHas('estimates', fn($q) => $q
-                ->where('year', $year)
-                ->where('month', $month)
                 ->whereHas('rootItems', fn($q2) => $q2->whereNull('parent_id')))
             ->orderBy('name')
             ->get();
 
         // Все клиенты сотрудника (для создания внеплановых задач)
-        $allClients = $employee->clients()->orderBy('clients.name')->get(['clients.id', 'clients.name']);
+        $allClients = $employee->responsibleClients()->orderBy('name')->get(['id', 'name']);
 
         // Логи плановых задач за этот период
         $logs = BuhTaskLog::where('employee_id', $employee->id)
@@ -125,24 +121,19 @@ class BuhTasksController extends Controller
             'service_id' => 'nullable|exists:services,id',
             'name'       => 'required_without:service_id|nullable|string|max:255',
             'cost'       => 'nullable|numeric|min:0',
-            'year'       => 'nullable|integer|min:2020|max:2030',
-            'month'      => 'nullable|integer|min:1|max:12',
         ]);
-
-        $year  = (int) $request->input('year',  now()->year);
-        $month = (int) $request->input('month', now()->month);
 
         $employee = auth('employee')->user();
 
         abort_if(
-            !$employee->clients()->where('clients.id', $request->client_id)->exists(),
+            !$employee->responsibleClients()->where('id', $request->client_id)->exists(),
             403
         );
 
         $client = Client::find($request->client_id);
 
         $estimate = Estimate::firstOrCreate(
-            ['client_id' => $client->id, 'year' => $year, 'month' => $month],
+            ['client_id' => $client->id],
             ['total' => 0]
         );
 
@@ -316,7 +307,7 @@ class BuhTasksController extends Controller
         $employee = auth('employee')->user();
 
         abort_if(
-            !$employee->clients()->where('clients.id', $request->client_id)->exists(),
+            !$employee->responsibleClients()->where('id', $request->client_id)->exists(),
             403
         );
 

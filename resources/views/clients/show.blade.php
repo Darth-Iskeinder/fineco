@@ -682,14 +682,12 @@
                                     <dd class="mt-1 text-sm text-slate-900" x-text="client.contract_with || '—'"></dd>
                                 </div>
                                 <div>
-                                    <dt class="text-sm font-medium text-slate-500">Ответственные лица</dt>
-                                    <dd class="mt-1 flex flex-wrap gap-1">
-                                        <template x-if="client.employees && client.employees.length > 0">
-                                            <template x-for="emp in client.employees" :key="emp.id">
-                                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700" x-text="emp.full_name"></span>
-                                            </template>
+                                    <dt class="text-sm font-medium text-slate-500">Ответственное лицо</dt>
+                                    <dd class="mt-1">
+                                        <template x-if="client.responsible_employee">
+                                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700" x-text="client.responsible_employee.full_name"></span>
                                         </template>
-                                        <template x-if="!client.employees || client.employees.length === 0">
+                                        <template x-if="!client.responsible_employee">
                                             <span class="text-sm text-slate-500">—</span>
                                         </template>
                                     </dd>
@@ -743,12 +741,14 @@
                                     <input type="text" x-model="form.contract.contract_with" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
                                 </div>
                                 <div>
-                                    <label class="block text-sm font-medium text-slate-700 mb-1">Ответственные лица</label>
-                                    <select x-model="form.contract.employees" multiple class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 h-[42px]">
+                                    <label class="block text-sm font-medium text-slate-700 mb-1">Ответственное лицо</label>
+                                    <select x-model="form.contract.responsible_employee_id" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
+                                        <option value="">— Не назначено —</option>
                                         <template x-for="emp in allEmployees" :key="emp.id">
-                                            <option :value="String(emp.id)" :selected="form.contract.employees.includes(String(emp.id))" x-text="emp.full_name"></option>
+                                            <option :value="String(emp.id)" x-text="emp.full_name"></option>
                                         </template>
                                     </select>
+                                    <p class="mt-1 text-xs text-slate-400">На это лицо ассайнятся задачи по компании</p>
                                 </div>
                             </div>
                             <div class="pt-4 border-t border-slate-100">
@@ -1631,7 +1631,7 @@
     </template>
 
     <!-- ==================== СМЕТА (превью) ==================== -->
-    @php $estimate = \App\Models\Estimate::where('client_id', $client->id)->where('year', now()->year)->where('month', now()->month)->first(); @endphp
+    @php $estimate = \App\Models\Estimate::where('client_id', $client->id)->first(); @endphp
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden mt-6">
         <div class="px-6 py-5 flex items-center justify-between">
             <div class="flex items-center gap-4">
@@ -1810,7 +1810,7 @@ function clientShow() {
                 contract_with: this.client.contract_with,
                 contract_url: this.client.contract_url,
                 requisites_url: this.client.requisites_url,
-                employees: this.client.employees?.map(e => String(e.id)) || [],
+                responsible_employee_id: this.client.responsible_employee_id ? String(this.client.responsible_employee_id) : '',
             };
             this.form.attorney = {
                 power_of_attorney_name: Array.isArray(this.client.power_of_attorney_name)
