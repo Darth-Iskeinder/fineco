@@ -4,6 +4,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BuhSmetaController;
 use App\Http\Controllers\BuhTasksController;
 use App\Http\Controllers\ClientController;
+use App\Http\Controllers\ClientServiceScheduleController;
 use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\EstimateController;
 use App\Http\Controllers\SettingsController;
@@ -66,6 +67,10 @@ Route::middleware('auth:employee')->group(function () {
         Route::get('/{client}/estimate', [EstimateController::class, 'show'])->name('estimate.show');
         Route::post('/{client}/estimate', [EstimateController::class, 'save'])->name('estimate.save');
         Route::get('/{client}/estimate/pdf', [EstimateController::class, 'pdf'])->name('estimate.pdf');
+
+        // Индивидуальное расписание БП у клиента (override дефолта)
+        Route::put('/{client}/services/{service}/schedule', [ClientServiceScheduleController::class, 'update'])->name('service-schedule.update');
+        Route::delete('/{client}/services/{service}/schedule', [ClientServiceScheduleController::class, 'destroy'])->name('service-schedule.destroy');
     });
 
     // Модуль БухСмета
@@ -89,6 +94,9 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/adhoc/{task}/pause', [BuhTasksController::class, 'pauseAdhoc'])->name('adhoc.pause');
         Route::post('/adhoc/{task}/complete', [BuhTasksController::class, 'completeAdhoc'])->name('adhoc.complete');
         Route::post('/adhoc/{task}/reset', [BuhTasksController::class, 'resetAdhoc'])->name('adhoc.reset');
+        // Напоминания о сроках (выход воркера tasks:generate)
+        Route::post('/reminders/{reminder}/complete', [BuhTasksController::class, 'completeReminder'])->name('reminders.complete');
+        Route::post('/reminders/{reminder}/reopen', [BuhTasksController::class, 'reopenReminder'])->name('reminders.reopen');
     });
 
     // Настройки (только для админов)

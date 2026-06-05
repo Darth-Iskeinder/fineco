@@ -164,7 +164,12 @@ class Service extends Model
     /** Тип периодичности (kind) этого БП — резолвится из справочника по имени. */
     public function periodicityKind(): ?string
     {
-        $name = $this->periodicity;
+        return static::kindForPeriodicity($this->periodicity);
+    }
+
+    /** Kind по имени периодичности из справочника (с кэшем). Null, если имя пустое/не найдено. */
+    public static function kindForPeriodicity(?string $name): ?string
+    {
         if (!$name) {
             return null;
         }
@@ -242,7 +247,7 @@ class Service extends Model
         return array_values($dates);
     }
 
-    /** Даты срока выполнения этого БП в диапазоне [$from, $to]. */
+    /** Даты срока выполнения этого БП в диапазоне [$from, $to] (по дефолтному расписанию). */
     public function dueDatesBetween(CarbonInterface $from, CarbonInterface $to): array
     {
         return static::computeDueDates(
@@ -255,6 +260,87 @@ class Service extends Model
     }
 
     /**
+     * Выбор эффективного расписания: если есть override клиента — он ЦЕЛИКОМ
+     * перекрывает дефолт БП (предсказуемо, без смешивания полей разных kind);
+     * иначе берём дефолт БП. Чистая функция (без БД) — удобно тестировать.
+     *
+     * @param  array{periodicity:?string,start_month:?array,start_day:?array}|null  $override
+     * @return array{periodicity: ?string, months: int[], days: int[]}
+     */
+    public static function resolveScheduleRaw(
+        ?array $override,
+        ?string $svcPeriodicity,
+        ?array $svcMonths,
+        ?array $svcDays,
+    ): array {
+        $norm = static fn ($a) => array_values(array_map('intval', is_array($a) ? $a : []));
+        $src  = $override ?? [
+            'periodicity' => $svcPeriodicity,
+            'start_month' => $svcMonths,
+            'start_day'   => $svcDays,
+        ];
+
+        return [
+            'periodicity' => $src['periodicity'] ?? null,
+            'months'      => $norm($src['start_month'] ?? []),
+            'days'        => $norm($src['start_day'] ?? []),
+        ];
+    }
+
+    /**
+     * Эффективное расписание (periodicity/months/days) с учётом override клиента.
+     * @return array{periodicity: ?string, months: int[], days: int[]}
+     */
+    public function resolveForClient(?ClientServiceSchedule $override): array
+    {
+        return static::resolveScheduleRaw(
+            $override ? [
+                'periodicity' => $override->periodicity,
+                'start_month' => $override->start_month,
+                'start_day'   => $override->start_day,
+            ] : null,
+            $this->periodicity,
+            is_array($this->start_month) ? $this->start_month : [],
+            is_array($this->start_day) ? $this->start_day : [],
+        );
+    }
+
+    /**
+     * Даты срока выполнения с учётом индивидуального расписания клиента.
+     * $override — строка ClientServiceSchedule для этого клиента и БП (или null → дефолт).
+     */
+    public function dueDatesForClient(?ClientServiceSchedule $override, CarbonInterface $from, CarbonInterface $to): array
+    {
+        $r = $this->resolveForClient($override);
+
+        return static::computeDueDates(
+            static::kindForPeriodicity($r['periodicity']),
+            $r['months'],
+            $r['days'],
+            $from,
+            $to,
+        );
+    }
+
+    /** Подписи срока выполнения с учётом override клиента (для показа в смете). */
+    public function deadlineLabelsForClient(?ClientServiceSchedule $override): array
+    {
+        $r = $this->resolveForClient($override);
+
+        return static::deadlineLabelsFor(
+            static::kindForPeriodicity($r['periodicity']),
+            $r['months'],
+            $r['days'],
+        );
+    }
+
+    /** Индивидуальные расписания этого БП по клиентам. */
+    public function scheduleOverrides(): HasMany
+    {
+        return $this->hasMany(ClientServiceSchedule::class);
+    }
+
+    /**
      * Подписи срока выполнения для отображения в списке (компактно, по типу периодичности):
      *  - quarterly/yearly → конкретные даты текущего года ['20.03','20.07', …];
      *  - monthly          → ['15 числа'];
@@ -264,10 +350,16 @@ class Service extends Model
      */
     public function deadlineLabels(): array
     {
-        $kind   = $this->periodicityKind();
-        $days   = is_array($this->start_day) ? $this->start_day : [];
-        $months = is_array($this->start_month) ? $this->start_month : [];
+        return static::deadlineLabelsFor(
+            $this->periodicityKind(),
+            is_array($this->start_month) ? $this->start_month : [],
+            is_array($this->start_day) ? $this->start_day : [],
+        );
+    }
 
+    /** Та же генерация подписей, но из явных (kind, месяцы, дни) — для override клиента. */
+    public static function deadlineLabelsFor(?string $kind, array $months, array $days): array
+    {
         switch ($kind) {
             case 'weekly':
                 $names = [1 => 'Пн', 2 => 'Вт', 3 => 'Ср', 4 => 'Чт', 5 => 'Пт', 6 => 'Сб', 7 => 'Вс'];
@@ -280,7 +372,7 @@ class Service extends Model
             case 'yearly':
                 return array_map(
                     fn ($d) => $d->format('d.m'),
-                    $this->dueDatesBetween(now()->startOfYear(), now()->endOfYear()),
+                    static::computeDueDates($kind, $months, $days, now()->startOfYear(), now()->endOfYear()),
                 );
         }
 

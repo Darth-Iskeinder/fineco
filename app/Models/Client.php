@@ -249,6 +249,12 @@ class Client extends Model
         return $this->hasMany(Estimate::class);
     }
 
+    /** Индивидуальные расписания БП для этого клиента (override дефолтов БП). */
+    public function serviceSchedules(): HasMany
+    {
+        return $this->hasMany(ClientServiceSchedule::class);
+    }
+
     public function employees(): BelongsToMany
     {
         return $this->belongsToMany(Employee::class, 'client_employee')

@@ -45,8 +45,11 @@ class EstimateController extends Controller
 
         $flagKeys = array_keys(Service::SPECIAL_FLAGS);
 
+        // Индивидуальные расписания БП этого клиента (override дефолтов), keyed by service_id
+        $overrides = $client->serviceSchedules()->get()->keyBy('service_id');
+
         // Сборка структуры БП с состоянием тоглов
-        $buildBpData = function ($bp) use ($isFirstLoad, $savedByServiceId, $savedChildByServiceId, $flagKeys) {
+        $buildBpData = function ($bp) use ($isFirstLoad, $savedByServiceId, $savedChildByServiceId, $flagKeys, $overrides) {
             $savedItem = $savedByServiceId->get($bp->id);
             $bpData = [
                 'service_id'     => $bp->id,
@@ -62,6 +65,17 @@ class EstimateController extends Controller
             foreach ($flagKeys as $fk) {
                 $bpData[$fk] = (bool) $bp->$fk;
             }
+
+            // Индивидуальное расписание клиента (или дефолт БП, если override нет)
+            $override = $overrides->get($bp->id);
+            $resolved = $bp->resolveForClient($override);
+            $bpData['schedule'] = [
+                'is_custom'   => $override !== null,
+                'periodicity' => $resolved['periodicity'] ?? '',
+                'start_month' => $resolved['months'],
+                'start_day'   => $resolved['days'],
+                'labels'      => $bp->deadlineLabelsForClient($override),
+            ];
 
             foreach ($bp->children as $child) {
                 $savedChild = $savedChildByServiceId->get($child->id);
@@ -168,9 +182,15 @@ class EstimateController extends Controller
 
         $specialFlags = Service::specialFlagsList();
 
+        // Справочник периодичностей для редактора расписания (name + kind)
+        $periodicities = \App\Models\Periodicity::orderBy('id')
+            ->get(['name', 'kind'])
+            ->map(fn ($p) => ['name' => $p->name, 'kind' => $p->kind])
+            ->values()->toArray();
+
         return view('clients.estimate', compact(
             'client', 'estimate', 'tariffBPs', 'extras', 'allServices', 'specialFlags',
-            'estimateHasItems'
+            'estimateHasItems', 'periodicities'
         ));
     }
 

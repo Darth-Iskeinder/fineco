@@ -23,6 +23,20 @@
                     </template>
                 </div>
                 <p class="text-xs text-slate-400 mt-0.5" x-show="bp.periodicity" x-text="bp.periodicity"></p>
+
+                <!-- Срок выполнения (с учётом индивидуального расписания клиента) -->
+                <div class="flex items-center gap-1.5 mt-1 flex-wrap" x-show="bp.schedule">
+                    <svg class="w-3.5 h-3.5 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                    <span class="text-xs text-slate-500"
+                          x-text="(bp.schedule.labels && bp.schedule.labels.length) ? bp.schedule.labels.join(', ') : 'срок не задан'"></span>
+                    <span x-show="bp.schedule.is_custom"
+                          class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-700">индивидуально</span>
+                    <button type="button" @click.stop="openSchedule(bp)"
+                            class="inline-flex items-center gap-0.5 text-xs text-indigo-500 hover:text-indigo-700 font-medium">
+                        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                        изменить
+                    </button>
+                </div>
             </div>
 
             <template x-if="bp.allows_quantity && bp.enabled && !bp.children.some(c => c.enabled)">
@@ -38,20 +52,9 @@
                 </div>
             </template>
 
-            <div class="text-right flex-shrink-0">
-                <template x-if="bp.children.length === 0">
-                    <span class="text-sm font-semibold text-slate-800" x-text="fmt(bp.cost * (bp.allows_quantity ? bp.quantity : 1))"></span>
-                </template>
-                <template x-if="bp.children.length > 0 && !bp.enabled">
-                    <span class="text-sm font-semibold text-slate-400">—</span>
-                </template>
-                <template x-if="bp.children.length > 0 && bp.enabled && !bp.children.some(c => c.enabled)">
-                    <span class="text-xs text-slate-400 italic">выберите подпункты</span>
-                </template>
-                <template x-if="bp.children.length > 0 && bp.enabled && bp.children.some(c => c.enabled)">
-                    <span class="text-sm font-semibold text-slate-800" x-text="fmt(bpTotal(bp))"></span>
-                </template>
-            </div>
+            <template x-if="bp.children.length > 0 && bp.enabled && !bp.children.some(c => c.enabled)">
+                <span class="text-xs text-slate-400 italic flex-shrink-0">выберите подпункты</span>
+            </template>
         </div>
 
         <!-- Подпункты -->
@@ -84,9 +87,6 @@
                                 </div>
                             </div>
                         </template>
-
-                        <span class="text-sm text-slate-600 flex-shrink-0"
-                              x-text="fmt(child.cost * (child.allows_quantity ? child.quantity : 1))"></span>
                     </div>
                 </template>
             </div>

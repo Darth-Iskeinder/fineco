@@ -4,6 +4,151 @@
 @section('page-title', 'БухЗадачник')
 
 @section('content')
+
+{{-- Сроки по клиентам: агенда (воркер) + календарь (живая проекция расписаний) --}}
+<div x-data="taskReminders({{ json_encode($reminders) }}, {{ json_encode($schedule) }})" x-cloak class="mb-6">
+    <template x-if="items.length > 0 || schedule.length > 0">
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-100 flex items-center gap-3 flex-wrap">
+                <svg class="w-5 h-5 text-indigo-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+                <h2 class="text-base font-bold text-slate-900">Сроки по клиентам</h2>
+                <span class="text-xs text-slate-400" x-show="viewMode === 'list'" x-text="filteredItems.length + ' ' + plural(filteredItems.length, 'срок', 'срока', 'сроков')"></span>
+
+                <div class="ml-auto flex items-center gap-2 flex-wrap">
+                    {{-- Переключатель Список / Календарь --}}
+                    <div class="flex items-center bg-slate-100 rounded-lg p-0.5">
+                        <button type="button" @click="viewMode = 'list'"
+                                :class="viewMode === 'list' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'"
+                                class="px-3 py-1.5 rounded-md text-xs font-medium transition-all">Список</button>
+                        <button type="button" @click="viewMode = 'calendar'"
+                                :class="viewMode === 'calendar' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'"
+                                class="px-3 py-1.5 rounded-md text-xs font-medium transition-all">Календарь</button>
+                    </div>
+
+                    {{-- Фильтр по компаниям --}}
+                    <div class="flex items-center gap-2" x-show="clientOptions.length > 1">
+                        <svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L14 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 018 21v-7.586L3.293 6.707A1 1 0 013 6V4z"/></svg>
+                        <select x-model="clientFilter"
+                                class="px-3 py-1.5 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                            <option value="all" x-text="'Все компании (' + currentTotal + ')'"></option>
+                            <template x-for="c in clientOptions" :key="c.id">
+                                <option :value="String(c.id)" x-text="c.name + ' (' + c.count + ')'"></option>
+                            </template>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            {{-- ===== РЕЖИМ СПИСОК (агенда по срочности) ===== --}}
+            <div x-show="viewMode === 'list'">
+                <template x-if="filteredItems.length === 0">
+                    <div class="px-6 py-8 text-center text-sm text-slate-400">Нет активных сроков по выбранной компании.</div>
+                </template>
+
+                <div class="divide-y divide-slate-100">
+                    <template x-for="group in groups" :key="group.key">
+                        <template x-if="group.items.length > 0">
+                            <div>
+                                <button type="button" @click="group.key === 'later' ? (showLater = !showLater) : null"
+                                        class="w-full px-6 py-2 text-xs font-semibold uppercase tracking-wider flex items-center gap-2"
+                                        :class="[group.headClass, group.key === 'later' ? 'cursor-pointer hover:brightness-95' : 'cursor-default']">
+                                    <span x-text="group.label"></span>
+                                    <span class="opacity-70" x-text="'(' + group.items.length + ')'"></span>
+                                    <svg x-show="group.key === 'later'" class="w-3.5 h-3.5 ml-auto transition-transform" :class="showLater ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                                </button>
+
+                                <div x-show="group.key !== 'later' || showLater" class="divide-y divide-slate-50">
+                                    <template x-for="r in group.items" :key="r.id">
+                                        <div class="flex items-center gap-3 px-6 py-3" :class="group.rowClass">
+                                            <div class="flex-1 min-w-0">
+                                                <p class="text-sm font-medium text-slate-800 truncate" x-text="r.name" :title="r.name"></p>
+                                                <p class="text-xs text-slate-500 truncate" x-text="r.client_name"></p>
+                                            </div>
+                                            <div class="text-right flex-shrink-0">
+                                                <p class="text-sm font-semibold" :class="group.dateClass" x-text="fmtDate(r.due_date)"></p>
+                                                <p class="text-xs" :class="group.dateClass" x-text="relLabel(r)"></p>
+                                            </div>
+                                            <button type="button" @click="complete(r)" :disabled="r.loading"
+                                                    title="Отметить выполненным"
+                                                    class="flex-shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-full border border-slate-200 text-slate-300 hover:border-emerald-400 hover:text-emerald-500 disabled:opacity-50 transition-colors">
+                                                <svg x-show="!r.loading" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                                                <svg x-show="r.loading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                                            </button>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </template>
+                    </template>
+                </div>
+            </div>
+
+            {{-- ===== РЕЖИМ КАЛЕНДАРЬ (живая проекция, любой месяц) ===== --}}
+            <div x-show="viewMode === 'calendar'" class="p-4 sm:p-6">
+                <div class="flex items-center justify-center gap-4 mb-4">
+                    <button type="button" @click="prevMonth()" :disabled="!canPrev"
+                            class="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
+                        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                    </button>
+                    <span class="text-sm font-semibold text-slate-800 w-40 text-center" x-text="monthLabel"></span>
+                    <button type="button" @click="nextMonth()" :disabled="!canNext"
+                            class="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
+                        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                    </button>
+                </div>
+
+                <div class="grid grid-cols-7 gap-1 mb-1">
+                    <template x-for="w in ['Пн','Вт','Ср','Чт','Пт','Сб','Вс']" :key="w">
+                        <div class="text-center text-xs font-medium text-slate-400 py-1" x-text="w"></div>
+                    </template>
+                </div>
+
+                <div class="grid grid-cols-7 gap-1">
+                    <template x-for="(cell, i) in monthCells" :key="i">
+                        <div>
+                            <template x-if="cell.day">
+                                <button type="button" @click="cell.count ? selectDay(cell.date) : null"
+                                        class="relative w-full aspect-square rounded-lg border flex flex-col items-center justify-center transition-colors"
+                                        :class="[
+                                            cell.count ? 'cursor-pointer hover:border-indigo-300' : 'cursor-default',
+                                            selectedDay === cell.date ? 'ring-2 ring-indigo-400 border-indigo-200' : 'border-slate-100',
+                                            isToday(cell.date) ? 'bg-indigo-50' : 'bg-white'
+                                        ]">
+                                    <span class="text-sm leading-none" :class="isToday(cell.date) ? 'font-bold text-indigo-600' : 'text-slate-700'" x-text="cell.day"></span>
+                                    <template x-if="cell.count">
+                                        <span class="mt-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-semibold bg-indigo-100 text-indigo-700" x-text="cell.count"></span>
+                                    </template>
+                                </button>
+                            </template>
+                            <template x-if="!cell.day"><div class="aspect-square"></div></template>
+                        </div>
+                    </template>
+                </div>
+
+                <template x-if="selectedDay && selectedEntries.length">
+                    <div class="mt-4 border-t border-slate-100 pt-3">
+                        <p class="text-sm font-semibold text-slate-700 mb-2" x-text="fmtFull(selectedDay)"></p>
+                        <div class="space-y-1.5">
+                            <template x-for="(e, i) in selectedEntries" :key="i">
+                                <div class="flex items-center gap-2 text-sm">
+                                    <span class="w-1.5 h-1.5 rounded-full bg-indigo-400 flex-shrink-0"></span>
+                                    <span class="font-medium text-slate-800 truncate" x-text="e.name"></span>
+                                    <span class="text-slate-300">·</span>
+                                    <span class="text-slate-500 truncate" x-text="e.client_name"></span>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+
+                <template x-if="filteredSchedule.length === 0">
+                    <p class="mt-4 text-center text-sm text-slate-400">Нет запланированных сроков по выбранной компании.</p>
+                </template>
+            </div>
+        </div>
+    </template>
+</div>
+
 <div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($services) }})" x-cloak>
 
     {{-- Баннер срочных задач --}}
@@ -37,7 +182,16 @@
             </div>
         </div>
 
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-3 flex-wrap">
+            {{-- Фильтр по компаниям --}}
+            <select x-show="clientOptions.length > 1" x-model="clientFilter"
+                    class="px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                <option value="all" x-text="'Все компании (' + tasks.length + ')'"></option>
+                <template x-for="c in clientOptions" :key="c.id">
+                    <option :value="String(c.id)" x-text="c.name + ' (' + c.count + ')'"></option>
+                </template>
+            </select>
+
             {{-- Кнопка создания задачи --}}
             <button @click="showCreateModal = true"
                     class="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 transition-colors shadow-sm">
@@ -71,7 +225,13 @@
         <p class="text-slate-500 text-sm">Нет задач. Добавьте внеплановую задачу или убедитесь, что у клиентов заполнены сметы и вы назначены на них.</p>
     </div>
 
-    <div x-show="tasks.length > 0"
+    {{-- Все задачи скрыты фильтром --}}
+    <div x-show="tasks.length > 0 && visibleCount === 0"
+         class="bg-white rounded-2xl border border-slate-200/50 shadow-sm px-6 py-10 text-center text-sm text-slate-400">
+        Нет задач по выбранной компании.
+    </div>
+
+    <div x-show="tasks.length > 0 && visibleCount > 0"
          class="bg-white rounded-2xl border border-slate-200/50 shadow-sm overflow-hidden">
 
         {{-- ===== РЕЖИМ СПИСОК ===== --}}
@@ -96,7 +256,7 @@
                                 'border-l-4 border-l-orange-400 bg-orange-50/30': task.status !== 'completed' && urgency(task) === 'today',
                                 'border-l-4 border-l-amber-300 bg-amber-50/20': task.status !== 'completed' && urgency(task) === 'soon',
                                 'hover:bg-slate-50/50': task.status !== 'completed' && !urgency(task),
-                            }">
+                            }" x-show="matchesFilter(task)">
 
                             {{-- Статус-точка --}}
                             <td class="px-4 py-3.5">
@@ -246,7 +406,7 @@
                                 'border-l-4 border-l-amber-300 bg-amber-50/20': task.status !== 'completed' && urgency(task) === 'soon',
                                 'hover:bg-slate-50/50': task.status !== 'completed' && !urgency(task),
                             }"
-                            class="cursor-pointer" @click="toggleChecklist(idx)">
+                            class="cursor-pointer" x-show="matchesFilter(task)" @click="toggleChecklist(idx)">
                             <td class="px-4 py-3.5" @click.stop>
                                 <input type="checkbox"
                                        :checked="task.status === 'completed'"
@@ -440,11 +600,29 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
         viewMode: 'list',
         ticker: null,
         now: Math.floor(Date.now() / 1000),
+        clientFilter: 'all',
 
         showCreateModal: false,
         newTask: { mode: 'catalog', client_id: '', service_id: '', name: '', cost: '', due_day: '' },
         creating: false,
         createError: '',
+
+        // Фильтр по компаниям (idx строк сохраняем — строки прячем через x-show)
+        get clientOptions() {
+            const map = {};
+            this.tasks.forEach(t => {
+                const k = t.client_id ?? t.client_name;
+                if (!map[k]) map[k] = { id: t.client_id, name: t.client_name, count: 0 };
+                map[k].count++;
+            });
+            return Object.values(map).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+        },
+        matchesFilter(task) {
+            return this.clientFilter === 'all' || String(task.client_id) === String(this.clientFilter);
+        },
+        get visibleCount() {
+            return this.tasks.filter(t => this.matchesFilter(t)).length;
+        },
 
         get totalCompleted() {
             return this.tasks.filter(t => t.status === 'completed').length;
@@ -712,6 +890,165 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
             }
 
             this.creating = false;
+        },
+    };
+}
+
+// Агенда сроков по клиентам — группировка по срочности + отметка «выполнено»
+function taskReminders(initial, schedule) {
+    return {
+        items: (initial || []).map(r => ({ ...r, loading: false })),
+        schedule: schedule || [],          // живая проекция: [{date, name, client_id, client_name}]
+        viewMode: 'list',                  // list (агенда) | calendar
+        showLater: false,
+        clientFilter: 'all',
+        calYear: null,
+        calMonth: null,                    // 1–12
+        selectedDay: null,                 // 'YYYY-MM-DD'
+
+        init() {
+            const n = new Date();
+            this.calYear = n.getFullYear();
+            this.calMonth = n.getMonth() + 1;
+        },
+
+        today() { const d = new Date(); d.setHours(0, 0, 0, 0); return d; },
+        daysUntil(r) {
+            const due = new Date(r.due_date + 'T00:00:00');
+            return Math.round((due - this.today()) / 86400000);
+        },
+
+        // Текущий набор данных зависит от режима (агенда=items, календарь=schedule)
+        get currentDataset() { return this.viewMode === 'calendar' ? this.schedule : this.items; },
+        get currentTotal() { return this.currentDataset.length; },
+
+        // Список компаний для фильтра (с количеством по текущему режиму)
+        get clientOptions() {
+            const map = {};
+            this.currentDataset.forEach(r => {
+                const k = r.client_id ?? r.client_name;
+                if (!map[k]) map[k] = { id: r.client_id, name: r.client_name, count: 0 };
+                map[k].count++;
+            });
+            return Object.values(map).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+        },
+
+        matchesClient(r) {
+            return this.clientFilter === 'all' || String(r.client_id) === String(this.clientFilter);
+        },
+        get filteredItems() { return this.items.filter(r => this.matchesClient(r)); },
+        get filteredSchedule() { return this.schedule.filter(r => this.matchesClient(r)); },
+
+        get groups() {
+            const make = (key, label, filter, cls) => ({ key, label, items: this.filteredItems.filter(filter), ...cls });
+            return [
+                make('overdue', 'Просрочено', r => this.daysUntil(r) < 0,
+                    { headClass: 'text-red-600 bg-red-50', rowClass: 'bg-red-50/30', dateClass: 'text-red-600' }),
+                make('today', 'Сегодня', r => this.daysUntil(r) === 0,
+                    { headClass: 'text-orange-600 bg-orange-50', rowClass: 'bg-orange-50/20', dateClass: 'text-orange-600' }),
+                make('week', 'На этой неделе', r => { const d = this.daysUntil(r); return d > 0 && d <= 7; },
+                    { headClass: 'text-amber-600 bg-amber-50', rowClass: '', dateClass: 'text-amber-600' }),
+                make('later', 'Позже', r => this.daysUntil(r) > 7,
+                    { headClass: 'text-slate-500 bg-slate-50', rowClass: '', dateClass: 'text-slate-500' }),
+            ];
+        },
+
+        fmtDate(s) {
+            const [, m, d] = s.split('-');
+            const months = ['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];
+            return parseInt(d) + ' ' + months[parseInt(m) - 1];
+        },
+        relLabel(r) {
+            const d = this.daysUntil(r);
+            if (d < 0) return 'просрочено на ' + Math.abs(d) + ' ' + this.plural(Math.abs(d), 'день', 'дня', 'дней');
+            if (d === 0) return 'сегодня';
+            if (d === 1) return 'завтра';
+            return 'через ' + d + ' ' + this.plural(d, 'день', 'дня', 'дней');
+        },
+        plural(n, one, few, many) {
+            const m10 = n % 10, m100 = n % 100;
+            if (m10 === 1 && m100 !== 11) return one;
+            if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
+            return many;
+        },
+
+        // ===== Календарь =====
+        get monthLabel() {
+            const names = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+            return names[this.calMonth - 1] + ' ' + this.calYear;
+        },
+        pad(n) { return String(n).padStart(2, '0'); },
+        get monthCells() {
+            const first = new Date(this.calYear, this.calMonth - 1, 1);
+            const lead = (first.getDay() + 6) % 7;               // Пн=0
+            const dim = new Date(this.calYear, this.calMonth, 0).getDate();
+            const counts = {};
+            this.filteredSchedule.forEach(s => { counts[s.date] = (counts[s.date] || 0) + 1; });
+            const cells = [];
+            for (let i = 0; i < lead; i++) cells.push({ day: null, date: null, count: 0 });
+            for (let d = 1; d <= dim; d++) {
+                const date = this.calYear + '-' + this.pad(this.calMonth) + '-' + this.pad(d);
+                cells.push({ day: d, date, count: counts[date] || 0 });
+            }
+            return cells;
+        },
+        isToday(date) {
+            const n = new Date();
+            return date === (n.getFullYear() + '-' + this.pad(n.getMonth() + 1) + '-' + this.pad(n.getDate()));
+        },
+        selectDay(date) { this.selectedDay = this.selectedDay === date ? null : date; },
+        get selectedEntries() {
+            return this.selectedDay ? this.filteredSchedule.filter(s => s.date === this.selectedDay) : [];
+        },
+        fmtFull(s) {
+            const [y, m, d] = s.split('-');
+            const months = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+            return parseInt(d) + ' ' + months[parseInt(m) - 1] + ' ' + y;
+        },
+        get _monthIdx() { return this.calYear * 12 + this.calMonth; },
+        get _bounds() {
+            if (this.schedule.length === 0) return { min: this._monthIdx, max: this._monthIdx };
+            let min = Infinity, max = -Infinity;
+            this.schedule.forEach(s => {
+                const [y, m] = s.date.split('-');
+                const idx = (+y) * 12 + (+m);
+                if (idx < min) min = idx;
+                if (idx > max) max = idx;
+            });
+            return { min, max };
+        },
+        get canPrev() { return this._monthIdx > this._bounds.min; },
+        get canNext() { return this._monthIdx < this._bounds.max; },
+        prevMonth() {
+            if (!this.canPrev) return;
+            if (this.calMonth === 1) { this.calMonth = 12; this.calYear--; } else this.calMonth--;
+            this.selectedDay = null;
+        },
+        nextMonth() {
+            if (!this.canNext) return;
+            if (this.calMonth === 12) { this.calMonth = 1; this.calYear++; } else this.calMonth++;
+            this.selectedDay = null;
+        },
+
+        async complete(r) {
+            r.loading = true;
+            try {
+                const res = await fetch('/buhtasks/reminders/' + r.id + '/complete', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]').content,
+                        'Accept': 'application/json',
+                    },
+                });
+                const data = await res.json();
+                if (data.success) {
+                    this.items = this.items.filter(x => x.id !== r.id);
+                } else {
+                    r.loading = false;
+                }
+            } catch (e) {
+                r.loading = false;
+            }
         },
     };
 }
