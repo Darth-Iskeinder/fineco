@@ -399,6 +399,7 @@
                                     <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="client.has_export ? 'bg-cyan-500' : 'bg-slate-300'"></span>
                                     Экспорт
                                 </span>
+                                {{-- ПВТ/ПКИ скрыты: это режимы налогообложения, задаются через выбор РН. Возможно к удалению.
                                 <span :class="client.pvt_mode ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-slate-50 text-slate-400 border-slate-200'" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border">
                                     <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="client.pvt_mode ? 'bg-indigo-500' : 'bg-slate-300'"></span>
                                     Режим ПВТ
@@ -407,6 +408,7 @@
                                     <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="client.pki_mode ? 'bg-purple-500' : 'bg-slate-300'"></span>
                                     Режим ПКИ
                                 </span>
+                                --}}
                                 <span :class="client.has_alcohol ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-slate-50 text-slate-400 border-slate-200'" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border">
                                     <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="client.has_alcohol ? 'bg-rose-500' : 'bg-slate-300'"></span>
                                     Алкоголь / ГосАлко
@@ -561,6 +563,7 @@
                                         </div>
                                         <p :class="form.flags.has_export ? 'text-cyan-700' : 'text-slate-500'" class="text-xs font-medium leading-tight">Экспорт</p>
                                     </div>
+                                    {{-- ПВТ/ПКИ скрыты: это режимы налогообложения, задаются через выбор РН выше. Возможно к удалению.
                                     <!-- Режим ПВТ -->
                                     <div :class="form.flags.pvt_mode ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-slate-200'" class="p-3 rounded-xl border transition-all duration-150 cursor-pointer select-none" @click="form.flags.pvt_mode = !form.flags.pvt_mode">
                                         <div class="flex items-center justify-between mb-1.5">
@@ -585,6 +588,7 @@
                                         </div>
                                         <p :class="form.flags.pki_mode ? 'text-purple-700' : 'text-slate-500'" class="text-xs font-medium leading-tight">Режим ПКИ</p>
                                     </div>
+                                    --}}
                                     <!-- Алкоголь -->
                                     <div :class="form.flags.has_alcohol ? 'bg-rose-50 border-rose-200' : 'bg-white border-slate-200'" class="p-3 rounded-xl border transition-all duration-150 cursor-pointer select-none" @click="form.flags.has_alcohol = !form.flags.has_alcohol">
                                         <div class="flex items-center justify-between mb-1.5">

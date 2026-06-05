@@ -20,8 +20,10 @@ class Service extends Model
      * Порядок важен — определяет приоритет секции, если у БП несколько условий.
      */
     public const SPECIAL_FLAGS = [
-        'is_pvt'                 => ['label' => 'ПВТ',                  'client' => 'pvt_mode',                'color' => 'indigo'],
-        'is_pki'                 => ['label' => 'ПКИ',                  'client' => 'pki_mode',                'color' => 'purple'],
+        // ПВТ/ПКИ убраны из особых условий — это режимы налогообложения (РН), а не доп. признаки.
+        // Скрыто, возможно к удалению (вместе с колонками is_pvt/is_pki, pvt_mode/pki_mode).
+        // 'is_pvt'                 => ['label' => 'ПВТ',                  'client' => 'pvt_mode',                'color' => 'indigo'],
+        // 'is_pki'                 => ['label' => 'ПКИ',                  'client' => 'pki_mode',                'color' => 'purple'],
         'is_employees'           => ['label' => 'Сотрудники',          'client' => 'has_employees',           'color' => 'emerald'],
         'is_insurance_policy'    => ['label' => 'ИП страховой полис',  'client' => 'has_insurance_policy',    'color' => 'rose'],
         'is_marketplaces'        => ['label' => 'Маркетплейсы',        'client' => 'has_marketplaces',        'color' => 'violet'],
