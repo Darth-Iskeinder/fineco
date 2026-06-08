@@ -848,7 +848,7 @@
                             <template x-if="!uploadingDocs">
                                 <div>
                                     <p class="text-sm font-medium text-slate-600">Перетащите файлы или нажмите для выбора</p>
-                                    <p class="text-xs text-slate-400 mt-0.5">PDF, DOC, XLS, PNG, JPG, ZIP и другие — до 20 МБ</p>
+                                    <p class="text-xs text-slate-400 mt-0.5">PDF, DOC, XLS, PNG, JPG, ZIP и другие — до 40 МБ</p>
                                 </div>
                             </template>
                             <template x-if="uploadingDocs">
@@ -1967,6 +1967,16 @@ function clientShow() {
 
         async uploadDocuments(files) {
             if (!files || files.length === 0) return;
+
+            // Проверка размера до отправки — чтобы не ждать заведомо отклонённую загрузку
+            const MAX_BYTES = 40 * 1024 * 1024; // 40 МБ
+            const tooBig = [...files].filter(f => f.size > MAX_BYTES);
+            if (tooBig.length > 0) {
+                const names = tooBig.map(f => `«${f.name}» — ${this.formatFileSize(f.size)}`).join('\n');
+                alert(`Файл слишком большой (максимум 40 МБ):\n${names}`);
+                return;
+            }
+
             this.uploadingDocs = true;
             const formData = new FormData();
             for (const file of files) {
@@ -1979,6 +1989,25 @@ function clientShow() {
                     headers: { 'Accept': 'application/json' },
                     body: formData,
                 });
+
+                if (!response.ok) {
+                    let msg = 'Не удалось загрузить файлы.';
+                    if (response.status === 413) {
+                        msg = 'Файлы слишком большие — суммарный размер превышает лимит сервера.';
+                    } else {
+                        try {
+                            const err = await response.json();
+                            if (err.errors) {
+                                msg = Object.values(err.errors).flat().join('\n');
+                            } else if (err.message) {
+                                msg = err.message;
+                            }
+                        } catch (_) { /* тело не JSON (напр. при превышении post_max_size) */ }
+                    }
+                    alert(msg);
+                    return;
+                }
+
                 const data = await response.json();
                 if (data.success) {
                     this.clientDocuments = data.documents;
@@ -1987,9 +2016,10 @@ function clientShow() {
                 }
             } catch (e) {
                 console.error(e);
-                alert('Ошибка загрузки файлов');
+                alert('Не удалось загрузить файлы. Вероятная причина — размер превышает лимит сервера. Обратитесь к администратору, чтобы поднять лимит загрузки.');
+            } finally {
+                this.uploadingDocs = false;
             }
-            this.uploadingDocs = false;
         },
 
         async deleteDocument(docId) {

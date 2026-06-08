@@ -288,7 +288,11 @@ class ClientController extends Controller
     {
         $request->validate([
             'files' => ['required', 'array'],
-            'files.*' => ['required', 'file', 'max:20480'],
+            'files.*' => ['required', 'file', 'max:40960'],
+        ], [
+            'files.required' => 'Выберите файлы для загрузки.',
+            'files.*.file' => 'Не удалось прочитать файл — возможно, он превышает лимит сервера.',
+            'files.*.max' => 'Файл не должен превышать 40 МБ.',
         ]);
 
         $uploaded = [];

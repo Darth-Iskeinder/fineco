@@ -108,30 +108,43 @@
                         <div>
                             <template x-if="cell.day">
                                 <button type="button" @click="cell.count ? selectDay(cell.date) : null"
-                                        class="relative w-full aspect-square rounded-lg border flex flex-col items-center justify-center transition-colors"
+                                        class="relative w-full min-h-[84px] rounded-lg border p-1.5 flex flex-col gap-1 text-left overflow-hidden transition-colors"
                                         :class="[
-                                            cell.count ? 'cursor-pointer hover:border-indigo-300' : 'cursor-default',
+                                            cell.count ? 'cursor-pointer hover:border-indigo-300 hover:shadow-sm' : 'cursor-default',
                                             selectedDay === cell.date ? 'ring-2 ring-indigo-400 border-indigo-200' : 'border-slate-100',
-                                            isToday(cell.date) ? 'bg-indigo-50' : 'bg-white'
+                                            isToday(cell.date) ? 'bg-indigo-50/60' : 'bg-white'
                                         ]">
-                                    <span class="text-sm leading-none" :class="isToday(cell.date) ? 'font-bold text-indigo-600' : 'text-slate-700'" x-text="cell.day"></span>
-                                    <template x-if="cell.count">
-                                        <span class="mt-1 inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-semibold bg-indigo-100 text-indigo-700" x-text="cell.count"></span>
-                                    </template>
+                                    <span class="text-xs font-semibold leading-none"
+                                          :class="isToday(cell.date) ? 'text-indigo-600' : 'text-slate-500'"
+                                          x-text="cell.day"></span>
+                                    <div class="flex flex-col gap-0.5 w-full">
+                                        <template x-for="(e, ei) in cell.entries.slice(0, 2)" :key="ei">
+                                            <span class="block w-full truncate rounded-sm bg-slate-50 border-l-2 pl-1 pr-0.5 py-0.5 text-[10px] leading-tight text-slate-700"
+                                                  :class="barClass(cell.date)"
+                                                  :title="e.name + ' · ' + e.client_name"
+                                                  x-text="e.name"></span>
+                                        </template>
+                                        <template x-if="cell.count > 2">
+                                            <span class="pl-1 text-[10px] font-medium text-slate-400" x-text="'+' + (cell.count - 2) + ' ещё'"></span>
+                                        </template>
+                                    </div>
                                 </button>
                             </template>
-                            <template x-if="!cell.day"><div class="aspect-square"></div></template>
+                            <template x-if="!cell.day"><div class="min-h-[84px]"></div></template>
                         </div>
                     </template>
                 </div>
 
                 <template x-if="selectedDay && selectedEntries.length">
                     <div class="mt-4 border-t border-slate-100 pt-3">
-                        <p class="text-sm font-semibold text-slate-700 mb-2" x-text="fmtFull(selectedDay)"></p>
+                        <div class="flex items-center gap-2 mb-2">
+                            <p class="text-sm font-semibold text-slate-700" x-text="fmtFull(selectedDay)"></p>
+                            <span class="text-xs text-slate-400" x-text="'· ' + selectedEntries.length + ' ' + plural(selectedEntries.length, 'задача', 'задачи', 'задач')"></span>
+                        </div>
                         <div class="space-y-1.5">
                             <template x-for="(e, i) in selectedEntries" :key="i">
                                 <div class="flex items-center gap-2 text-sm">
-                                    <span class="w-1.5 h-1.5 rounded-full bg-indigo-400 flex-shrink-0"></span>
+                                    <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="dotClass(selectedDay)"></span>
                                     <span class="font-medium text-slate-800 truncate" x-text="e.name"></span>
                                     <span class="text-slate-300">·</span>
                                     <span class="text-slate-500 truncate" x-text="e.client_name"></span>
@@ -242,14 +255,24 @@
                         <th class="w-6 px-4 py-3"></th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Задача</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Компания</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Периодичность</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                            <button type="button" @click="toggleSort()"
+                                    class="group inline-flex items-center gap-1 uppercase tracking-wider hover:text-slate-700 transition-colors"
+                                    title="Сортировать по сроку">
+                                Периодичность
+                                <span class="inline-flex flex-col leading-[0]">
+                                    <svg class="w-2 h-2" :class="sortDir === 'asc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" viewBox="0 0 8 8" fill="currentColor"><path d="M4 0l4 5H0z"/></svg>
+                                    <svg class="w-2 h-2 mt-0.5" :class="sortDir === 'desc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" viewBox="0 0 8 8" fill="currentColor"><path d="M4 8L0 3h8z"/></svg>
+                                </span>
+                            </button>
+                        </th>
                         <th class="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Стоимость</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider w-24">Время</th>
                         <th class="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Действия</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y divide-slate-100">
                     <template x-for="(task, idx) in tasks" :key="task.uid">
+                        <tbody class="divide-y divide-slate-100">
                         <tr :class="{
                                 'bg-emerald-50/30': task.status === 'completed',
                                 'border-l-4 border-l-red-400 bg-red-50/40': task.status !== 'completed' && urgency(task) === 'overdue',
@@ -271,7 +294,14 @@
 
                             <td class="px-4 py-3.5">
                                 <div class="flex items-center gap-2">
-                                    <span class="text-sm font-medium"
+                                    <button type="button" @click.prevent="toggleExpand(task.uid)"
+                                            class="flex-shrink-0 text-slate-300 hover:text-indigo-500 transition-all"
+                                            :class="expanded[task.uid] ? 'rotate-90 text-indigo-500' : ''"
+                                            title="Описание / комментарий">
+                                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                                    </button>
+                                    <span class="text-sm font-medium cursor-pointer"
+                                          @click="toggleExpand(task.uid)"
                                           :class="task.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-800'"
                                           x-text="task.name"></span>
                                     <span x-show="task.type === 'adhoc'"
@@ -325,7 +355,7 @@
 
                                 {{-- Старт (pending) --}}
                                 <button x-show="task.status === 'pending'"
-                                        @click.prevent="startTask(idx)"
+                                        @click.prevent="askStart(idx)"
                                         :disabled="task.loading"
                                         class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
                                     <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
@@ -364,24 +394,42 @@
                                     </button>
                                 </span>
 
-                                {{-- Выполнено + Сброс (completed) --}}
-                                <span x-show="task.status === 'completed'" class="inline-flex items-center gap-2">
+                                {{-- Выполнено (completed) --}}
+                                <span x-show="task.status === 'completed'" class="inline-flex items-center">
                                     <span class="text-xs text-emerald-600 font-medium flex items-center gap-1">
                                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
                                         Выполнено
                                     </span>
-                                    <button @click.prevent="resetTask(idx)"
-                                            :disabled="task.loading"
-                                            class="p-1.5 text-slate-300 hover:text-slate-500 transition-colors rounded"
-                                            title="Сбросить">
-                                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-                                    </button>
                                 </span>
 
                             </td>
                         </tr>
+
+                        {{-- Раскрывающаяся сноска: описание / комментарий БП --}}
+                        <tr x-show="matchesFilter(task) && expanded[task.uid]" class="bg-slate-50/60">
+                            <td></td>
+                            <td colspan="6" class="px-4 pb-4 pt-0">
+                                <div class="text-sm text-slate-600 space-y-2 border-l-2 border-indigo-200 pl-3">
+                                    <template x-if="task.description">
+                                        <div>
+                                            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Описание</p>
+                                            <p class="whitespace-pre-line" x-text="task.description"></p>
+                                        </div>
+                                    </template>
+                                    <template x-if="task.comment">
+                                        <div>
+                                            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Комментарий</p>
+                                            <p class="whitespace-pre-line" x-text="task.comment"></p>
+                                        </div>
+                                    </template>
+                                    <template x-if="!task.description && !task.comment">
+                                        <p class="text-slate-400 italic">Описание и комментарий не заполнены</p>
+                                    </template>
+                                </div>
+                            </td>
+                        </tr>
+                        </tbody>
                     </template>
-                </tbody>
             </table>
         </div>
 
@@ -393,7 +441,17 @@
                         <th class="w-10 px-4 py-3"></th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Задача</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Компания</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Периодичность</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                            <button type="button" @click="toggleSort()"
+                                    class="group inline-flex items-center gap-1 uppercase tracking-wider hover:text-slate-700 transition-colors"
+                                    title="Сортировать по сроку">
+                                Периодичность
+                                <span class="inline-flex flex-col leading-[0]">
+                                    <svg class="w-2 h-2" :class="sortDir === 'asc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" viewBox="0 0 8 8" fill="currentColor"><path d="M4 0l4 5H0z"/></svg>
+                                    <svg class="w-2 h-2 mt-0.5" :class="sortDir === 'desc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" viewBox="0 0 8 8" fill="currentColor"><path d="M4 8L0 3h8z"/></svg>
+                                </span>
+                            </button>
+                        </th>
                         <th class="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Стоимость</th>
                     </tr>
                 </thead>
@@ -587,12 +645,47 @@
         </div>
     </div>
 
+    {{-- ===== МОДАЛ ПОДТВЕРЖДЕНИЯ СТАРТА ===== --}}
+    <div x-show="startConfirm.show"
+         x-transition:enter="ease-out duration-200"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="ease-in duration-150"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+         @click.self="startConfirm = { show: false, idx: null }"
+         @keydown.escape.window="startConfirm = { show: false, idx: null }"
+         style="display:none">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">
+            <div class="flex items-start gap-4">
+                <div class="flex-shrink-0 w-11 h-11 rounded-full bg-indigo-100 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-indigo-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <h3 class="text-base font-semibold text-slate-800">Начать выполнение задачи?</h3>
+                    <p class="mt-1 text-sm text-slate-500">Запустится отсчёт времени по задаче.</p>
+                </div>
+            </div>
+            <div class="flex gap-3 mt-6">
+                <button @click="startConfirm = { show: false, idx: null }"
+                        class="flex-1 py-2.5 px-4 border border-slate-200 text-slate-600 text-sm font-medium rounded-xl hover:bg-slate-50 transition-colors">
+                    Отмена
+                </button>
+                <button @click="confirmStart()"
+                        class="flex-1 py-2.5 px-4 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 transition-colors">
+                    Начать
+                </button>
+            </div>
+        </div>
+    </div>
+
 </div>
 
 <script>
 function buhTasks(initialTasks, year, month, allClients, allServices) {
     return {
-        tasks: initialTasks.map(t => ({ ...t, loading: false, client_resumed_at: null })),
+        tasks: initialTasks.map((t, i) => ({ ...t, loading: false, client_resumed_at: null, _seq: i })),
         year,
         month,
         allClients,
@@ -601,8 +694,11 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
         ticker: null,
         now: Math.floor(Date.now() / 1000),
         clientFilter: 'all',
+        sortDir: null, // null = исходный порядок | 'asc' | 'desc' (по сроку due_day)
+        expanded: {},  // uid задачи -> раскрыта ли сноска с описанием/комментарием
 
         showCreateModal: false,
+        startConfirm: { show: false, idx: null },
         newTask: { mode: 'catalog', client_id: '', service_id: '', name: '', cost: '', due_day: '' },
         creating: false,
         createError: '',
@@ -619,6 +715,31 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
         },
         matchesFilter(task) {
             return this.clientFilter === 'all' || String(task.client_id) === String(this.clientFilter);
+        },
+        toggleExpand(uid) {
+            this.expanded[uid] = !this.expanded[uid];
+        },
+
+        // Сортировка по сроку (due_day): клик переключает asc → desc → исходный порядок
+        toggleSort() {
+            this.sortDir = this.sortDir === null ? 'asc' : (this.sortDir === 'asc' ? 'desc' : null);
+            this.applySort();
+        },
+        applySort() {
+            const bySeq = (a, b) => a._seq - b._seq;
+            if (!this.sortDir) {
+                this.tasks = [...this.tasks].sort(bySeq);
+                return;
+            }
+            const mult = this.sortDir === 'desc' ? -1 : 1;
+            this.tasks = [...this.tasks].sort((a, b) => {
+                const av = a.due_day, bv = b.due_day;
+                if (av == null && bv == null) return bySeq(a, b); // обе без срока — сохраняем порядок
+                if (av == null) return 1;  // без срока — всегда в конец
+                if (bv == null) return -1;
+                if (av === bv) return bySeq(a, b);
+                return (av - bv) * mult;
+            });
         },
         get visibleCount() {
             return this.tasks.filter(t => this.matchesFilter(t)).length;
@@ -755,6 +876,16 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
                 return data.log.id;
             }
             return null;
+        },
+
+        askStart(idx) {
+            this.startConfirm = { show: true, idx };
+        },
+
+        confirmStart() {
+            const idx = this.startConfirm.idx;
+            this.startConfirm = { show: false, idx: null };
+            if (idx !== null) this.startTask(idx);
         },
 
         async startTask(idx) {
@@ -982,19 +1113,48 @@ function taskReminders(initial, schedule) {
             const first = new Date(this.calYear, this.calMonth - 1, 1);
             const lead = (first.getDay() + 6) % 7;               // Пн=0
             const dim = new Date(this.calYear, this.calMonth, 0).getDate();
-            const counts = {};
-            this.filteredSchedule.forEach(s => { counts[s.date] = (counts[s.date] || 0) + 1; });
+            const byDate = {};
+            this.filteredSchedule.forEach(s => { (byDate[s.date] = byDate[s.date] || []).push(s); });
             const cells = [];
-            for (let i = 0; i < lead; i++) cells.push({ day: null, date: null, count: 0 });
+            for (let i = 0; i < lead; i++) cells.push({ day: null, date: null, count: 0, entries: [] });
             for (let d = 1; d <= dim; d++) {
                 const date = this.calYear + '-' + this.pad(this.calMonth) + '-' + this.pad(d);
-                cells.push({ day: d, date, count: counts[date] || 0 });
+                const entries = byDate[date] || [];
+                cells.push({ day: d, date, count: entries.length, entries });
             }
             return cells;
         },
         isToday(date) {
             const n = new Date();
             return date === (n.getFullYear() + '-' + this.pad(n.getMonth() + 1) + '-' + this.pad(n.getDate()));
+        },
+        // Срочность дня (для цветовой кодировки) — все записи одной даты одинаковой срочности
+        daysUntilDate(date) {
+            const due = new Date(date + 'T00:00:00');
+            return Math.round((due - this.today()) / 86400000);
+        },
+        urgencyOf(date) {
+            const d = this.daysUntilDate(date);
+            if (d < 0) return 'overdue';
+            if (d === 0) return 'today';
+            if (d <= 7) return 'soon';
+            return 'later';
+        },
+        barClass(date) {
+            return {
+                overdue: 'border-l-red-400',
+                today:   'border-l-orange-400',
+                soon:    'border-l-amber-300',
+                later:   'border-l-slate-300',
+            }[this.urgencyOf(date)];
+        },
+        dotClass(date) {
+            return {
+                overdue: 'bg-red-400',
+                today:   'bg-orange-400',
+                soon:    'bg-amber-300',
+                later:   'bg-slate-300',
+            }[this.urgencyOf(date)];
         },
         selectDay(date) { this.selectedDay = this.selectedDay === date ? null : date; },
         get selectedEntries() {

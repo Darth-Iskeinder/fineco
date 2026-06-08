@@ -19,7 +19,7 @@ Route::get('/', function () {
     }
 
     // Модули в порядке приоритета (hasAccessToModule уже возвращает true для admin)
-    $availableModules = ['employees', 'clients', 'buhsmeta', 'buhtasks'];
+    $availableModules = ['employees', 'clients', 'buhsmeta', 'buhtasks', 'settings'];
 
     foreach ($availableModules as $moduleName) {
         if ($employee->hasAccessToModule($moduleName)) {
@@ -99,8 +99,8 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/reminders/{reminder}/reopen', [BuhTasksController::class, 'reopenReminder'])->name('reminders.reopen');
     });
 
-    // Настройки (только для админов)
-    Route::prefix('settings')->name('settings.')->middleware('admin')->group(function () {
+    // Настройки (доступ по модулю settings; админ имеет доступ всегда)
+    Route::prefix('settings')->name('settings.')->middleware('module:settings')->group(function () {
         Route::get('/', fn() => redirect()->route('settings.tax-systems'))->name('index');
 
         // Страницы разделов

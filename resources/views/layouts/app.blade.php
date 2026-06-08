@@ -125,7 +125,7 @@
                     @endif
                 @endforeach
 
-                @if($currentEmployee && $currentEmployee->isAdmin())
+                @if($currentEmployee && $currentEmployee->hasAccessToModule('settings'))
                     <div class="pt-4 mt-4 border-t border-slate-100">
                         <p class="px-4 mb-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">Администрирование</p>
                         <a href="{{ route('settings.index') }}"

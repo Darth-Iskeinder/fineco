@@ -9,6 +9,7 @@ use App\Models\Estimate;
 use App\Models\EstimateItem;
 use App\Models\Service;
 use App\Models\TaskReminder;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 
 class BuhTasksController extends Controller
@@ -54,12 +55,36 @@ class BuhTasksController extends Controller
             ->with('client')
             ->get();
 
+        // Окно выбранного месяца — для расчёта срока из расписания БП
+        $monthStart = CarbonImmutable::create($year, $month, 1)->startOfDay();
+        $monthEnd   = $monthStart->endOfMonth();
+
+        // Предзагрузка БП по сметным позициям (нужны их методы расписания)
+        $serviceIds = $clients
+            ->flatMap(fn ($c) => $c->estimates->first()?->rootItems ?? collect())
+            ->pluck('service_id')->filter()->unique()->values();
+        $services = $serviceIds->isNotEmpty()
+            ? Service::whereIn('id', $serviceIds)->get()->keyBy('id')
+            : collect();
+
         // Плановые задачи из сметы
         $tasks = [];
         foreach ($clients as $client) {
             $items = $client->estimates->first()?->rootItems ?? collect();
+            $overrides = $client->serviceSchedules->keyBy('service_id');
             foreach ($items as $item) {
                 $log = $logs->get($item->id);
+
+                // Срок: считаем из расписания БП (с учётом override клиента) на выбранный месяц;
+                // если расписания нет — фолбэк на статичное поле позиции сметы.
+                $dueDay = $item->due_day;
+                $service = $item->service_id ? $services->get($item->service_id) : null;
+                if ($service) {
+                    $dates = $service->dueDatesForClient($overrides->get($item->service_id), $monthStart, $monthEnd);
+                    if (!empty($dates)) {
+                        $dueDay = min(array_map(fn ($d) => (int) $d->day, $dates));
+                    }
+                }
 
                 $tasks[] = [
                     'uid'             => 'planned_' . $item->id,
@@ -71,7 +96,9 @@ class BuhTasksController extends Controller
                     'name'            => $item->name,
                     'cost'            => (float) $item->total,
                     'periodicity'     => $item->periodicity,
-                    'due_day'         => $item->due_day,
+                    'due_day'         => $dueDay,
+                    'comment'         => $service?->comment,
+                    'description'     => $service?->description,
                     'status'          => $log?->status ?? 'pending',
                     'elapsed_seconds' => $this->calcElapsed($log),
                 ];
@@ -90,6 +117,8 @@ class BuhTasksController extends Controller
                 'cost'            => (float) $adhoc->cost,
                 'periodicity'     => null,
                 'due_day'         => $adhoc->due_day,
+                'comment'         => null,
+                'description'     => null,
                 'status'          => $adhoc->status,
                 'elapsed_seconds' => $this->calcElapsed($adhoc),
             ];
