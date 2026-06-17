@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\AccountingMethod;
 use App\Models\ActivityType;
+use App\Models\Billing;
 use App\Models\Category;
 use App\Models\CheckType;
 use App\Models\ClientStatus;
@@ -72,6 +73,7 @@ class SettingsController extends Controller
         ['key' => 'kind', 'label' => 'Тип', 'type' => 'select', 'options' => Periodicity::KINDS],
     ]); }
     public function checkTypesPage()          { return $this->lookupView('Проверка',                    '/settings/check-types',           CheckType::orderBy('name')->get()); }
+    public function billingsPage()            { return $this->lookupView('Биллинг',                     '/settings/billings',              Billing::orderBy('id')->get()); }
 
     public function storeOrganizationForm(Request $r)                { return $this->lookupStore($r, OrganizationForm::class); }
     public function updateOrganizationForm(Request $r, OrganizationForm $organizationForm) { return $this->lookupUpdate($r, $organizationForm); }
@@ -113,6 +115,10 @@ class SettingsController extends Controller
     public function updateCheckType(Request $r, CheckType $checkType)                      { return $this->lookupUpdate($r, $checkType); }
     public function destroyCheckType(CheckType $checkType)                                 { return $this->lookupDestroy($checkType); }
 
+    public function storeBilling(Request $r)                         { return $this->lookupStore($r, Billing::class); }
+    public function updateBilling(Request $r, Billing $billing)                            { return $this->lookupUpdate($r, $billing); }
+    public function destroyBilling(Billing $billing)                                       { return $this->lookupDestroy($billing); }
+
     public function taxSystemsPage()
     {
         return view('settings.tax-systems', [
@@ -151,6 +157,7 @@ class SettingsController extends Controller
             'categories' => Category::orderBy('name')->pluck('name')->values(),
             'spheres' => Sphere::orderBy('name')->pluck('name')->values(),
             'groups' => ServiceGroup::orderBy('name')->pluck('name')->values(),
+            'billings' => Billing::orderBy('id')->pluck('name')->values(),
         ]);
     }
 
@@ -410,7 +417,7 @@ class SettingsController extends Controller
     {
         $request->validate([
             'name'                          => 'required|string|max:255',
-            'tax_systems'                   => 'required|array|min:1',
+            'tax_systems'                   => 'nullable|array',
             'tax_systems.*'                 => 'required|exists:tax_systems,id',
             'description'                   => 'nullable|string|max:1000',
             'sphere'                        => 'nullable|string|max:255',
@@ -499,7 +506,7 @@ class SettingsController extends Controller
     {
         $request->validate([
             'name'                          => 'required|string|max:255',
-            'tax_systems'                   => 'required|array|min:1',
+            'tax_systems'                   => 'nullable|array',
             'tax_systems.*'                 => 'required|exists:tax_systems,id',
             'description'                   => 'nullable|string|max:1000',
             'sphere'                        => 'nullable|string|max:255',

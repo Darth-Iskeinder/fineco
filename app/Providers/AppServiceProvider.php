@@ -30,7 +30,7 @@ class AppServiceProvider extends ServiceProvider
                     ->where('employee_id', $employee->id)
                     ->where('year', $year)
                     ->where('month', $month)
-                    ->where('status', 'completed')
+                    ->whereIn('status', ['completed', 'review'])
                     ->pluck('estimate_item_id');
 
                 $plannedUrgent = DB::table('estimate_items')

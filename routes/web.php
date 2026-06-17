@@ -7,6 +7,7 @@ use App\Http\Controllers\ClientController;
 use App\Http\Controllers\ClientServiceScheduleController;
 use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\EstimateController;
+use App\Http\Controllers\ReviewController;
 use App\Http\Controllers\SettingsController;
 use Illuminate\Support\Facades\Route;
 
@@ -19,7 +20,7 @@ Route::get('/', function () {
     }
 
     // Модули в порядке приоритета (hasAccessToModule уже возвращает true для admin)
-    $availableModules = ['employees', 'clients', 'buhsmeta', 'buhtasks', 'settings'];
+    $availableModules = ['employees', 'clients', 'buhsmeta', 'buhtasks', 'review', 'settings'];
 
     foreach ($availableModules as $moduleName) {
         if ($employee->hasAccessToModule($moduleName)) {
@@ -88,6 +89,8 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/logs/{log}/pause', [BuhTasksController::class, 'pause'])->name('logs.pause');
         Route::post('/logs/{log}/complete', [BuhTasksController::class, 'complete'])->name('logs.complete');
         Route::post('/logs/{log}/reset', [BuhTasksController::class, 'reset'])->name('logs.reset');
+        Route::post('/logs/{log}/quantity', [BuhTasksController::class, 'updateQuantity'])->name('logs.quantity');
+        Route::post('/logs/{log}/document', [BuhTasksController::class, 'uploadDocument'])->name('logs.document');
         // Внеплановые задачи
         Route::post('/adhoc', [BuhTasksController::class, 'storeAdhoc'])->name('adhoc.store');
         Route::post('/adhoc/{task}/start', [BuhTasksController::class, 'startAdhoc'])->name('adhoc.start');
@@ -97,6 +100,13 @@ Route::middleware('auth:employee')->group(function () {
         // Напоминания о сроках (выход воркера tasks:generate)
         Route::post('/reminders/{reminder}/complete', [BuhTasksController::class, 'completeReminder'])->name('reminders.complete');
         Route::post('/reminders/{reminder}/reopen', [BuhTasksController::class, 'reopenReminder'])->name('reminders.reopen');
+    });
+
+    // Модуль Проверка (задачи на проверке у БП с флагом requires_review)
+    Route::prefix('review')->name('review.')->middleware('module:review')->group(function () {
+        Route::get('/', [ReviewController::class, 'index'])->name('index');
+        Route::post('/{log}/approve', [ReviewController::class, 'approve'])->name('approve');
+        Route::post('/{log}/reject', [ReviewController::class, 'reject'])->name('reject');
     });
 
     // Настройки (доступ по модулю settings; админ имеет доступ всегда)
@@ -197,5 +207,11 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/check-types', [SettingsController::class, 'storeCheckType'])->name('check-types.store');
         Route::put('/check-types/{checkType}', [SettingsController::class, 'updateCheckType'])->name('check-types.update');
         Route::delete('/check-types/{checkType}', [SettingsController::class, 'destroyCheckType'])->name('check-types.destroy');
+
+        // Биллинг
+        Route::get('/billings', [SettingsController::class, 'billingsPage'])->name('billings');
+        Route::post('/billings', [SettingsController::class, 'storeBilling'])->name('billings.store');
+        Route::put('/billings/{billing}', [SettingsController::class, 'updateBilling'])->name('billings.update');
+        Route::delete('/billings/{billing}', [SettingsController::class, 'destroyBilling'])->name('billings.destroy');
     });
 });

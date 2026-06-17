@@ -11,6 +11,7 @@ use App\Models\Service;
 use App\Models\TaskReminder;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class BuhTasksController extends Controller
 {
@@ -30,6 +31,7 @@ class BuhTasksController extends Controller
                 'estimates' => fn($q) => $q
                     ->with(['rootItems' => fn($q) => $q
                         ->whereNull('parent_id')
+                        ->with('children.service')
                         ->orderBy('sort_order'),
                     ]),
             ])
@@ -101,6 +103,30 @@ class BuhTasksController extends Controller
                     'description'     => $service?->description,
                     'status'          => $log?->status ?? 'pending',
                     'elapsed_seconds' => $this->calcElapsed($log),
+                    'review_comment'  => $log?->review_comment,
+                    'quantity'         => (int) $item->quantity,
+                    'allows_quantity'  => (bool) ($service?->allows_quantity),
+                    'actual_quantity'  => $log?->actual_quantity,
+                    'requires_document' => (bool) ($service?->requires_document),
+                    'document_name'    => $log?->document_name,
+                    'document_path'    => $log?->document_path,
+                    'children'        => $item->children->map(function ($child) use ($logs) {
+                        $childLog = $logs->get($child->id);
+
+                        return [
+                            'id'                 => $child->id,
+                            'log_id'             => $childLog?->id,
+                            'name'               => $child->name,
+                            'status'             => $childLog?->status ?? 'pending',
+                            'review_comment'     => $childLog?->review_comment,
+                            'quantity'           => (int) $child->quantity,
+                            'allows_quantity'    => (bool) ($child->service?->allows_quantity),
+                            'actual_quantity'    => $childLog?->actual_quantity,
+                            'requires_document'  => (bool) ($child->service?->requires_document),
+                            'document_name'      => $childLog?->document_name,
+                            'document_path'      => $childLog?->document_path,
+                        ];
+                    })->values(),
                 ];
             }
         }
@@ -121,6 +147,14 @@ class BuhTasksController extends Controller
                 'description'     => null,
                 'status'          => $adhoc->status,
                 'elapsed_seconds' => $this->calcElapsed($adhoc),
+                'review_comment'  => null,
+                'quantity'        => 1,
+                'allows_quantity' => false,
+                'actual_quantity' => null,
+                'requires_document' => false,
+                'document_name'   => null,
+                'document_path'  => null,
+                'children'        => [],
             ];
         }
 
@@ -341,7 +375,7 @@ class BuhTasksController extends Controller
             $log->status     = 'running';
             $log->started_at = $now;
             $log->resumed_at = $now;
-        } elseif ($log->status === 'paused') {
+        } elseif (in_array($log->status, ['paused', 'rework'], true)) {
             $log->status     = 'running';
             $log->resumed_at = $now;
         }
@@ -374,14 +408,28 @@ class BuhTasksController extends Controller
     {
         $this->authorizeLog($log);
 
+        if ($log->estimateItem?->service?->requires_document && !$log->document_path) {
+            return response()->json([
+                'success'            => false,
+                'requires_document'  => true,
+                'message'            => 'Для завершения задачи нужно прикрепить документ',
+            ], 422);
+        }
+
         $now = now();
 
         if ($log->status === 'running' && $log->resumed_at) {
             $log->paused_seconds += max(0, $now->timestamp - $log->resumed_at->timestamp);
         }
 
-        $log->status       = 'completed';
-        $log->completed_at = $now;
+        if ($log->estimateItem?->service?->requires_review) {
+            $log->status         = 'review';
+            $log->review_comment = null;
+        } else {
+            $log->status       = 'completed';
+            $log->completed_at = $now;
+        }
+
         $log->save();
 
         return response()->json(['success' => true, 'log' => $this->formatLog($log)]);
@@ -396,6 +444,52 @@ class BuhTasksController extends Controller
         $log->resumed_at     = null;
         $log->paused_seconds = 0;
         $log->completed_at   = null;
+        $log->review_comment = null;
+        $log->reviewed_at    = null;
+        $log->reviewed_by    = null;
+        $log->save();
+
+        return response()->json(['success' => true, 'log' => $this->formatLog($log)]);
+    }
+
+    public function updateQuantity(Request $request, BuhTaskLog $log)
+    {
+        $this->authorizeLog($log);
+
+        $validated = $request->validate([
+            'actual_quantity' => ['nullable', 'integer', 'min:0'],
+        ]);
+
+        $log->actual_quantity = $validated['actual_quantity'] ?? null;
+        $log->save();
+
+        return response()->json(['success' => true, 'log' => $this->formatLog($log)]);
+    }
+
+    public function uploadDocument(Request $request, BuhTaskLog $log)
+    {
+        $this->authorizeLog($log);
+
+        $request->validate([
+            'file' => ['required', 'file', 'max:40960'],
+        ], [
+            'file.required' => 'Выберите файл',
+            'file.file'     => 'Не удалось прочитать файл — возможно, он превышает лимит сервера',
+            'file.max'      => 'Файл не должен превышать 40 МБ',
+        ]);
+
+        if ($log->document_path) {
+            Storage::disk('public')->delete($log->document_path);
+        }
+
+        $file         = $request->file('file');
+        $originalName = $file->getClientOriginalName();
+        $extension    = $file->getClientOriginalExtension();
+        $safeName     = pathinfo($originalName, PATHINFO_FILENAME) . '_' . time() . '.' . $extension;
+        $path         = $file->storeAs('buh_task_documents/' . $log->id, $safeName, 'public');
+
+        $log->document_path = $path;
+        $log->document_name = $originalName;
         $log->save();
 
         return response()->json(['success' => true, 'log' => $this->formatLog($log)]);
@@ -547,6 +641,10 @@ class BuhTasksController extends Controller
             'id'              => $log->id,
             'status'          => $log->status,
             'elapsed_seconds' => $this->calcElapsed($log),
+            'review_comment'  => $log->review_comment,
+            'actual_quantity' => $log->actual_quantity,
+            'document_name'   => $log->document_name,
+            'document_path'   => $log->document_path,
         ];
     }
 
@@ -567,8 +665,7 @@ class BuhTasksController extends Controller
 
         return match ($log->status) {
             'running'   => $log->paused_seconds + ($log->resumed_at ? max(0, $now - $log->resumed_at->timestamp) : 0),
-            'paused'    => $log->paused_seconds,
-            'completed' => $log->paused_seconds,
+            'paused', 'review', 'rework', 'completed' => $log->paused_seconds,
             default     => 0,
         };
     }

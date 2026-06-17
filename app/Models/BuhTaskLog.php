@@ -9,15 +9,19 @@ class BuhTaskLog extends Model
 {
     protected $fillable = [
         'employee_id', 'client_id', 'estimate_item_id',
-        'year', 'month', 'status',
+        'year', 'month', 'status', 'review_comment',
         'started_at', 'resumed_at', 'paused_seconds', 'completed_at',
+        'reviewed_at', 'reviewed_by', 'actual_quantity',
+        'document_path', 'document_name',
     ];
 
     protected $casts = [
         'started_at'   => 'datetime',
         'resumed_at'   => 'datetime',
         'completed_at' => 'datetime',
+        'reviewed_at'  => 'datetime',
         'paused_seconds' => 'integer',
+        'actual_quantity' => 'integer',
     ];
 
     public function employee(): BelongsTo
@@ -35,4 +39,8 @@ class BuhTaskLog extends Model
         return $this->belongsTo(EstimateItem::class);
     }
 
+    public function reviewer(): BelongsTo
+    {
+        return $this->belongsTo(Employee::class, 'reviewed_by');
+    }
 }

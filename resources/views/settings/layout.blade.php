@@ -84,6 +84,11 @@
                       {{ request()->routeIs('settings.check-types') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
                 Проверка
             </a>
+            <a href="{{ route('settings.billings') }}"
+               class="block px-3 py-2 rounded-lg text-sm transition-colors
+                      {{ request()->routeIs('settings.billings') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
+                Биллинг
+            </a>
         </nav>
     </aside>
 

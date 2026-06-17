@@ -14,8 +14,13 @@
         'tax_system_name' => $c->taxSystem?->name ?? '—',
         'tariff_name' => $c->tariff?->name ?? '—',
         'responsible' => $c->responsibleEmployee?->full_name ?? '—',
+        'total' => (float) ($c->estimate?->total ?? 0),
     ])),
     searchQuery: '',
+
+    formatTotal(value) {
+        return new Intl.NumberFormat('ru-RU').format(value) + ' сом';
+    },
 
     get filteredClients() {
         if (!this.searchQuery) return this.clients;
@@ -61,65 +66,59 @@
         </div>
     </div>
 
-    <!-- Таблица клиентов -->
-    <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
-        <div class="overflow-x-auto">
-            <table class="min-w-full">
-                <thead>
-                    <tr class="bg-slate-50/80 border-b border-slate-200/50">
-                        <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Название</th>
-                        <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">ИНН</th>
-                        <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">СНО</th>
-                        <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Тарифный план</th>
-                        <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Ответственный</th>
-                        <th scope="col" class="relative px-6 py-4"><span class="sr-only">Перейти</span></th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100">
-                    <template x-for="client in filteredClients" :key="client.id">
-                        <tr class="hover:bg-slate-50/50 transition-colors duration-150 cursor-pointer"
-                            @click="window.location.href = '/clients/' + client.id">
-                            <td class="px-6 py-4 whitespace-nowrap">
-                                <div class="flex items-center">
-                                    <div class="w-9 h-9 bg-gradient-to-br from-emerald-100 to-teal-100 rounded-xl flex items-center justify-center mr-3">
-                                        <span class="text-sm font-semibold text-teal-600" x-text="client.name.charAt(0)"></span>
-                                    </div>
-                                    <div class="text-sm font-medium text-slate-800" x-text="client.name"></div>
-                                </div>
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap">
-                                <div class="text-sm text-slate-600 font-mono" x-text="client.inn"></div>
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap">
-                                <div class="text-sm text-slate-600" x-text="client.tax_system_name"></div>
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap">
-                                <div class="text-sm text-slate-600" x-text="client.tariff_name"></div>
-                            </td>
-                            <td class="px-6 py-4">
-                                <div class="text-sm text-slate-600 max-w-[200px] truncate" x-text="client.responsible" :title="client.responsible"></div>
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-right">
-                                <svg class="w-5 h-5 text-slate-400 ml-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7" />
-                                </svg>
-                            </td>
-                        </tr>
-                    </template>
-                </tbody>
-            </table>
-        </div>
+    <!-- Сметы компаний -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <template x-for="client in filteredClients" :key="client.id">
+            <div class="group bg-white rounded-2xl shadow-sm border border-slate-200/50 p-5 cursor-pointer hover:shadow-md hover:border-indigo-200 transition-all duration-150 flex flex-col"
+                 @click="window.location.href = '/clients/' + client.id + '/estimate/edit'">
+                <!-- Шапка карточки -->
+                <div class="flex items-start gap-3 mb-4">
+                    <div class="w-11 h-11 bg-gradient-to-br from-emerald-100 to-teal-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                        <span class="text-base font-semibold text-teal-600" x-text="client.name.charAt(0)"></span>
+                    </div>
+                    <div class="min-w-0 flex-1">
+                        <div class="text-sm font-semibold text-slate-800 truncate" x-text="client.name" :title="client.name"></div>
+                        <div class="text-xs text-slate-500 font-mono mt-0.5" x-text="'ИНН ' + client.inn"></div>
+                    </div>
+                    <svg class="w-5 h-5 text-slate-300 group-hover:text-indigo-400 flex-shrink-0 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7" />
+                    </svg>
+                </div>
 
-        <!-- Пустое состояние -->
-        <div x-show="filteredClients.length === 0" class="px-6 py-16 text-center">
-            <div class="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <svg class="h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                </svg>
+                <!-- Параметры -->
+                <div class="space-y-1.5 text-xs mb-4">
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="text-slate-400">СНО</span>
+                        <span class="text-slate-600 font-medium truncate" x-text="client.tax_system_name"></span>
+                    </div>
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="text-slate-400">Тариф</span>
+                        <span class="text-slate-600 font-medium truncate" x-text="client.tariff_name"></span>
+                    </div>
+                    <div class="flex items-center justify-between gap-2">
+                        <span class="text-slate-400">Ответственный</span>
+                        <span class="text-slate-600 font-medium truncate" x-text="client.responsible" :title="client.responsible"></span>
+                    </div>
+                </div>
+
+                <!-- Сумма сметы -->
+                <div class="mt-auto pt-3 border-t border-slate-100 flex items-baseline justify-between">
+                    <span class="text-xs text-slate-400">Сумма сметы</span>
+                    <span class="text-base font-bold text-slate-800" x-text="formatTotal(client.total)"></span>
+                </div>
             </div>
-            <h3 class="text-sm font-medium text-slate-800 mb-1">Компании не найдены</h3>
-            <p class="text-sm text-slate-500" x-text="searchQuery ? 'Попробуйте изменить параметры поиска' : 'Нет активных клиентов'"></p>
+        </template>
+    </div>
+
+    <!-- Пустое состояние -->
+    <div x-show="filteredClients.length === 0" class="bg-white rounded-2xl shadow-sm border border-slate-200/50 px-6 py-16 text-center">
+        <div class="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <svg class="h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+            </svg>
         </div>
+        <h3 class="text-sm font-medium text-slate-800 mb-1">Компании не найдены</h3>
+        <p class="text-sm text-slate-500" x-text="searchQuery ? 'Попробуйте изменить параметры поиска' : 'Нет активных клиентов'"></p>
     </div>
 </div>
 @endsection

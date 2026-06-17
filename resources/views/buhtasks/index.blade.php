@@ -275,11 +275,13 @@
                         <tbody class="divide-y divide-slate-100">
                         <tr :class="{
                                 'bg-emerald-50/30': task.status === 'completed',
+                                'bg-sky-50/40': task.status === 'review',
+                                'bg-rose-50/40': task.status === 'rework',
                                 'border-l-4 border-l-red-400 bg-red-50/40': task.status !== 'completed' && urgency(task) === 'overdue',
                                 'border-l-4 border-l-orange-400 bg-orange-50/30': task.status !== 'completed' && urgency(task) === 'today',
                                 'border-l-4 border-l-amber-300 bg-amber-50/20': task.status !== 'completed' && urgency(task) === 'soon',
                                 'hover:bg-slate-50/50': task.status !== 'completed' && !urgency(task),
-                            }" x-show="matchesFilter(task)">
+                            }" x-show="matchesFilter(task)" @dblclick="openTaskModal(idx)">
 
                             {{-- Статус-точка --}}
                             <td class="px-4 py-3.5">
@@ -288,20 +290,15 @@
                                          'bg-slate-300': task.status === 'pending',
                                          'bg-indigo-500 animate-pulse': task.status === 'running',
                                          'bg-amber-400': task.status === 'paused',
+                                         'bg-sky-500': task.status === 'review',
+                                         'bg-rose-500': task.status === 'rework',
                                          'bg-emerald-500': task.status === 'completed',
                                      }"></div>
                             </td>
 
                             <td class="px-4 py-3.5">
                                 <div class="flex items-center gap-2">
-                                    <button type="button" @click.prevent="toggleExpand(task.uid)"
-                                            class="flex-shrink-0 text-slate-300 hover:text-indigo-500 transition-all"
-                                            :class="expanded[task.uid] ? 'rotate-90 text-indigo-500' : ''"
-                                            title="Описание / комментарий">
-                                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                                    </button>
                                     <span class="text-sm font-medium cursor-pointer"
-                                          @click="toggleExpand(task.uid)"
                                           :class="task.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-800'"
                                           x-text="task.name"></span>
                                     <span x-show="task.type === 'adhoc'"
@@ -310,6 +307,10 @@
                                           class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">просрочена</span>
                                     <span x-show="task.status !== 'completed' && urgency(task) === 'today'"
                                           class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-700">сегодня</span>
+                                    <span x-show="task.status === 'review'"
+                                          class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-sky-100 text-sky-700">на проверке</span>
+                                    <span x-show="task.status === 'rework'"
+                                          class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-rose-100 text-rose-700">на доработку</span>
                                 </div>
                             </td>
 
@@ -346,12 +347,14 @@
                                           'text-slate-300': task.status === 'pending',
                                           'text-indigo-600': task.status === 'running',
                                           'text-amber-500': task.status === 'paused',
+                                          'text-sky-600': task.status === 'review',
+                                          'text-rose-500': task.status === 'rework',
                                           'text-emerald-600': task.status === 'completed',
                                       }"
                                       x-text="formatTime(getElapsed(task))"></span>
                             </td>
 
-                            <td class="px-4 py-3.5 text-right whitespace-nowrap">
+                            <td class="px-4 py-3.5 text-right whitespace-nowrap" @dblclick.stop>
 
                                 {{-- Старт (pending) --}}
                                 <button x-show="task.status === 'pending'"
@@ -394,6 +397,30 @@
                                     </button>
                                 </span>
 
+                                {{-- Продолжить + Стоп (rework) --}}
+                                <span x-show="task.status === 'rework'" class="inline-flex items-center gap-1.5">
+                                    <button @click.prevent="resumeTask(idx)"
+                                            :disabled="task.loading"
+                                            class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 text-rose-600 border border-rose-200 text-xs font-medium rounded-lg hover:bg-rose-100 disabled:opacity-50 transition-colors">
+                                        <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
+                                        Продолжить
+                                    </button>
+                                    <button @click.prevent="completeTask(idx)"
+                                            :disabled="task.loading"
+                                            class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors">
+                                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                                        Стоп
+                                    </button>
+                                </span>
+
+                                {{-- На проверке (review) --}}
+                                <span x-show="task.status === 'review'" class="inline-flex items-center">
+                                    <span class="text-xs text-sky-600 font-medium flex items-center gap-1">
+                                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                        На проверке
+                                    </span>
+                                </span>
+
                                 {{-- Выполнено (completed) --}}
                                 <span x-show="task.status === 'completed'" class="inline-flex items-center">
                                     <span class="text-xs text-emerald-600 font-medium flex items-center gap-1">
@@ -402,30 +429,6 @@
                                     </span>
                                 </span>
 
-                            </td>
-                        </tr>
-
-                        {{-- Раскрывающаяся сноска: описание / комментарий БП --}}
-                        <tr x-show="matchesFilter(task) && expanded[task.uid]" class="bg-slate-50/60">
-                            <td></td>
-                            <td colspan="6" class="px-4 pb-4 pt-0">
-                                <div class="text-sm text-slate-600 space-y-2 border-l-2 border-indigo-200 pl-3">
-                                    <template x-if="task.description">
-                                        <div>
-                                            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Описание</p>
-                                            <p class="whitespace-pre-line" x-text="task.description"></p>
-                                        </div>
-                                    </template>
-                                    <template x-if="task.comment">
-                                        <div>
-                                            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Комментарий</p>
-                                            <p class="whitespace-pre-line" x-text="task.comment"></p>
-                                        </div>
-                                    </template>
-                                    <template x-if="!task.description && !task.comment">
-                                        <p class="text-slate-400 italic">Описание и комментарий не заполнены</p>
-                                    </template>
-                                </div>
                             </td>
                         </tr>
                         </tbody>
@@ -459,6 +462,8 @@
                     <template x-for="(task, idx) in tasks" :key="task.uid">
                         <tr :class="{
                                 'bg-emerald-50/30': task.status === 'completed',
+                                'bg-sky-50/40': task.status === 'review',
+                                'bg-rose-50/40': task.status === 'rework',
                                 'border-l-4 border-l-red-400 bg-red-50/40': task.status !== 'completed' && urgency(task) === 'overdue',
                                 'border-l-4 border-l-orange-400 bg-orange-50/30': task.status !== 'completed' && urgency(task) === 'today',
                                 'border-l-4 border-l-amber-300 bg-amber-50/20': task.status !== 'completed' && urgency(task) === 'soon',
@@ -469,7 +474,7 @@
                                 <input type="checkbox"
                                        :checked="task.status === 'completed'"
                                        @change="toggleChecklist(idx)"
-                                       :disabled="task.loading"
+                                       :disabled="task.loading || task.status === 'review'"
                                        class="w-4 h-4 text-emerald-600 border-slate-300 rounded focus:ring-emerald-500 cursor-pointer">
                             </td>
                             <td class="px-4 py-3.5">
@@ -483,6 +488,10 @@
                                           class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">просрочена</span>
                                     <span x-show="task.status !== 'completed' && urgency(task) === 'today'"
                                           class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-700">сегодня</span>
+                                    <span x-show="task.status === 'review'"
+                                          class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-sky-100 text-sky-700">на проверке</span>
+                                    <span x-show="task.status === 'rework'"
+                                          class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-rose-100 text-rose-700">на доработку</span>
                                 </div>
                             </td>
                             <td class="px-4 py-3.5">
@@ -680,12 +689,218 @@
         </div>
     </div>
 
+    {{-- ===== МОДАЛ ПРЕДУПРЕЖДЕНИЯ: НУЖЕН ДОКУМЕНТ ===== --}}
+    <div x-show="docRequiredModal.show"
+         x-transition:enter="ease-out duration-200"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="ease-in duration-150"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+         @click.self="docRequiredModal = { show: false, taskIdx: null }"
+         @keydown.escape.window="docRequiredModal = { show: false, taskIdx: null }"
+         style="display:none">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">
+            <div class="flex items-start gap-4">
+                <div class="flex-shrink-0 w-11 h-11 rounded-full bg-amber-100 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/></svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <h3 class="text-base font-semibold text-slate-800">Нужно прикрепить документ</h3>
+                    <p class="mt-1 text-sm text-slate-500">Для этого БП правило закрытия — «с документом». Откройте задачу и прикрепите файл, после этого можно будет завершить.</p>
+                </div>
+            </div>
+            <div class="flex gap-3 mt-6">
+                <button @click="docRequiredModal = { show: false, taskIdx: null }"
+                        class="flex-1 py-2.5 px-4 border border-slate-200 text-slate-600 text-sm font-medium rounded-xl hover:bg-slate-50 transition-colors">
+                    Понятно
+                </button>
+                <button @click="openTaskModal(docRequiredModal.taskIdx); docRequiredModal = { show: false, taskIdx: null }"
+                        class="flex-1 py-2.5 px-4 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 transition-colors">
+                    Открыть задачу
+                </button>
+            </div>
+        </div>
+    </div>
+
+    {{-- ===== МОДАЛ ЗАДАЧИ (описание + чек-лист подпунктов) ===== --}}
+    <div x-show="taskModalIdx !== null"
+         x-transition:enter="ease-out duration-200"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="ease-in duration-150"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+         @click.self="closeTaskModal()"
+         @keydown.escape.window="closeTaskModal()"
+         style="display:none">
+        <template x-if="taskModalIdx !== null">
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 max-h-[85vh] overflow-y-auto">
+                <div class="flex items-start justify-between gap-4">
+                    <h3 class="text-base font-semibold text-slate-800" x-text="tasks[taskModalIdx].name"></h3>
+                    <button @click="closeTaskModal()" class="text-slate-300 hover:text-slate-500 transition-colors flex-shrink-0">
+                        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                <p class="text-sm text-slate-500 mt-0.5" x-text="tasks[taskModalIdx].client_name"></p>
+
+                <div class="mt-4 space-y-3">
+                    <template x-if="tasks[taskModalIdx].description">
+                        <div>
+                            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Описание</p>
+                            <p class="text-sm text-slate-600 whitespace-pre-line" x-text="tasks[taskModalIdx].description"></p>
+                        </div>
+                    </template>
+                    <template x-if="tasks[taskModalIdx].comment">
+                        <div>
+                            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Комментарий</p>
+                            <p class="text-sm text-slate-600 whitespace-pre-line" x-text="tasks[taskModalIdx].comment"></p>
+                        </div>
+                    </template>
+                    <template x-if="tasks[taskModalIdx].review_comment">
+                        <div>
+                            <p class="text-xs font-semibold text-rose-500 uppercase tracking-wider mb-0.5">Комментарий проверяющего</p>
+                            <p class="text-sm text-rose-700 whitespace-pre-line" x-text="tasks[taskModalIdx].review_comment"></p>
+                        </div>
+                    </template>
+                    <template x-if="!tasks[taskModalIdx].description && !tasks[taskModalIdx].comment && !tasks[taskModalIdx].review_comment">
+                        <p class="text-sm text-slate-400 italic">Описание и комментарий не заполнены</p>
+                    </template>
+                </div>
+
+                <template x-if="tasks[taskModalIdx].allows_quantity">
+                    <div class="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between gap-3">
+                        <div>
+                            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Количество</p>
+                            <p class="text-sm text-slate-600">План: <span class="font-medium text-slate-800" x-text="tasks[taskModalIdx].quantity"></span></p>
+                        </div>
+                        <div class="text-right">
+                            <label class="text-xs text-slate-400 block mb-0.5">Факт</label>
+                            <input type="number" min="0"
+                                   :placeholder="tasks[taskModalIdx].quantity"
+                                   :value="tasks[taskModalIdx].actual_quantity"
+                                   @change="updateRootQuantity(taskModalIdx, $event.target.value)"
+                                   class="w-20 px-2 py-1 border border-slate-200 rounded-lg text-sm text-right focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                        </div>
+                    </div>
+                </template>
+
+                <template x-if="tasks[taskModalIdx].requires_document">
+                    <div class="mt-4 pt-4 border-t border-slate-100">
+                        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Документ для закрытия</p>
+                        <div class="flex items-center gap-2">
+                            <template x-if="tasks[taskModalIdx].document_name && !tasks[taskModalIdx].pending_file_name">
+                                <a :href="'/storage/' + tasks[taskModalIdx].document_path" target="_blank"
+                                   class="inline-flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 underline truncate max-w-[220px]">
+                                    <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                                    <span x-text="tasks[taskModalIdx].document_name"></span>
+                                </a>
+                            </template>
+                            <template x-if="!tasks[taskModalIdx].document_name && !tasks[taskModalIdx].pending_file_name">
+                                <span class="text-sm text-slate-400 italic">Не прикреплён</span>
+                            </template>
+                            <template x-if="tasks[taskModalIdx].pending_file_name">
+                                <span class="text-sm text-slate-600 truncate max-w-[220px]" x-text="tasks[taskModalIdx].pending_file_name"></span>
+                            </template>
+                            <label class="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-600 text-xs font-medium rounded-lg hover:bg-slate-200 cursor-pointer transition-colors">
+                                <span x-text="tasks[taskModalIdx].document_name ? 'Заменить' : 'Выбрать файл'"></span>
+                                <input type="file" class="hidden" @change="selectRootDocument(taskModalIdx, $event)">
+                            </label>
+                            <template x-if="tasks[taskModalIdx].pending_file_name">
+                                <button @click="saveRootDocument(taskModalIdx)"
+                                        :disabled="tasks[taskModalIdx].doc_uploading"
+                                        class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                                    <span x-text="tasks[taskModalIdx].doc_uploading ? 'Сохранение...' : 'Сохранить'"></span>
+                                </button>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+
+                <template x-if="tasks[taskModalIdx].children && tasks[taskModalIdx].children.length > 0">
+                    <div class="mt-5 pt-4 border-t border-slate-100">
+                        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Подпункты</p>
+                        <div class="space-y-1.5">
+                            <template x-for="(child, cidx) in tasks[taskModalIdx].children" :key="child.id">
+                                <div class="py-1">
+                                    <label class="flex items-center gap-2.5 cursor-pointer"
+                                           :class="child.status === 'review' ? 'opacity-60 cursor-not-allowed' : ''">
+                                        <input type="checkbox"
+                                               :checked="child.status === 'completed'"
+                                               :disabled="child.loading || child.status === 'review'"
+                                               @change="toggleChild(taskModalIdx, cidx)"
+                                               class="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500">
+                                        <span class="text-sm flex-1"
+                                              :class="child.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-700'"
+                                              x-text="child.name"></span>
+                                        <span x-show="child.status === 'review'" class="text-xs text-sky-600 font-medium">на проверке</span>
+                                        <span x-show="child.status === 'rework'" class="text-xs text-rose-600 font-medium">на доработку</span>
+                                    </label>
+                                    <template x-if="child.allows_quantity">
+                                        <div class="flex items-center gap-2 mt-1 ml-6 text-xs text-slate-500">
+                                            <span>План: <span class="font-medium text-slate-700" x-text="child.quantity"></span></span>
+                                            <span>Факт:</span>
+                                            <input type="number" min="0"
+                                                   :placeholder="child.quantity"
+                                                   :value="child.actual_quantity"
+                                                   @change="updateChildQuantity(taskModalIdx, cidx, $event.target.value)"
+                                                   class="w-16 px-1.5 py-0.5 border border-slate-200 rounded text-xs text-right focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                        </div>
+                                    </template>
+                                    <template x-if="child.requires_document">
+                                        <div class="flex items-center gap-2 mt-1 ml-6 text-xs">
+                                            <template x-if="child.document_name && !child.pending_file_name">
+                                                <a :href="'/storage/' + child.document_path" target="_blank"
+                                                   class="text-indigo-600 hover:text-indigo-800 underline truncate max-w-[140px]" x-text="child.document_name"></a>
+                                            </template>
+                                            <template x-if="!child.document_name && !child.pending_file_name">
+                                                <span class="text-slate-400 italic">Документ не прикреплён</span>
+                                            </template>
+                                            <template x-if="child.pending_file_name">
+                                                <span class="text-slate-600 truncate max-w-[140px]" x-text="child.pending_file_name"></span>
+                                            </template>
+                                            <label class="ml-auto inline-flex items-center px-2 py-1 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 cursor-pointer transition-colors">
+                                                <span x-text="child.document_name ? 'Заменить' : 'Выбрать файл'"></span>
+                                                <input type="file" class="hidden" @change="selectChildDocument(taskModalIdx, cidx, $event)">
+                                            </label>
+                                            <template x-if="child.pending_file_name">
+                                                <button @click="saveChildDocument(taskModalIdx, cidx)"
+                                                        :disabled="child.doc_uploading"
+                                                        class="inline-flex items-center px-2 py-1 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                                                    <span x-text="child.doc_uploading ? 'Сохранение...' : 'Сохранить'"></span>
+                                                </button>
+                                            </template>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </template>
+    </div>
+
 </div>
 
 <script>
 function buhTasks(initialTasks, year, month, allClients, allServices) {
+    // File-объекты держим вне реактивного state — Alpine оборачивает объекты в Proxy,
+    // что ломает внутренние методы File/Blob при передаче в FormData
+    const pendingFiles = new Map();
+
     return {
-        tasks: initialTasks.map((t, i) => ({ ...t, loading: false, client_resumed_at: null, _seq: i })),
+        tasks: initialTasks.map((t, i) => ({
+            ...t,
+            loading: false,
+            client_resumed_at: null,
+            _seq: i,
+            doc_uploading: false,
+            pending_file_name: null,
+            children: (t.children || []).map(c => ({ ...c, doc_uploading: false, pending_file_name: null })),
+        })),
         year,
         month,
         allClients,
@@ -695,7 +910,8 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
         now: Math.floor(Date.now() / 1000),
         clientFilter: 'all',
         sortDir: null, // null = исходный порядок | 'asc' | 'desc' (по сроку due_day)
-        expanded: {},  // uid задачи -> раскрыта ли сноска с описанием/комментарием
+        taskModalIdx: null,
+        docRequiredModal: { show: false, taskIdx: null },
 
         showCreateModal: false,
         startConfirm: { show: false, idx: null },
@@ -716,8 +932,158 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
         matchesFilter(task) {
             return this.clientFilter === 'all' || String(task.client_id) === String(this.clientFilter);
         },
-        toggleExpand(uid) {
-            this.expanded[uid] = !this.expanded[uid];
+        openTaskModal(idx) {
+            this.taskModalIdx = idx;
+        },
+
+        closeTaskModal() {
+            this.taskModalIdx = null;
+        },
+
+        async ensureChildLog(taskIdx, cidx) {
+            const task = this.tasks[taskIdx];
+            const child = task.children[cidx];
+            if (child.log_id) return child.log_id;
+
+            const r = await fetch('/buhtasks/logs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': this.csrf(), 'Accept': 'application/json' },
+                body: JSON.stringify({
+                    client_id:        task.client_id,
+                    estimate_item_id: child.id,
+                    year:             this.year,
+                    month:            this.month,
+                }),
+            });
+            const data = await r.json();
+            if (!data.success) return null;
+            task.children[cidx] = { ...task.children[cidx], log_id: data.log.id };
+            return data.log.id;
+        },
+
+        async toggleChild(taskIdx, cidx) {
+            const task = this.tasks[taskIdx];
+            const child = task.children[cidx];
+            if (child.loading || child.status === 'review') return;
+
+            task.children[cidx] = { ...child, loading: true };
+
+            if (child.status === 'completed') {
+                const data = await this.post(`/buhtasks/logs/${child.log_id}/reset`);
+                task.children[cidx] = data.success
+                    ? { ...task.children[cidx], loading: false, status: data.log.status, review_comment: data.log.review_comment ?? null }
+                    : { ...task.children[cidx], loading: false };
+                return;
+            }
+
+            const logId = await this.ensureChildLog(taskIdx, cidx);
+            if (!logId) { task.children[cidx] = { ...task.children[cidx], loading: false }; return; }
+
+            if (task.children[cidx].status === 'pending' || task.children[cidx].status === 'rework') {
+                await this.post(`/buhtasks/logs/${logId}/start`);
+            }
+            const data = await this.post(`/buhtasks/logs/${logId}/complete`);
+            task.children[cidx] = data.success
+                ? { ...task.children[cidx], loading: false, status: data.log.status, review_comment: data.log.review_comment ?? null }
+                : { ...task.children[cidx], loading: false };
+            if (!data.success && data.requires_document) {
+                this.docRequiredModal = { show: true, taskIdx };
+            }
+        },
+
+        async updateRootQuantity(taskIdx, rawValue) {
+            const task = this.tasks[taskIdx];
+            const value = rawValue === '' ? null : Math.max(0, parseInt(rawValue, 10) || 0);
+
+            const logId = await this.ensureLog(taskIdx);
+            if (!logId) return;
+
+            const data = await this.post(`/buhtasks/logs/${logId}/quantity`, { actual_quantity: value });
+            if (data.success) {
+                this.tasks[taskIdx] = { ...this.tasks[taskIdx], actual_quantity: data.log.actual_quantity };
+            }
+        },
+
+        async updateChildQuantity(taskIdx, cidx, rawValue) {
+            const task = this.tasks[taskIdx];
+            const value = rawValue === '' ? null : Math.max(0, parseInt(rawValue, 10) || 0);
+
+            const logId = await this.ensureChildLog(taskIdx, cidx);
+            if (!logId) return;
+
+            const data = await this.post(`/buhtasks/logs/${logId}/quantity`, { actual_quantity: value });
+            if (data.success) {
+                task.children[cidx] = { ...task.children[cidx], actual_quantity: data.log.actual_quantity };
+            }
+        },
+
+        selectRootDocument(taskIdx, event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            pendingFiles.set('root_' + taskIdx, file);
+            this.tasks[taskIdx] = { ...this.tasks[taskIdx], pending_file_name: file.name };
+            event.target.value = '';
+        },
+
+        async saveRootDocument(taskIdx) {
+            const file = pendingFiles.get('root_' + taskIdx);
+            if (!file) return;
+
+            this.tasks[taskIdx] = { ...this.tasks[taskIdx], doc_uploading: true };
+
+            const logId = await this.ensureLog(taskIdx);
+            if (!logId) { this.tasks[taskIdx] = { ...this.tasks[taskIdx], doc_uploading: false }; return; }
+
+            const fd = new FormData();
+            fd.append('file', file);
+            const r = await fetch(`/buhtasks/logs/${logId}/document`, {
+                method: 'POST',
+                headers: { 'X-CSRF-TOKEN': this.csrf(), 'Accept': 'application/json' },
+                body: fd,
+            });
+            const data = await r.json();
+            if (data.success) {
+                pendingFiles.delete('root_' + taskIdx);
+                this.tasks[taskIdx] = { ...this.tasks[taskIdx], doc_uploading: false, pending_file_name: null, document_name: data.log.document_name, document_path: data.log.document_path };
+            } else {
+                this.tasks[taskIdx] = { ...this.tasks[taskIdx], doc_uploading: false };
+            }
+        },
+
+        selectChildDocument(taskIdx, cidx, event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const task = this.tasks[taskIdx];
+            pendingFiles.set('child_' + taskIdx + '_' + cidx, file);
+            task.children[cidx] = { ...task.children[cidx], pending_file_name: file.name };
+            event.target.value = '';
+        },
+
+        async saveChildDocument(taskIdx, cidx) {
+            const key = 'child_' + taskIdx + '_' + cidx;
+            const file = pendingFiles.get(key);
+            if (!file) return;
+            const task = this.tasks[taskIdx];
+
+            task.children[cidx] = { ...task.children[cidx], doc_uploading: true };
+
+            const logId = await this.ensureChildLog(taskIdx, cidx);
+            if (!logId) { task.children[cidx] = { ...task.children[cidx], doc_uploading: false }; return; }
+
+            const fd = new FormData();
+            fd.append('file', file);
+            const r = await fetch(`/buhtasks/logs/${logId}/document`, {
+                method: 'POST',
+                headers: { 'X-CSRF-TOKEN': this.csrf(), 'Accept': 'application/json' },
+                body: fd,
+            });
+            const data = await r.json();
+            if (data.success) {
+                pendingFiles.delete(key);
+                task.children[cidx] = { ...task.children[cidx], doc_uploading: false, pending_file_name: null, document_name: data.log.document_name, document_path: data.log.document_path };
+            } else {
+                task.children[cidx] = { ...task.children[cidx], doc_uploading: false };
+            }
         },
 
         // Сортировка по сроку (due_day): клик переключает asc → desc → исходный порядок
@@ -755,7 +1121,7 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
         },
 
         urgency(task) {
-            if (task.status === 'completed' || !task.due_day) return null;
+            if (task.status === 'completed' || task.status === 'review' || !task.due_day) return null;
             const now = new Date();
             if (this.year !== now.getFullYear() || this.month !== now.getMonth() + 1) return null;
             const today = now.getDate();
@@ -823,11 +1189,14 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
             return document.querySelector('meta[name="csrf-token"]').content;
         },
 
-        async post(url) {
-            const r = await fetch(url, {
-                method: 'POST',
-                headers: { 'X-CSRF-TOKEN': this.csrf(), 'Accept': 'application/json' },
-            });
+        async post(url, body = null) {
+            const headers = { 'X-CSRF-TOKEN': this.csrf(), 'Accept': 'application/json' };
+            const options = { method: 'POST', headers };
+            if (body !== null) {
+                headers['Content-Type'] = 'application/json';
+                options.body = JSON.stringify(body);
+            }
+            const r = await fetch(url, options);
             return r.json();
         },
 
@@ -840,6 +1209,7 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
                 log_id:            task.type === 'planned' ? log.id : task.log_id,
                 status:            log.status,
                 elapsed_seconds:   log.elapsed_seconds,
+                review_comment:    log.review_comment ?? null,
                 client_resumed_at: log.status === 'running' ? this.now : null,
             };
         },
@@ -925,8 +1295,12 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
             }
 
             const data = await this.post(this.actionUrl(this.tasks[idx], 'complete'));
-            if (data.success) this.applyResult(idx, data.log);
-            else this.tasks[idx] = { ...this.tasks[idx], loading: false };
+            if (data.success) {
+                this.applyResult(idx, data.log);
+            } else {
+                this.tasks[idx] = { ...this.tasks[idx], loading: false };
+                if (data.requires_document) this.docRequiredModal = { show: true, taskIdx: idx };
+            }
         },
 
         async resetTask(idx) {
@@ -938,7 +1312,7 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
 
         async toggleChecklist(idx) {
             const task = this.tasks[idx];
-            if (task.loading) return;
+            if (task.loading || task.status === 'review') return;
             if (task.status === 'completed') {
                 await this.resetTask(idx);
             } else {
@@ -951,8 +1325,12 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
                         await this.post(`/buhtasks/logs/${logId}/start`);
                     }
                     const data = await this.post(`/buhtasks/logs/${logId}/complete`);
-                    if (data.success) this.applyResult(idx, data.log);
-                    else this.tasks[idx] = { ...this.tasks[idx], loading: false };
+                    if (data.success) {
+                        this.applyResult(idx, data.log);
+                    } else {
+                        this.tasks[idx] = { ...this.tasks[idx], loading: false };
+                        if (data.requires_document) this.docRequiredModal = { show: true, taskIdx: idx };
+                    }
                 } else {
                     if (this.tasks[idx].status === 'pending') {
                         await this.post(this.actionUrl(this.tasks[idx], 'start'));

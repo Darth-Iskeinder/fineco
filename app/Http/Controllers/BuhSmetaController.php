@@ -12,8 +12,10 @@ class BuhSmetaController extends Controller
 {
     public function index(Request $request)
     {
+        // Только компании, у которых уже создана смета
         $clients = Client::active()
-            ->with(['taxSystem', 'tariff', 'responsibleEmployee'])
+            ->has('estimates')
+            ->with(['taxSystem', 'tariff', 'responsibleEmployee', 'estimate'])
             ->orderBy('name')
             ->get();
 

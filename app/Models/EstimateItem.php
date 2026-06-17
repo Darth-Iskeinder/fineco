@@ -42,4 +42,9 @@ class EstimateItem extends Model
     {
         return $this->hasMany(EstimateItem::class, 'parent_id')->orderBy('sort_order');
     }
+
+    public function service(): BelongsTo
+    {
+        return $this->belongsTo(Service::class);
+    }
 }
