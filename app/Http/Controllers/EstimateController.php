@@ -54,6 +54,7 @@ class EstimateController extends Controller
             $bpData = [
                 'service_id'     => $bp->id,
                 'name'           => $bp->name,
+                'sphere'         => $bp->sphere,
                 'cost'           => (float) $bp->cost,
                 'periodicity'    => $bp->periodicity ?? '',
                 'allows_quantity'=> $bp->allows_quantity,

@@ -43,23 +43,27 @@ class BuhTasksController extends Controller
         // Все клиенты сотрудника (для создания внеплановых задач)
         $allClients = $employee->responsibleClients()->orderBy('name')->get(['id', 'name']);
 
-        // Логи плановых задач за этот период
-        $logs = BuhTaskLog::where('employee_id', $employee->id)
-            ->where('year', $year)
-            ->where('month', $month)
-            ->get()
-            ->keyBy('estimate_item_id');
+        // Правила активного списка:
+        //  - просроченные невыполненные — показываем ВСЕ, пока не закроют;
+        //  - предстоящие — на 30 дней вперёд от сегодня;
+        //  - выполненные — только в день закрытия (сегодня), дальше уходят во вкладку «Выполненные».
+        $today       = CarbonImmutable::now()->startOfDay();
+        $todayStr    = $today->toDateString();
+        $horizonEnd  = $today->addDays(30)->endOfDay();
+        $curStart    = $today->startOfMonth();
+        $year        = $curStart->year;
+        $month       = $curStart->month;
+        $historyFrom = $today->subDays(30)->startOfDay(); // глубина вкладки «Выполненные»
 
-        // Внеплановые задачи за этот период
+        // Все логи плановых задач сотрудника (нужны статусы за прошлое для просрочки), ключ year-month-item
+        $logs = BuhTaskLog::where('employee_id', $employee->id)
+            ->get()
+            ->keyBy(fn ($l) => $l->year . '-' . $l->month . '-' . $l->estimate_item_id);
+
+        // Все внеплановые задачи сотрудника (невыполненные висят, пока не закроют)
         $adhocs = BuhAdhocTask::where('employee_id', $employee->id)
-            ->where('year', $year)
-            ->where('month', $month)
             ->with('client')
             ->get();
-
-        // Окно выбранного месяца — для расчёта срока из расписания БП
-        $monthStart = CarbonImmutable::create($year, $month, 1)->startOfDay();
-        $monthEnd   = $monthStart->endOfMonth();
 
         // Предзагрузка БП по сметным позициям (нужны их методы расписания)
         $serviceIds = $clients
@@ -69,80 +73,132 @@ class BuhTasksController extends Controller
             ? Service::whereIn('id', $serviceIds)->get()->keyBy('id')
             : collect();
 
-        // Плановые задачи из сметы
+        // Плановые задачи из сметы.
+        // Берём реальные даты срока от старта обслуживания клиента до +30 дней, затем оставляем:
+        //  - просроченные невыполненные (все), предстоящие в пределах 30 дней, выполненные сегодня.
+        // Квартальные/годовые всплывают сами за 30 дней до срока. Позиции без расписания
+        // (ручные one_time или БП без периодичности) показываем как текущую задачу.
         $tasks = [];
         foreach ($clients as $client) {
             $items = $client->estimates->first()?->rootItems ?? collect();
             $overrides = $client->serviceSchedules->keyBy('service_id');
-            foreach ($items as $item) {
-                $log = $logs->get($item->id);
 
-                // Срок: считаем из расписания БП (с учётом override клиента) на выбранный месяц;
-                // если расписания нет — фолбэк на статичное поле позиции сметы.
-                $dueDay = $item->due_day;
-                $service = $item->service_id ? $services->get($item->service_id) : null;
-                if ($service) {
-                    $dates = $service->dueDatesForClient($overrides->get($item->service_id), $monthStart, $monthEnd);
-                    if (!empty($dates)) {
-                        $dueDay = min(array_map(fn ($d) => (int) $d->day, $dates));
+            // Нижняя граница поиска просрочки — старт обслуживания (но не дальше 3 лет назад).
+            $lookbackStart = $client->service_start_date
+                ? CarbonImmutable::parse($client->service_start_date)->startOfDay()
+                : $today->subMonths(12);
+            if ($lookbackStart->lt($today->subYears(3))) {
+                $lookbackStart = $today->subYears(3);
+            }
+
+            foreach ($items as $item) {
+                $service  = $item->service_id ? $services->get($item->service_id) : null;
+                $override = $service ? $overrides->get($item->service_id) : null;
+                $hasSchedule = $service && !empty($service->resolveForClient($override)['periodicity']);
+
+                // Экземпляры задачи: [year, month, dueDateString|null, dueDay|null, Carbon|null]
+                $occurrences = [];
+                if ($hasSchedule) {
+                    foreach ($service->dueDatesForClient($override, $lookbackStart, $horizonEnd) as $due) {
+                        $occurrences[] = [$due->year, $due->month, $due->toDateString(), (int) $due->day, $due];
                     }
+                } else {
+                    $dueDay = $item->due_day ? min((int) $item->due_day, $curStart->daysInMonth) : null;
+                    $dueObj = $dueDay ? $curStart->day($dueDay) : null;
+                    $occurrences[] = [$curStart->year, $curStart->month, $dueObj?->toDateString(), $item->due_day ? (int) $item->due_day : null, $dueObj];
                 }
 
-                $tasks[] = [
-                    'uid'             => 'planned_' . $item->id,
-                    'type'            => 'planned',
-                    'item_id'         => $item->id,
-                    'client_id'       => $client->id,
-                    'client_name'     => $client->name,
-                    'log_id'          => $log?->id,
-                    'name'            => $item->name,
-                    'cost'            => (float) $item->total,
-                    'periodicity'     => $item->periodicity,
-                    'due_day'         => $dueDay,
-                    'comment'         => $service?->comment,
-                    'description'     => $service?->description,
-                    'status'          => $log?->status ?? 'pending',
-                    'elapsed_seconds' => $this->calcElapsed($log),
-                    'review_comment'  => $log?->review_comment,
-                    'quantity'         => (int) $item->quantity,
-                    'allows_quantity'  => (bool) ($service?->allows_quantity),
-                    'actual_quantity'  => $log?->actual_quantity,
-                    'requires_document' => (bool) ($service?->requires_document),
-                    'document_name'    => $log?->document_name,
-                    'document_path'    => $log?->document_path,
-                    'children'        => $item->children->map(function ($child) use ($logs) {
-                        $childLog = $logs->get($child->id);
+                foreach ($occurrences as [$wy, $wm, $dueDateStr, $dueDay, $dueObj]) {
+                    $log = $logs->get($wy . '-' . $wm . '-' . $item->id);
+                    $status = $log?->status ?? 'pending';
 
-                        return [
-                            'id'                 => $child->id,
-                            'log_id'             => $childLog?->id,
-                            'name'               => $child->name,
-                            'status'             => $childLog?->status ?? 'pending',
-                            'review_comment'     => $childLog?->review_comment,
-                            'quantity'           => (int) $child->quantity,
-                            'allows_quantity'    => (bool) ($child->service?->allows_quantity),
-                            'actual_quantity'    => $childLog?->actual_quantity,
-                            'requires_document'  => (bool) ($child->service?->requires_document),
-                            'document_name'      => $childLog?->document_name,
-                            'document_path'      => $childLog?->document_path,
-                        ];
-                    })->values(),
-                ];
+                    // Фильтр видимости в активном списке:
+                    if ($status === 'completed') {
+                        // выполненные — только в день закрытия (дальше уходят во вкладку «Выполненные»)
+                        $completedToday = $log?->completed_at && $log->completed_at->toDateString() === $todayStr;
+                        if (!$completedToday) {
+                            continue;
+                        }
+                    } elseif ($dueObj && $dueObj->gt($horizonEnd)) {
+                        // не выполнено: просроченные показываем всегда, прячем только дальше 30 дней вперёд
+                        continue;
+                    }
+                    // позиции без даты (ручные без срока) — показываем как текущую задачу
+
+                    $tasks[] = [
+                        'uid'             => 'planned_' . $item->id . '_' . $wy . '_' . $wm,
+                        'type'            => 'planned',
+                        'item_id'         => $item->id,
+                        'client_id'       => $client->id,
+                        'client_name'     => $client->name,
+                        'year'            => $wy,
+                        'month'           => $wm,
+                        'log_id'          => $log?->id,
+                        'name'            => $item->name,
+                        'cost'            => (float) $item->total,
+                        'periodicity'     => $item->periodicity,
+                        'due_day'         => $dueDay,
+                        'due_date'        => $dueDateStr,
+                        'comment'         => $service?->comment,
+                        'description'     => $service?->description,
+                        'status'          => $log?->status ?? 'pending',
+                        'elapsed_seconds' => $this->calcElapsed($log),
+                        'review_comment'  => $log?->review_comment,
+                        'quantity'         => (int) $item->quantity,
+                        'allows_quantity'  => (bool) ($service?->allows_quantity),
+                        'actual_quantity'  => $log?->actual_quantity,
+                        'requires_document' => (bool) ($service?->requires_document),
+                        'document_name'    => $log?->document_name,
+                        'document_path'    => $log?->document_path,
+                        'children'        => $item->children->map(function ($child) use ($logs, $wy, $wm) {
+                            $childLog = $logs->get($wy . '-' . $wm . '-' . $child->id);
+
+                            return [
+                                'id'                 => $child->id,
+                                'log_id'             => $childLog?->id,
+                                'name'               => $child->name,
+                                'status'             => $childLog?->status ?? 'pending',
+                                'review_comment'     => $childLog?->review_comment,
+                                'quantity'           => (int) $child->quantity,
+                                'allows_quantity'    => (bool) ($child->service?->allows_quantity),
+                                'actual_quantity'    => $childLog?->actual_quantity,
+                                'requires_document'  => (bool) ($child->service?->requires_document),
+                                'document_name'      => $childLog?->document_name,
+                                'document_path'      => $childLog?->document_path,
+                            ];
+                        })->values(),
+                    ];
+                }
             }
         }
 
-        // Внеплановые задачи
+        // Внеплановые задачи: невыполненные висят, пока не закроют; выполненные — только сегодня.
         foreach ($adhocs as $adhoc) {
+            if ($adhoc->status === 'completed') {
+                $completedToday = $adhoc->completed_at && $adhoc->completed_at->toDateString() === $todayStr;
+                if (!$completedToday) {
+                    continue;
+                }
+            }
+
+            // Дата срока внеплановой (если задан день)
+            $adhocDate = $adhoc->due_day
+                ? CarbonImmutable::create($adhoc->year, $adhoc->month, min((int) $adhoc->due_day, CarbonImmutable::create($adhoc->year, $adhoc->month, 1)->daysInMonth))
+                : null;
+
             $tasks[] = [
                 'uid'             => 'adhoc_' . $adhoc->id,
                 'type'            => 'adhoc',
                 'adhoc_id'        => $adhoc->id,
                 'client_id'       => $adhoc->client_id,
                 'client_name'     => $adhoc->client->name,
+                'year'            => $adhoc->year,
+                'month'           => $adhoc->month,
                 'name'            => $adhoc->name,
                 'cost'            => (float) $adhoc->cost,
                 'periodicity'     => null,
                 'due_day'         => $adhoc->due_day,
+                'due_date'        => $adhocDate?->toDateString(),
                 'comment'         => null,
                 'description'     => null,
                 'status'          => $adhoc->status,
@@ -171,6 +227,34 @@ class BuhTasksController extends Controller
                     'periodicity' => $c->periodicity ?? '',
                 ])->values()->toArray(),
             ])->values()->toArray();
+
+        // Вкладка «Выполненные» — история за последние 30 дней (read-only): плановые + внеплановые.
+        $completedPlanned = BuhTaskLog::where('employee_id', $employee->id)
+            ->where('status', 'completed')
+            ->whereNotNull('completed_at')
+            ->where('completed_at', '>=', $historyFrom)
+            ->with(['estimateItem:id,name', 'client:id,name'])
+            ->get()
+            ->map(fn ($l) => [
+                'id'           => 'log_' . $l->id,
+                'name'         => $l->estimateItem?->name ?? '—',
+                'client_name'  => $l->client?->name ?? '—',
+                'completed_at' => $l->completed_at->toIso8601String(),
+            ]);
+        $completedAdhoc = BuhAdhocTask::where('employee_id', $employee->id)
+            ->where('status', 'completed')
+            ->whereNotNull('completed_at')
+            ->where('completed_at', '>=', $historyFrom)
+            ->with('client:id,name')
+            ->get()
+            ->map(fn ($a) => [
+                'id'           => 'adhoc_' . $a->id,
+                'name'         => $a->name,
+                'client_name'  => $a->client?->name ?? '—',
+                'completed_at' => $a->completed_at->toIso8601String(),
+            ]);
+        $completed = $completedPlanned->concat($completedAdhoc)
+            ->sortByDesc('completed_at')->values()->toArray();
 
         // Напоминания о сроках (выход воркера tasks:generate) — активные (невыполненные)
         $reminders = TaskReminder::where('employee_id', $employee->id)
@@ -218,7 +302,7 @@ class BuhTasksController extends Controller
             }
         }
 
-        return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'services', 'reminders', 'schedule'));
+        return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'services', 'reminders', 'schedule', 'completed'));
     }
 
     // =============================================
@@ -315,19 +399,28 @@ class BuhTasksController extends Controller
         $estimate->total = $estimate->items()->whereNull('parent_id')->sum('total');
         $estimate->save();
 
+        // Новая задача создаётся в текущем месяце
+        $now = CarbonImmutable::now();
+        $dueDateStr = $item->due_day
+            ? $now->day(min((int) $item->due_day, $now->daysInMonth))->toDateString()
+            : null;
+
         return response()->json([
             'success' => true,
             'task' => [
-                'uid'               => 'planned_' . $item->id,
+                'uid'               => 'planned_' . $item->id . '_' . $now->year . '_' . $now->month,
                 'type'              => 'planned',
                 'item_id'           => $item->id,
                 'client_id'         => $client->id,
                 'client_name'       => $client->name,
+                'year'              => $now->year,
+                'month'             => $now->month,
                 'log_id'            => null,
                 'name'              => $item->name,
                 'cost'              => (float) $item->total,
                 'periodicity'       => $item->periodicity,
                 'due_day'           => $item->due_day,
+                'due_date'          => $dueDateStr,
                 'status'            => 'pending',
                 'elapsed_seconds'   => 0,
                 'loading'           => false,
@@ -414,6 +507,24 @@ class BuhTasksController extends Controller
                 'requires_document'  => true,
                 'message'            => 'Для завершения задачи нужно прикрепить документ',
             ], 422);
+        }
+
+        // Задачу с подпунктами нельзя закрыть, пока все подпункты не выполнены
+        $childIds = $log->estimateItem?->children()->pluck('id') ?? collect();
+        if ($childIds->isNotEmpty()) {
+            $doneChildren = BuhTaskLog::where('employee_id', $log->employee_id)
+                ->where('year', $log->year)
+                ->where('month', $log->month)
+                ->whereIn('estimate_item_id', $childIds)
+                ->where('status', 'completed')
+                ->count();
+            if ($doneChildren < $childIds->count()) {
+                return response()->json([
+                    'success'            => false,
+                    'requires_checklist' => true,
+                    'message'            => 'Сначала отметьте все подпункты задачи',
+                ], 422);
+            }
         }
 
         $now = now();
@@ -537,10 +648,15 @@ class BuhTasksController extends Controller
                 'adhoc_id'        => $adhoc->id,
                 'client_id'       => $adhoc->client_id,
                 'client_name'     => Client::find($adhoc->client_id)->name,
+                'year'            => $adhoc->year,
+                'month'           => $adhoc->month,
                 'name'            => $adhoc->name,
                 'cost'            => (float) $adhoc->cost,
                 'periodicity'     => null,
                 'due_day'         => $adhoc->due_day,
+                'due_date'        => $adhoc->due_day
+                    ? CarbonImmutable::create($adhoc->year, $adhoc->month, min((int) $adhoc->due_day, CarbonImmutable::create($adhoc->year, $adhoc->month, 1)->daysInMonth))->toDateString()
+                    : null,
                 'status'          => 'pending',
                 'elapsed_seconds' => 0,
                 'loading'         => false,

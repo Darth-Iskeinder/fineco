@@ -421,19 +421,20 @@
                                     { key: 'has_production', label: 'Производство' },
                                     { key: 'has_management_report', label: 'Управленческий отчёт' },
                                 ]" :key="opt.key">
-                                    <span x-show="client[opt.key]" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border bg-indigo-50 text-indigo-700 border-indigo-200">
-                                        <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-indigo-500"></span>
+                                    <span :class="client[opt.key] ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-slate-50 text-slate-400 border-slate-200'" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border">
+                                        <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="client[opt.key] ? 'bg-indigo-500' : 'bg-slate-300'"></span>
                                         <span x-text="opt.label"></span>
                                     </span>
                                 </template>
                             </div>
-                            <!-- Оператор ЭДО -->
+                            {{-- Оператор ЭДО временно скрыт — пока не нужен. Возможно к удалению (колонка clients.edo_operator).
                             <template x-if="client.edo_operator">
                                 <div class="pt-2 border-t border-slate-100">
                                     <span class="text-sm text-slate-500">Оператор ЭДО / ЭСФ: </span>
                                     <span class="text-sm font-medium text-slate-800" x-text="client.edo_operator"></span>
                                 </div>
                             </template>
+                            --}}
                         </div>
                     </template>
 
@@ -445,7 +446,7 @@
                                 <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Состав бизнеса</p>
                                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                                     <!-- Нулевой клиент -->
-                                    <div :class="form.flags.is_zero_movement ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'" class="p-3.5 rounded-xl border transition-all duration-150">
+                                    <div :class="form.flags.is_zero_movement ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'" class="p-3.5 rounded-xl border transition-all duration-150 cursor-pointer select-none" @click="form.flags.is_zero_movement = !form.flags.is_zero_movement">
                                         <div class="flex items-center justify-between gap-2">
                                             <div class="flex items-center gap-2.5">
                                                 <div :class="form.flags.is_zero_movement ? 'bg-amber-100 text-amber-500' : 'bg-slate-100 text-slate-400'" class="p-1.5 rounded-lg flex-shrink-0 transition-colors">
@@ -453,11 +454,10 @@
                                                 </div>
                                                 <span class="text-sm font-medium text-slate-700">Нулевой клиент</span>
                                             </div>
-                                            <button type="button" @click="form.flags.is_zero_movement = !form.flags.is_zero_movement"
-                                                    :class="form.flags.is_zero_movement ? 'bg-amber-400' : 'bg-slate-200'"
-                                                    class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none">
+                                            <span :class="form.flags.is_zero_movement ? 'bg-amber-400' : 'bg-slate-200'"
+                                                  class="relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out">
                                                 <span :class="form.flags.is_zero_movement ? 'translate-x-5' : 'translate-x-0'" class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
-                                            </button>
+                                            </span>
                                         </div>
                                     </div>
                                     <!-- Сотрудники -->
@@ -604,10 +604,10 @@
                                 </div>
                             </div>
 
-                            <!-- Прочие условия (компактные тоглы) -->
-                            <div class="pt-3 border-t border-slate-100">
-                                <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Прочие условия</p>
-                                <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                            <!-- Прочие условия -->
+                            <div>
+                                <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Прочие условия</p>
+                                <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
                                     <template x-for="opt in [
                                         { key: 'has_insurance_policy', label: 'ИП страховой полис' },
                                         { key: 'has_mbt', label: 'МБТ' },
@@ -616,22 +616,29 @@
                                         { key: 'has_production', label: 'Производство' },
                                         { key: 'has_management_report', label: 'Управленческий отчёт' },
                                     ]" :key="opt.key">
-                                        <label class="flex items-center gap-2 cursor-pointer px-2.5 py-1.5 rounded-lg border text-sm transition-colors select-none"
-                                               :class="form.flags[opt.key] ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-slate-200 hover:bg-slate-50'">
-                                            <input type="checkbox" x-model="form.flags[opt.key]" class="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500">
-                                            <span class="text-slate-700 leading-tight" x-text="opt.label"></span>
-                                        </label>
+                                        <div :class="form.flags[opt.key] ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-slate-200'" class="p-3 rounded-xl border transition-all duration-150 cursor-pointer select-none" @click="form.flags[opt.key] = !form.flags[opt.key]">
+                                            <div class="flex items-center justify-between mb-1.5">
+                                                <div :class="form.flags[opt.key] ? 'bg-indigo-100 text-indigo-500' : 'bg-slate-100 text-slate-400'" class="p-1.5 rounded-lg transition-colors">
+                                                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5a1.99 1.99 0 011.414.586l7 7a2 2 0 010 2.828l-5 5a2 2 0 01-2.828 0l-7-7A1.99 1.99 0 013 7V4a1 1 0 011-1z" /></svg>
+                                                </div>
+                                                <div :class="form.flags[opt.key] ? 'bg-indigo-400' : 'bg-slate-200'" class="w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 transition-colors">
+                                                    <svg x-show="form.flags[opt.key]" class="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                                </div>
+                                            </div>
+                                            <p :class="form.flags[opt.key] ? 'text-indigo-700' : 'text-slate-500'" class="text-xs font-medium leading-tight" x-text="opt.label"></p>
+                                        </div>
                                     </template>
                                 </div>
                             </div>
 
-                            <!-- Оператор ЭДО -->
+                            {{-- Оператор ЭДО временно скрыт — пока не нужен. Возможно к удалению (колонка clients.edo_operator).
                             <div class="pt-1 border-t border-slate-100">
                                 <label class="block text-sm font-medium text-slate-700 mb-1">Оператор ЭДО / ЭСФ</label>
                                 <input type="text" x-model="form.flags.edo_operator"
                                        class="block w-full sm:w-72 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                                        placeholder="Название оператора">
                             </div>
+                            --}}
                         </div>
                     </template>
 

@@ -52,9 +52,7 @@
                         <h2 class="text-sm font-semibold text-slate-600 uppercase tracking-wider">Услуги по тарифу</h2>
                         <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">Постоянные</span>
                     </div>
-                    <div class="divide-y divide-slate-100">
-                        @include('clients.partials.estimate-bp-rows', ['list' => 'regularBPs'])
-                    </div>
+                    @include('clients.partials.estimate-bp-grouped', ['groups' => 'regularBPsGrouped'])
                 </div>
             </template>
 
@@ -67,9 +65,7 @@
                             <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" :class="'bg-' + f.color + '-100 text-' + f.color + '-700'">Постоянные</span>
                             <span class="text-xs" :class="'text-' + f.color + '-500'" x-text="'подтянуто по условию: ' + f.label"></span>
                         </div>
-                        <div class="divide-y divide-slate-100">
-                            @include('clients.partials.estimate-bp-rows', ['list' => 'flagBPs(f.key)'])
-                        </div>
+                        @include('clients.partials.estimate-bp-grouped', ['groups' => 'flagBPsGrouped(f.key)'])
                     </div>
                 </template>
             </template>
@@ -574,6 +570,33 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
         },
         get regularBPs() { return this.tariffBPs.filter(bp => !this.primaryFlag(bp)); },
         flagBPs(key) { return this.tariffBPs.filter(bp => this.primaryFlag(bp) === key); },
+
+        // Группировка БП: по сфере, внутри сферы — по сроку выполнения (датам).
+        // Возвращает [{ sphere, dateGroups: [{ dateKey, label, bps: [...] }] }].
+        // Порядок сфер и дат — по первому появлению (каталог уже отсортирован).
+        groupBySphereDate(list) {
+            const sphereMap = {};
+            const spheres = [];
+            list.forEach(bp => {
+                const sphere = bp.sphere || 'Без сферы';
+                if (!sphereMap[sphere]) {
+                    sphereMap[sphere] = { sphere, dateMap: {}, dateGroups: [] };
+                    spheres.push(sphereMap[sphere]);
+                }
+                const sg = sphereMap[sphere];
+                const label = (bp.schedule && bp.schedule.labels && bp.schedule.labels.length)
+                    ? bp.schedule.labels.join(', ')
+                    : 'Срок не задан';
+                if (!sg.dateMap[label]) {
+                    sg.dateMap[label] = { dateKey: label, label, bps: [] };
+                    sg.dateGroups.push(sg.dateMap[label]);
+                }
+                sg.dateMap[label].bps.push(bp);
+            });
+            return spheres;
+        },
+        get regularBPsGrouped() { return this.groupBySphereDate(this.regularBPs); },
+        flagBPsGrouped(key) { return this.groupBySphereDate(this.flagBPs(key)); },
 
         bpTotal(bp) {
             if (!bp.enabled) return 0;

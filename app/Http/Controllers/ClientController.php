@@ -99,6 +99,9 @@ class ClientController extends Controller
             'tariff_id' => $validated['tariff_id'] ?? null,
             'responsible_employee_id' => $validated['responsible_employee_id'] ?? null,
             'is_active' => $validated['is_active'] ?? true,
+            'client_status_id' => ClientStatus::where('closes_service', false)
+                ->orderBy('sort_order')
+                ->value('id'),
             'notes' => $validated['notes'] ?? null,
             'service_start_date' => $validated['service_start_date'] ?? now()->toDateString(),
         ]);
@@ -253,14 +256,38 @@ class ClientController extends Controller
             unset($validated['employees']);
         }
 
-        // Логика статуса: auto-fill service_end_date и is_active
-        if ($section === 'status' && !empty($validated['client_status_id'])) {
-            $status = ClientStatus::find($validated['client_status_id']);
-            if ($status) {
-                if ($status->closes_service && empty($validated['service_end_date'])) {
-                    $validated['service_end_date'] = now()->toDateString();
+        // Логика статуса: синхронизация статуса, даты завершения и is_active
+        if ($section === 'status') {
+            $statusChanged = array_key_exists('client_status_id', $validated)
+                && (string) $validated['client_status_id'] !== (string) $client->client_status_id;
+            $endDateAdded = !empty($validated['service_end_date'])
+                && $validated['service_end_date'] !== optional($client->service_end_date)->toDateString();
+
+            if ($statusChanged && !empty($validated['client_status_id'])) {
+                // Пользователь поменял статус — он главный
+                $status = ClientStatus::find($validated['client_status_id']);
+                if ($status) {
+                    if ($status->closes_service) {
+                        // «Завершен» — закрываем обслуживание, при необходимости проставляем дату
+                        if (empty($validated['service_end_date'])) {
+                            $validated['service_end_date'] = now()->toDateString();
+                        }
+                        $validated['is_active'] = false;
+                    } else {
+                        // «Активен» / «Приостановлен» — снимаем дату завершения
+                        $validated['service_end_date'] = null;
+                        $validated['is_active'] = true;
+                    }
                 }
-                $validated['is_active'] = !$status->closes_service;
+            } elseif ($endDateAdded) {
+                // Поставили дату завершения → статус «Завершен»
+                $closingStatus = ClientStatus::where('closes_service', true)
+                    ->orderBy('sort_order')
+                    ->first();
+                if ($closingStatus) {
+                    $validated['client_status_id'] = $closingStatus->id;
+                }
+                $validated['is_active'] = false;
             }
         }
 

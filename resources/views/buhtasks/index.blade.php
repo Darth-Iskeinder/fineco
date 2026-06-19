@@ -162,7 +162,7 @@
     </template>
 </div>
 
-<div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($services) }})" x-cloak>
+<div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($services) }}, {{ json_encode($completed) }})" x-cloak>
 
     {{-- Баннер срочных задач --}}
     <template x-if="urgentSummary.overdue.length > 0 || urgentSummary.today.length > 0 || urgentSummary.soon.length > 0">
@@ -186,7 +186,7 @@
     </template>
 
     {{-- Шапка --}}
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex items-center justify-between mb-2">
         <div class="flex items-center gap-2 text-sm text-slate-500">
             <span x-text="totalCompleted + ' из ' + tasks.length + ' выполнено'"></span>
             <div class="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
@@ -225,12 +225,25 @@
                     <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                     Чеклист
                 </button>
+                <button @click="viewMode = 'completed'"
+                        :class="viewMode === 'completed' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'"
+                        class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                    Выполненные
+                    <span x-show="completed.length > 0" class="text-xs text-slate-400" x-text="'(' + completed.length + ')'"></span>
+                </button>
             </div>
         </div>
     </div>
 
+    {{-- Подсказка про горизонт показа --}}
+    <div class="flex items-center gap-1.5 mb-6 text-xs text-slate-400">
+        <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <span>Показаны задачи на ближайшие 30 дней и все просроченные. Выполненные исчезают из списка на следующий день — их история во вкладке «Выполненные».</span>
+    </div>
+
     {{-- Нет задач --}}
-    <div x-show="tasks.length === 0"
+    <div x-show="viewMode !== 'completed' && tasks.length === 0"
          class="bg-white rounded-2xl border border-slate-200/50 shadow-sm px-6 py-16 text-center">
         <div class="w-14 h-14 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg class="w-7 h-7 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
@@ -239,12 +252,12 @@
     </div>
 
     {{-- Все задачи скрыты фильтром --}}
-    <div x-show="tasks.length > 0 && visibleCount === 0"
+    <div x-show="viewMode !== 'completed' && tasks.length > 0 && visibleCount === 0"
          class="bg-white rounded-2xl border border-slate-200/50 shadow-sm px-6 py-10 text-center text-sm text-slate-400">
         Нет задач по выбранной компании.
     </div>
 
-    <div x-show="tasks.length > 0 && visibleCount > 0"
+    <div x-show="viewMode === 'completed' || (tasks.length > 0 && visibleCount > 0)"
          class="bg-white rounded-2xl border border-slate-200/50 shadow-sm overflow-hidden">
 
         {{-- ===== РЕЖИМ СПИСОК ===== --}}
@@ -323,7 +336,7 @@
                                     <span x-show="task.periodicity"
                                           class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 w-fit"
                                           x-text="task.periodicity"></span>
-                                    <span x-show="task.due_day"
+                                    <span x-show="task.due_date"
                                           class="text-xs font-medium w-fit"
                                           :class="{
                                               'text-red-600': urgency(task) === 'overdue',
@@ -331,8 +344,8 @@
                                               'text-amber-600': urgency(task) === 'soon',
                                               'text-slate-500': !urgency(task),
                                           }"
-                                          x-text="'до ' + task.due_day + '-го'"></span>
-                                    <span x-show="!task.periodicity && !task.due_day" class="text-slate-300 text-sm">—</span>
+                                          x-text="'до ' + fmtDue(task.due_date)"></span>
+                                    <span x-show="!task.periodicity && !task.due_date" class="text-slate-300 text-sm">—</span>
                                 </div>
                             </td>
 
@@ -502,7 +515,7 @@
                                     <span x-show="task.periodicity"
                                           class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 w-fit"
                                           x-text="task.periodicity"></span>
-                                    <span x-show="task.due_day"
+                                    <span x-show="task.due_date"
                                           class="text-xs font-medium w-fit"
                                           :class="{
                                               'text-red-600': urgency(task) === 'overdue',
@@ -510,8 +523,8 @@
                                               'text-amber-600': urgency(task) === 'soon',
                                               'text-slate-500': !urgency(task),
                                           }"
-                                          x-text="'до ' + task.due_day + '-го'"></span>
-                                    <span x-show="!task.periodicity && !task.due_day" class="text-slate-300 text-sm">—</span>
+                                          x-text="'до ' + fmtDue(task.due_date)"></span>
+                                    <span x-show="!task.periodicity && !task.due_date" class="text-slate-300 text-sm">—</span>
                                 </div>
                             </td>
                             <td class="px-4 py-3.5 text-right">
@@ -522,6 +535,27 @@
                     </template>
                 </tbody>
             </table>
+        </div>
+
+        {{-- ===== РЕЖИМ ВЫПОЛНЕННЫЕ (история за 30 дней, только чтение) ===== --}}
+        <div x-show="viewMode === 'completed'">
+            <template x-if="completed.length === 0">
+                <div class="px-6 py-10 text-center text-sm text-slate-400">За последние 30 дней нет выполненных задач.</div>
+            </template>
+            <div class="divide-y divide-slate-100">
+                <template x-for="c in completed" :key="c.id">
+                    <div class="flex items-center gap-3 px-6 py-3">
+                        <span class="flex-shrink-0 w-8 h-8 inline-flex items-center justify-center rounded-full bg-emerald-50 text-emerald-500">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        </span>
+                        <div class="flex-1 min-w-0">
+                            <p class="text-sm font-medium text-slate-700 truncate" x-text="c.name"></p>
+                            <p class="text-xs text-slate-400 truncate" x-text="c.client_name"></p>
+                        </div>
+                        <span class="text-xs text-slate-400 whitespace-nowrap" x-text="fmtCompleted(c.completed_at)"></span>
+                    </div>
+                </template>
+            </div>
         </div>
 
     </div>
@@ -724,6 +758,41 @@
         </div>
     </div>
 
+    {{-- ===== МОДАЛ ПРЕДУПРЕЖДЕНИЯ: НУЖНО ОТМЕТИТЬ ПОДПУНКТЫ ===== --}}
+    <div x-show="checklistRequiredModal.show"
+         x-transition:enter="ease-out duration-200"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="ease-in duration-150"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+         @click.self="checklistRequiredModal = { show: false, taskIdx: null }"
+         @keydown.escape.window="checklistRequiredModal = { show: false, taskIdx: null }"
+         style="display:none">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">
+            <div class="flex items-start gap-4">
+                <div class="flex-shrink-0 w-11 h-11 rounded-full bg-amber-100 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <h3 class="text-base font-semibold text-slate-800">Сначала отметьте подпункты</h3>
+                    <p class="mt-1 text-sm text-slate-500">У этой задачи есть подпункты — отметьте все галочки, прежде чем завершить задачу.</p>
+                </div>
+            </div>
+            <div class="flex gap-3 mt-6">
+                <button @click="checklistRequiredModal = { show: false, taskIdx: null }"
+                        class="flex-1 py-2.5 px-4 border border-slate-200 text-slate-600 text-sm font-medium rounded-xl hover:bg-slate-50 transition-colors">
+                    Понятно
+                </button>
+                <button @click="openTaskModal(checklistRequiredModal.taskIdx); checklistRequiredModal = { show: false, taskIdx: null }"
+                        class="flex-1 py-2.5 px-4 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 transition-colors">
+                    Открыть подпункты
+                </button>
+            </div>
+        </div>
+    </div>
+
     {{-- ===== МОДАЛ ЗАДАЧИ (описание + чек-лист подпунктов) ===== --}}
     <div x-show="taskModalIdx !== null"
          x-transition:enter="ease-out duration-200"
@@ -886,7 +955,7 @@
 </div>
 
 <script>
-function buhTasks(initialTasks, year, month, allClients, allServices) {
+function buhTasks(initialTasks, year, month, allClients, allServices, completed) {
     // File-объекты держим вне реактивного state — Alpine оборачивает объекты в Proxy,
     // что ломает внутренние методы File/Blob при передаче в FormData
     const pendingFiles = new Map();
@@ -901,6 +970,7 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
             pending_file_name: null,
             children: (t.children || []).map(c => ({ ...c, doc_uploading: false, pending_file_name: null })),
         })),
+        completed: completed || [],
         year,
         month,
         allClients,
@@ -912,6 +982,7 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
         sortDir: null, // null = исходный порядок | 'asc' | 'desc' (по сроку due_day)
         taskModalIdx: null,
         docRequiredModal: { show: false, taskIdx: null },
+        checklistRequiredModal: { show: false, taskIdx: null },
 
         showCreateModal: false,
         startConfirm: { show: false, idx: null },
@@ -951,8 +1022,8 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
                 body: JSON.stringify({
                     client_id:        task.client_id,
                     estimate_item_id: child.id,
-                    year:             this.year,
-                    month:            this.month,
+                    year:             task.year,
+                    month:            task.month,
                 }),
             });
             const data = await r.json();
@@ -1099,12 +1170,12 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
             }
             const mult = this.sortDir === 'desc' ? -1 : 1;
             this.tasks = [...this.tasks].sort((a, b) => {
-                const av = a.due_day, bv = b.due_day;
-                if (av == null && bv == null) return bySeq(a, b); // обе без срока — сохраняем порядок
-                if (av == null) return 1;  // без срока — всегда в конец
-                if (bv == null) return -1;
+                const av = a.due_date, bv = b.due_date;
+                if (!av && !bv) return bySeq(a, b); // обе без срока — сохраняем порядок
+                if (!av) return 1;  // без срока — всегда в конец
+                if (!bv) return -1;
                 if (av === bv) return bySeq(a, b);
-                return (av - bv) * mult;
+                return (av < bv ? -1 : 1) * mult;
             });
         },
         get visibleCount() {
@@ -1120,29 +1191,48 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
             return Math.round(this.totalCompleted / this.tasks.length * 100);
         },
 
+        // Разница в днях между сроком задачи и сегодня (отриц. = просрочено)
+        dueDiffDays(task) {
+            if (!task.due_date) return null;
+            const today = new Date(); today.setHours(0, 0, 0, 0);
+            const due = new Date(task.due_date + 'T00:00:00');
+            return Math.round((due - today) / 86400000);
+        },
+
         urgency(task) {
-            if (task.status === 'completed' || task.status === 'review' || !task.due_day) return null;
-            const now = new Date();
-            if (this.year !== now.getFullYear() || this.month !== now.getMonth() + 1) return null;
-            const today = now.getDate();
-            if (task.due_day < today) return 'overdue';
-            if (task.due_day === today) return 'today';
-            if (task.due_day <= today + 3) return 'soon';
+            if (task.status === 'completed' || task.status === 'review') return null;
+            const d = this.dueDiffDays(task);
+            if (d === null) return null;
+            if (d < 0) return 'overdue';
+            if (d === 0) return 'today';
+            if (d <= 3) return 'soon';
             return null;
         },
 
         get urgentSummary() {
-            const pending = this.tasks.filter(t => t.status !== 'completed' && t.due_day);
-            const now = new Date();
-            if (this.year !== now.getFullYear() || this.month !== now.getMonth() + 1) {
-                return { overdue: [], today: [], soon: [] };
-            }
-            const today = now.getDate();
+            const pending = this.tasks.filter(t => t.status !== 'completed' && t.status !== 'review' && t.due_date);
+            const diff = (t) => this.dueDiffDays(t);
             return {
-                overdue: pending.filter(t => t.due_day < today),
-                today:   pending.filter(t => t.due_day === today),
-                soon:    pending.filter(t => t.due_day > today && t.due_day <= today + 3),
+                overdue: pending.filter(t => diff(t) < 0),
+                today:   pending.filter(t => diff(t) === 0),
+                soon:    pending.filter(t => { const d = diff(t); return d > 0 && d <= 3; }),
             };
+        },
+
+        // Срок задачи полной датой: «3.06.2026»
+        fmtDue(dateStr) {
+            if (!dateStr) return '';
+            const d = new Date(dateStr + 'T00:00:00');
+            return d.getDate() + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + d.getFullYear();
+        },
+
+        // Дата+время выполнения для истории: «3.06.2026, 14:30»
+        fmtCompleted(iso) {
+            if (!iso) return '';
+            const d = new Date(iso);
+            const hh = String(d.getHours()).padStart(2, '0');
+            const mm = String(d.getMinutes()).padStart(2, '0');
+            return d.getDate() + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + d.getFullYear() + ', ' + hh + ':' + mm;
         },
 
         plural(n, one, few, many) {
@@ -1236,8 +1326,8 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
                 body: JSON.stringify({
                     client_id:        task.client_id,
                     estimate_item_id: task.item_id,
-                    year:             this.year,
-                    month:            this.month,
+                    year:             task.year,
+                    month:            task.month,
                 }),
             });
             const data = await r.json();
@@ -1286,7 +1376,19 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
             else this.tasks[idx] = { ...this.tasks[idx], loading: false };
         },
 
+        // Все подпункты (чекбоксы) отмечены? Без подпунктов — считается выполнимой.
+        allChildrenDone(task) {
+            if (!task.children || task.children.length === 0) return true;
+            return task.children.every(c => c.status === 'completed');
+        },
+
         async completeTask(idx) {
+            // Задачу с подпунктами нельзя закрыть, пока не отмечены все чекбоксы
+            if (!this.allChildrenDone(this.tasks[idx])) {
+                this.checklistRequiredModal = { show: true, taskIdx: idx };
+                return;
+            }
+
             this.tasks[idx] = { ...this.tasks[idx], loading: true };
 
             if (this.tasks[idx].type === 'planned') {
@@ -1300,6 +1402,7 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
             } else {
                 this.tasks[idx] = { ...this.tasks[idx], loading: false };
                 if (data.requires_document) this.docRequiredModal = { show: true, taskIdx: idx };
+                if (data.requires_checklist) this.checklistRequiredModal = { show: true, taskIdx: idx };
             }
         },
 
@@ -1316,6 +1419,12 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
             if (task.status === 'completed') {
                 await this.resetTask(idx);
             } else {
+                // Задачу с подпунктами нельзя закрыть, пока не отмечены все чекбоксы
+                if (!this.allChildrenDone(task)) {
+                    this.checklistRequiredModal = { show: true, taskIdx: idx };
+                    return;
+                }
+
                 this.tasks[idx] = { ...this.tasks[idx], loading: true };
 
                 if (task.type === 'planned') {
@@ -1330,6 +1439,7 @@ function buhTasks(initialTasks, year, month, allClients, allServices) {
                     } else {
                         this.tasks[idx] = { ...this.tasks[idx], loading: false };
                         if (data.requires_document) this.docRequiredModal = { show: true, taskIdx: idx };
+                        if (data.requires_checklist) this.checklistRequiredModal = { show: true, taskIdx: idx };
                     }
                 } else {
                     if (this.tasks[idx].status === 'pending') {
