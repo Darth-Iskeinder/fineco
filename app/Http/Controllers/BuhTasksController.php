@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\BuhAdhocTask;
 use App\Models\BuhTaskLog;
 use App\Models\Client;
+use App\Models\Employee;
 use App\Models\Estimate;
 use App\Models\EstimateItem;
 use App\Models\Service;
@@ -15,6 +16,9 @@ use Illuminate\Support\Facades\Storage;
 
 class BuhTasksController extends Controller
 {
+    /** Глубина истории вкладки «Выполненные» (дней назад) */
+    private const COMPLETED_HISTORY_DAYS = 90;
+
     public function index(Request $request)
     {
         $employee = auth('employee')->user();
@@ -53,7 +57,8 @@ class BuhTasksController extends Controller
         $curStart    = $today->startOfMonth();
         $year        = $curStart->year;
         $month       = $curStart->month;
-        $historyFrom = $today->subDays(30)->startOfDay(); // глубина вкладки «Выполненные»
+        $curMonthIdx = $year * 12 + $month; // для отсечения будущих месяцев в списке
+        $historyFrom = $today->subDays(self::COMPLETED_HISTORY_DAYS)->startOfDay(); // глубина вкладки «Выполненные»
 
         // Все логи плановых задач сотрудника (нужны статусы за прошлое для просрочки), ключ year-month-item
         $logs = BuhTaskLog::where('employee_id', $employee->id)
@@ -94,7 +99,9 @@ class BuhTasksController extends Controller
             foreach ($items as $item) {
                 $service  = $item->service_id ? $services->get($item->service_id) : null;
                 $override = $service ? $overrides->get($item->service_id) : null;
-                $hasSchedule = $service && !empty($service->resolveForClient($override)['periodicity']);
+                $resolved = $service ? $service->resolveForClient($override) : null;
+                $hasSchedule = !empty($resolved['periodicity']);
+                $kind = $resolved ? Service::kindForPeriodicity($resolved['periodicity']) : null;
 
                 // Экземпляры задачи: [year, month, dueDateString|null, dueDay|null, Carbon|null]
                 $occurrences = [];
@@ -119,8 +126,9 @@ class BuhTasksController extends Controller
                         if (!$completedToday) {
                             continue;
                         }
-                    } elseif ($dueObj && $dueObj->gt($horizonEnd)) {
-                        // не выполнено: просроченные показываем всегда, прячем только дальше 30 дней вперёд
+                    } elseif ($wy * 12 + $wm > $curMonthIdx) {
+                        // показываем только текущий месяц и все просроченные (прошлые месяцы);
+                        // будущие месяцы скрываем, чтобы не засорять список
                         continue;
                     }
                     // позиции без даты (ручные без срока) — показываем как текущую задачу
@@ -137,6 +145,7 @@ class BuhTasksController extends Controller
                         'name'            => $item->name,
                         'cost'            => (float) $item->total,
                         'periodicity'     => $item->periodicity,
+                        'reporting_period' => Service::reportingPeriodLabel($kind, $dueObj, $today->year),
                         'due_day'         => $dueDay,
                         'due_date'        => $dueDateStr,
                         'comment'         => $service?->comment,
@@ -189,14 +198,16 @@ class BuhTasksController extends Controller
             $tasks[] = [
                 'uid'             => 'adhoc_' . $adhoc->id,
                 'type'            => 'adhoc',
+                'is_custom'       => true,
                 'adhoc_id'        => $adhoc->id,
                 'client_id'       => $adhoc->client_id,
-                'client_name'     => $adhoc->client->name,
+                'client_name'     => $adhoc->client?->name,
                 'year'            => $adhoc->year,
                 'month'           => $adhoc->month,
                 'name'            => $adhoc->name,
                 'cost'            => (float) $adhoc->cost,
                 'periodicity'     => null,
+                'reporting_period' => null,
                 'due_day'         => $adhoc->due_day,
                 'due_date'        => $adhocDate?->toDateString(),
                 'comment'         => null,
@@ -228,19 +239,51 @@ class BuhTasksController extends Controller
                 ])->values()->toArray(),
             ])->values()->toArray();
 
-        // Вкладка «Выполненные» — история за последние 30 дней (read-only): плановые + внеплановые.
+        // Вкладка «Выполненные» — история за последние 90 дней (read-only): плановые + внеплановые.
         $completedPlanned = BuhTaskLog::where('employee_id', $employee->id)
             ->where('status', 'completed')
             ->whereNotNull('completed_at')
             ->where('completed_at', '>=', $historyFrom)
-            ->with(['estimateItem:id,name', 'client:id,name'])
+            ->with(['estimateItem.service', 'estimateItem.children.service', 'client:id,name'])
             ->get()
-            ->map(fn ($l) => [
-                'id'           => 'log_' . $l->id,
-                'name'         => $l->estimateItem?->name ?? '—',
-                'client_name'  => $l->client?->name ?? '—',
-                'completed_at' => $l->completed_at->toIso8601String(),
-            ]);
+            ->map(function ($l) use ($logs) {
+                $item    = $l->estimateItem;
+                $service = $item?->service;
+
+                return [
+                    'id'           => 'log_' . $l->id,
+                    'type'         => 'planned',
+                    'name'         => $item?->name ?? '—',
+                    'client_name'  => $l->client?->name ?? '—',
+                    'completed_at' => $l->completed_at->toIso8601String(),
+                    'elapsed_seconds'   => $this->calcElapsed($l),
+                    'description'       => $service?->description,
+                    'comment'          => $service?->comment,
+                    'periodicity'      => $item?->periodicity,
+                    'allows_quantity'  => (bool) ($service?->allows_quantity),
+                    'quantity'         => (int) ($item?->quantity ?? 0),
+                    'actual_quantity'  => $l->actual_quantity,
+                    'requires_document' => (bool) ($service?->requires_document),
+                    'document_name'    => $l->document_name,
+                    'document_path'    => $l->document_path,
+                    'children'         => ($item?->children ?? collect())->map(function ($child) use ($logs, $l) {
+                        $childLog = $logs->get($l->year . '-' . $l->month . '-' . $child->id);
+                        $cs = $child->service;
+
+                        return [
+                            'id'                => $child->id,
+                            'name'              => $child->name,
+                            'status'            => $childLog?->status ?? 'pending',
+                            'allows_quantity'   => (bool) ($cs?->allows_quantity),
+                            'quantity'          => (int) $child->quantity,
+                            'actual_quantity'   => $childLog?->actual_quantity,
+                            'requires_document' => (bool) ($cs?->requires_document),
+                            'document_name'     => $childLog?->document_name,
+                            'document_path'     => $childLog?->document_path,
+                        ];
+                    })->values()->toArray(),
+                ];
+            });
         $completedAdhoc = BuhAdhocTask::where('employee_id', $employee->id)
             ->where('status', 'completed')
             ->whereNotNull('completed_at')
@@ -249,9 +292,21 @@ class BuhTasksController extends Controller
             ->get()
             ->map(fn ($a) => [
                 'id'           => 'adhoc_' . $a->id,
+                'type'         => 'adhoc',
                 'name'         => $a->name,
                 'client_name'  => $a->client?->name ?? '—',
                 'completed_at' => $a->completed_at->toIso8601String(),
+                'elapsed_seconds'   => $this->calcElapsed($a),
+                'description'       => null,
+                'comment'          => null,
+                'periodicity'      => null,
+                'allows_quantity'  => false,
+                'quantity'         => 1,
+                'actual_quantity'  => null,
+                'requires_document' => false,
+                'document_name'    => null,
+                'document_path'    => null,
+                'children'         => [],
             ]);
         $completed = $completedPlanned->concat($completedAdhoc)
             ->sortByDesc('completed_at')->values()->toArray();
@@ -302,7 +357,14 @@ class BuhTasksController extends Controller
             }
         }
 
-        return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'services', 'reminders', 'schedule', 'completed'));
+        $completedDays = self::COMPLETED_HISTORY_DAYS;
+
+        // Активные сотрудники — для назначения произвольной задачи (по умолчанию текущий)
+        $employees = Employee::where('status', 'active')
+            ->orderBy('full_name')
+            ->get(['id', 'full_name']);
+
+        return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'services', 'reminders', 'schedule', 'completed', 'completedDays', 'employees'));
     }
 
     // =============================================
@@ -534,8 +596,9 @@ class BuhTasksController extends Controller
         }
 
         if ($log->estimateItem?->service?->requires_review) {
-            $log->status         = 'review';
-            $log->review_comment = null;
+            $log->status            = 'review';
+            $log->review_comment    = null;
+            $log->review_started_at = $now; // старт/перезапуск 3-дневного срока проверки
         } else {
             $log->status       = 'completed';
             $log->completed_at = $now;
@@ -612,51 +675,55 @@ class BuhTasksController extends Controller
 
     public function storeAdhoc(Request $request)
     {
-        $request->validate([
-            'client_id' => 'required|exists:clients,id',
-            'name'      => 'required|string|max:255',
-            'cost'      => 'required|numeric|min:0',
-            'year'      => 'required|integer',
-            'month'     => 'required|integer|min:1|max:12',
-            'due_day'   => 'nullable|integer|min:1|max:31',
+        // Произвольная задача: не в смете, без стоимости, с датой-напоминанием,
+        // назначается любому активному сотруднику (по умолчанию — себе). Клиент необязателен.
+        $validated = $request->validate([
+            'employee_id' => 'required|exists:employees,id',
+            'client_id'   => 'nullable|exists:clients,id',
+            'name'        => 'required|string|max:255',
+            'due_date'    => 'required|date',
+        ], [
+            'employee_id.required' => 'Выберите сотрудника',
+            'name.required'        => 'Введите название задачи',
+            'due_date.required'    => 'Укажите дату',
         ]);
 
-        $employee = auth('employee')->user();
-
-        abort_if(
-            !$employee->responsibleClients()->where('id', $request->client_id)->exists(),
-            403
-        );
+        $author   = auth('employee')->user();
+        $assignee = Employee::where('status', 'active')->findOrFail($validated['employee_id']);
+        $due      = CarbonImmutable::parse($validated['due_date']);
 
         $adhoc = BuhAdhocTask::create([
-            'employee_id'    => $employee->id,
-            'client_id'      => $request->client_id,
-            'name'           => $request->name,
-            'cost'           => $request->cost,
-            'year'           => $request->year,
-            'month'          => $request->month,
-            'due_day'        => $request->due_day,
+            'employee_id'    => $assignee->id,
+            'client_id'      => $validated['client_id'] ?? null,
+            'name'           => $validated['name'],
+            'cost'           => 0,
+            'year'           => $due->year,
+            'month'          => $due->month,
+            'due_day'        => $due->day,
             'status'         => 'pending',
             'paused_seconds' => 0,
         ]);
 
         return response()->json([
             'success' => true,
+            // Добавлять в текущий список — только если назначено себе
+            'mine'    => $assignee->id === $author->id,
+            'assignee_name' => $assignee->full_name,
             'task' => [
                 'uid'             => 'adhoc_' . $adhoc->id,
                 'type'            => 'adhoc',
+                'is_custom'       => true,
                 'adhoc_id'        => $adhoc->id,
                 'client_id'       => $adhoc->client_id,
-                'client_name'     => Client::find($adhoc->client_id)->name,
+                'client_name'     => $adhoc->client_id ? Client::find($adhoc->client_id)?->name : null,
                 'year'            => $adhoc->year,
                 'month'           => $adhoc->month,
                 'name'            => $adhoc->name,
-                'cost'            => (float) $adhoc->cost,
+                'cost'            => 0,
                 'periodicity'     => null,
+                'reporting_period' => null,
                 'due_day'         => $adhoc->due_day,
-                'due_date'        => $adhoc->due_day
-                    ? CarbonImmutable::create($adhoc->year, $adhoc->month, min((int) $adhoc->due_day, CarbonImmutable::create($adhoc->year, $adhoc->month, 1)->daysInMonth))->toDateString()
-                    : null,
+                'due_date'        => $due->toDateString(),
                 'status'          => 'pending',
                 'elapsed_seconds' => 0,
                 'loading'         => false,

@@ -179,6 +179,48 @@ class Service extends Model
         return static::$periodicityKindCache[$name];
     }
 
+    /** Названия месяцев (именительный падеж) для подписи отчётного периода. */
+    private const MONTHS_NOM = [
+        'январь', 'февраль', 'март', 'апрель', 'май', 'июнь',
+        'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь',
+    ];
+
+    /**
+     * Отчётный период словами по сроку сдачи и типу периодичности.
+     * Отчёт сдаётся ПОСЛЕ окончания периода → берём период, предшествующий тому,
+     * в который попадает срок: «за сентябрь», «за 2 квартал», «за 2025 год».
+     * Год показываем, только если он отличается от текущего (для годового — всегда).
+     * Возвращает null для weekly / неизвестного kind / отсутствующего срока.
+     */
+    public static function reportingPeriodLabel(?string $kind, CarbonInterface|string|null $dueDate, ?int $currentYear = null): ?string
+    {
+        if (!$kind || !$dueDate) {
+            return null;
+        }
+
+        $due     = CarbonImmutable::parse($dueDate);
+        $curYear = $currentYear ?? CarbonImmutable::now()->year;
+        $year    = fn (int $y) => $y === $curYear ? '' : ' ' . $y;
+
+        switch ($kind) {
+            case 'monthly':
+                $m = $due->startOfMonth()->subMonth();
+                return 'за ' . static::MONTHS_NOM[$m->month - 1] . $year($m->year);
+
+            case 'quarterly':
+                $dueQ = (int) ceil($due->month / 3);
+                $q    = $dueQ === 1 ? 4 : $dueQ - 1;
+                $y    = $dueQ === 1 ? $due->year - 1 : $due->year;
+                return 'за ' . $q . ' квартал' . $year($y);
+
+            case 'yearly':
+                return 'за ' . ($due->year - 1) . ' год';
+
+            default: // weekly и прочее — отчётного периода словами нет
+                return null;
+        }
+    }
+
     /**
      * Конкретные даты срока выполнения в диапазоне [$from, $to] по правилу периодичности.
      * Срок = функция от (kind, месяцы, дни); дат может быть несколько.

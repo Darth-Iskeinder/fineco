@@ -571,32 +571,24 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
         get regularBPs() { return this.tariffBPs.filter(bp => !this.primaryFlag(bp)); },
         flagBPs(key) { return this.tariffBPs.filter(bp => this.primaryFlag(bp) === key); },
 
-        // Группировка БП: по сфере, внутри сферы — по сроку выполнения (датам).
-        // Возвращает [{ sphere, dateGroups: [{ dateKey, label, bps: [...] }] }].
-        // Порядок сфер и дат — по первому появлению (каталог уже отсортирован).
-        groupBySphereDate(list) {
+        // Группировка БП по сфере. Срок выполнения показывается в самой строке БП,
+        // поэтому отдельной подгруппы по датам нет (иначе дата дублируется).
+        // Возвращает [{ sphere, bps: [...] }]. Порядок сфер — по первому появлению.
+        groupBySphere(list) {
             const sphereMap = {};
             const spheres = [];
             list.forEach(bp => {
                 const sphere = bp.sphere || 'Без сферы';
                 if (!sphereMap[sphere]) {
-                    sphereMap[sphere] = { sphere, dateMap: {}, dateGroups: [] };
+                    sphereMap[sphere] = { sphere, bps: [] };
                     spheres.push(sphereMap[sphere]);
                 }
-                const sg = sphereMap[sphere];
-                const label = (bp.schedule && bp.schedule.labels && bp.schedule.labels.length)
-                    ? bp.schedule.labels.join(', ')
-                    : 'Срок не задан';
-                if (!sg.dateMap[label]) {
-                    sg.dateMap[label] = { dateKey: label, label, bps: [] };
-                    sg.dateGroups.push(sg.dateMap[label]);
-                }
-                sg.dateMap[label].bps.push(bp);
+                sphereMap[sphere].bps.push(bp);
             });
             return spheres;
         },
-        get regularBPsGrouped() { return this.groupBySphereDate(this.regularBPs); },
-        flagBPsGrouped(key) { return this.groupBySphereDate(this.flagBPs(key)); },
+        get regularBPsGrouped() { return this.groupBySphere(this.regularBPs); },
+        flagBPsGrouped(key) { return this.groupBySphere(this.flagBPs(key)); },
 
         bpTotal(bp) {
             if (!bp.enabled) return 0;

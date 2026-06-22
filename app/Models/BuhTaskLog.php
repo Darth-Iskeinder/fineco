@@ -11,7 +11,7 @@ class BuhTaskLog extends Model
         'employee_id', 'client_id', 'estimate_item_id',
         'year', 'month', 'status', 'review_comment',
         'started_at', 'resumed_at', 'paused_seconds', 'completed_at',
-        'reviewed_at', 'reviewed_by', 'actual_quantity',
+        'reviewed_at', 'reviewed_by', 'review_started_at', 'actual_quantity',
         'document_path', 'document_name',
     ];
 
@@ -20,6 +20,7 @@ class BuhTaskLog extends Model
         'resumed_at'   => 'datetime',
         'completed_at' => 'datetime',
         'reviewed_at'  => 'datetime',
+        'review_started_at' => 'datetime',
         'paused_seconds' => 'integer',
         'actual_quantity' => 'integer',
     ];

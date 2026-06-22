@@ -162,7 +162,7 @@
     </template>
 </div>
 
-<div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($services) }}, {{ json_encode($completed) }})" x-cloak>
+<div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($services) }}, {{ json_encode($completed) }}, {{ json_encode($employees) }}, {{ $employee->id }})" x-cloak>
 
     {{-- Баннер срочных задач --}}
     <template x-if="urgentSummary.overdue.length > 0 || urgentSummary.today.length > 0 || urgentSummary.soon.length > 0">
@@ -239,7 +239,7 @@
     {{-- Подсказка про горизонт показа --}}
     <div class="flex items-center gap-1.5 mb-6 text-xs text-slate-400">
         <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-        <span>Показаны задачи на ближайшие 30 дней и все просроченные. Выполненные исчезают из списка на следующий день — их история во вкладке «Выполненные».</span>
+        <span>Показаны задачи текущего месяца и все просроченные. Выполненные исчезают из списка на следующий день — их история во вкладке «Выполненные».</span>
     </div>
 
     {{-- Нет задач --}}
@@ -279,6 +279,7 @@
                                 </span>
                             </button>
                         </th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Отчётный период</th>
                         <th class="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Стоимость</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider w-24">Время</th>
                         <th class="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Действия</th>
@@ -293,7 +294,8 @@
                                 'border-l-4 border-l-red-400 bg-red-50/40': task.status !== 'completed' && urgency(task) === 'overdue',
                                 'border-l-4 border-l-orange-400 bg-orange-50/30': task.status !== 'completed' && urgency(task) === 'today',
                                 'border-l-4 border-l-amber-300 bg-amber-50/20': task.status !== 'completed' && urgency(task) === 'soon',
-                                'hover:bg-slate-50/50': task.status !== 'completed' && !urgency(task),
+                                'border-l-4 border-l-violet-400 bg-violet-50/30': task.is_custom && task.status !== 'completed' && !urgency(task),
+                                'hover:bg-slate-50/50': task.status !== 'completed' && !urgency(task) && !task.is_custom,
                             }" x-show="matchesFilter(task)" @dblclick="openTaskModal(idx)">
 
                             {{-- Статус-точка --}}
@@ -315,7 +317,7 @@
                                           :class="task.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-800'"
                                           x-text="task.name"></span>
                                     <span x-show="task.type === 'adhoc'"
-                                          class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">доп.</span>
+                                          class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-violet-100 text-violet-700">произвольная</span>
                                     <span x-show="task.status !== 'completed' && urgency(task) === 'overdue'"
                                           class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">просрочена</span>
                                     <span x-show="task.status !== 'completed' && urgency(task) === 'today'"
@@ -328,7 +330,7 @@
                             </td>
 
                             <td class="px-4 py-3.5">
-                                <span class="text-sm text-slate-600" x-text="task.client_name"></span>
+                                <span class="text-sm text-slate-600" x-text="task.client_name || '—'"></span>
                             </td>
 
                             <td class="px-4 py-3.5">
@@ -347,6 +349,11 @@
                                           x-text="'до ' + fmtDue(task.due_date)"></span>
                                     <span x-show="!task.periodicity && !task.due_date" class="text-slate-300 text-sm">—</span>
                                 </div>
+                            </td>
+
+                            <td class="px-4 py-3.5">
+                                <span x-show="task.reporting_period" class="text-sm text-slate-700" x-text="task.reporting_period"></span>
+                                <span x-show="!task.reporting_period" class="text-slate-300 text-sm">—</span>
                             </td>
 
                             <td class="px-4 py-3.5 text-right">
@@ -496,7 +503,7 @@
                                           :class="task.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-800'"
                                           x-text="task.name"></span>
                                     <span x-show="task.type === 'adhoc'"
-                                          class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">доп.</span>
+                                          class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-violet-100 text-violet-700">произвольная</span>
                                     <span x-show="task.status !== 'completed' && urgency(task) === 'overdue'"
                                           class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">просрочена</span>
                                     <span x-show="task.status !== 'completed' && urgency(task) === 'today'"
@@ -508,7 +515,7 @@
                                 </div>
                             </td>
                             <td class="px-4 py-3.5">
-                                <span class="text-sm text-slate-600" x-text="task.client_name"></span>
+                                <span class="text-sm text-slate-600" x-text="task.client_name || '—'"></span>
                             </td>
                             <td class="px-4 py-3.5">
                                 <div class="flex flex-col gap-0.5">
@@ -537,14 +544,20 @@
             </table>
         </div>
 
-        {{-- ===== РЕЖИМ ВЫПОЛНЕННЫЕ (история за 30 дней, только чтение) ===== --}}
+        {{-- ===== РЕЖИМ ВЫПОЛНЕННЫЕ (история за 90 дней, только чтение, пагинация по 20) ===== --}}
         <div x-show="viewMode === 'completed'">
+            <div class="px-6 py-3 border-b border-slate-100 flex items-center gap-2 text-sm text-slate-500 bg-slate-50/60">
+                <svg class="w-4 h-4 flex-shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <span>История выполненных задач за последние <span class="font-semibold text-slate-700">{{ $completedDays }} дней</span></span>
+                <span x-show="completed.length > 0" class="text-slate-400" x-text="'· всего ' + completed.length"></span>
+                <span x-show="completed.length > 0" class="text-slate-400 hidden sm:inline">· двойной клик — детали</span>
+            </div>
             <template x-if="completed.length === 0">
-                <div class="px-6 py-10 text-center text-sm text-slate-400">За последние 30 дней нет выполненных задач.</div>
+                <div class="px-6 py-10 text-center text-sm text-slate-400">За последние {{ $completedDays }} дней нет выполненных задач.</div>
             </template>
             <div class="divide-y divide-slate-100">
-                <template x-for="c in completed" :key="c.id">
-                    <div class="flex items-center gap-3 px-6 py-3">
+                <template x-for="c in completedPageItems" :key="c.id">
+                    <div class="flex items-center gap-3 px-6 py-3 cursor-pointer hover:bg-slate-50/60 transition-colors" @dblclick="openCompleted(c)">
                         <span class="flex-shrink-0 w-8 h-8 inline-flex items-center justify-center rounded-full bg-emerald-50 text-emerald-500">
                             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                         </span>
@@ -555,6 +568,23 @@
                         <span class="text-xs text-slate-400 whitespace-nowrap" x-text="fmtCompleted(c.completed_at)"></span>
                     </div>
                 </template>
+            </div>
+
+            {{-- Пагинация --}}
+            <div x-show="completedTotalPages > 1" class="px-6 py-3 border-t border-slate-100 flex items-center justify-between gap-3">
+                <span class="text-xs text-slate-400" x-text="'Страница ' + completedPage + ' из ' + completedTotalPages"></span>
+                <div class="flex items-center gap-1">
+                    <button type="button" @click="completedPage = Math.max(1, completedPage - 1)"
+                            :disabled="completedPage <= 1"
+                            class="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-transparent transition-colors">
+                        Назад
+                    </button>
+                    <button type="button" @click="completedPage = Math.min(completedTotalPages, completedPage + 1)"
+                            :disabled="completedPage >= completedTotalPages"
+                            class="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-transparent transition-colors">
+                        Вперёд
+                    </button>
+                </div>
             </div>
         </div>
 
@@ -598,7 +628,10 @@
             <div class="space-y-4">
                 {{-- Компания --}}
                 <div>
-                    <label class="block text-sm font-medium text-slate-700 mb-1.5">Компания</label>
+                    <label class="block text-sm font-medium text-slate-700 mb-1.5">
+                        Компания
+                        <span x-show="newTask.mode === 'custom'" class="text-slate-400 font-normal">(необязательно)</span>
+                    </label>
                     <select x-model="newTask.client_id"
                             class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 bg-white">
                         <option value="">Выберите компанию...</option>
@@ -637,7 +670,7 @@
                     </div>
                 </template>
 
-                {{-- Режим: произвольная --}}
+                {{-- Режим: произвольная (внеплановая задача сотруднику, не в смете) --}}
                 <template x-if="newTask.mode === 'custom'">
                     <div class="space-y-4">
                         <div>
@@ -649,24 +682,25 @@
                         </div>
                         <div class="flex gap-3">
                             <div class="flex-1">
-                                <label class="block text-sm font-medium text-slate-700 mb-1.5">Стоимость (сом)</label>
-                                <input type="number"
-                                       x-model="newTask.cost"
-                                       placeholder="0"
-                                       min="0"
-                                       step="0.01"
-                                       class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50">
+                                <label class="block text-sm font-medium text-slate-700 mb-1.5">Сотрудник</label>
+                                <select x-model="newTask.employee_id"
+                                        class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 bg-white">
+                                    <template x-for="emp in employees" :key="emp.id">
+                                        <option :value="emp.id" x-text="emp.full_name"></option>
+                                    </template>
+                                </select>
                             </div>
-                            <div class="w-32">
-                                <label class="block text-sm font-medium text-slate-700 mb-1.5">Срок (день)</label>
-                                <input type="number"
-                                       x-model="newTask.due_day"
-                                       placeholder="25"
-                                       min="1"
-                                       max="31"
-                                       class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50">
+                            <div class="w-40">
+                                <label class="block text-sm font-medium text-slate-700 mb-1.5">Дата</label>
+                                <input type="date"
+                                       x-model="newTask.due_date"
+                                       class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50">
                             </div>
                         </div>
+                        <p class="text-xs text-slate-400 flex items-center gap-1">
+                            <span class="inline-block w-2 h-2 rounded-full bg-violet-500"></span>
+                            Произвольная задача — не попадает в смету, напоминает назначенному сотруднику.
+                        </p>
                     </div>
                 </template>
 
@@ -682,7 +716,7 @@
                         :disabled="creating"
                         class="flex-1 py-2.5 px-4 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 disabled:opacity-60 transition-colors flex items-center justify-center gap-2">
                     <svg x-show="creating" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                    <span x-text="creating ? 'Создание...' : 'Добавить в смету'"></span>
+                    <span x-text="creating ? 'Создание...' : (newTask.mode === 'custom' ? 'Создать задачу' : 'Добавить в смету')"></span>
                 </button>
             </div>
         </div>
@@ -696,7 +730,7 @@
          x-transition:leave="ease-in duration-150"
          x-transition:leave-start="opacity-100"
          x-transition:leave-end="opacity-0"
-         class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+         class="fixed inset-0 z-[60] flex items-center justify-center bg-black/40"
          @click.self="startConfirm = { show: false, idx: null }"
          @keydown.escape.window="startConfirm = { show: false, idx: null }"
          style="display:none">
@@ -731,7 +765,7 @@
          x-transition:leave="ease-in duration-150"
          x-transition:leave-start="opacity-100"
          x-transition:leave-end="opacity-0"
-         class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+         class="fixed inset-0 z-[60] flex items-center justify-center bg-black/40"
          @click.self="docRequiredModal = { show: false, taskIdx: null }"
          @keydown.escape.window="docRequiredModal = { show: false, taskIdx: null }"
          style="display:none">
@@ -766,7 +800,7 @@
          x-transition:leave="ease-in duration-150"
          x-transition:leave-start="opacity-100"
          x-transition:leave-end="opacity-0"
-         class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+         class="fixed inset-0 z-[60] flex items-center justify-center bg-black/40"
          @click.self="checklistRequiredModal = { show: false, taskIdx: null }"
          @keydown.escape.window="checklistRequiredModal = { show: false, taskIdx: null }"
          style="display:none">
@@ -813,7 +847,105 @@
                         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                     </button>
                 </div>
-                <p class="text-sm text-slate-500 mt-0.5" x-text="tasks[taskModalIdx].client_name"></p>
+                <p class="text-sm text-slate-500 mt-0.5" x-text="tasks[taskModalIdx].client_name || '—'"></p>
+
+                {{-- Таймер + управление (Старт/Пауза/Стоп) — те же действия, что и в строке таблицы --}}
+                <div class="mt-4 flex items-center justify-between gap-3 bg-slate-50 rounded-xl px-4 py-3">
+                    <div class="flex items-center gap-2.5">
+                        <span class="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                              :class="{
+                                  'bg-slate-300': tasks[taskModalIdx].status === 'pending',
+                                  'bg-indigo-500 animate-pulse': tasks[taskModalIdx].status === 'running',
+                                  'bg-amber-400': tasks[taskModalIdx].status === 'paused',
+                                  'bg-sky-500': tasks[taskModalIdx].status === 'review',
+                                  'bg-rose-500': tasks[taskModalIdx].status === 'rework',
+                                  'bg-emerald-500': tasks[taskModalIdx].status === 'completed',
+                              }"></span>
+                        <span class="font-mono text-lg font-semibold tracking-tight"
+                              :class="{
+                                  'text-slate-300': tasks[taskModalIdx].status === 'pending',
+                                  'text-indigo-600': tasks[taskModalIdx].status === 'running',
+                                  'text-amber-500': tasks[taskModalIdx].status === 'paused',
+                                  'text-sky-600': tasks[taskModalIdx].status === 'review',
+                                  'text-rose-500': tasks[taskModalIdx].status === 'rework',
+                                  'text-emerald-600': tasks[taskModalIdx].status === 'completed',
+                              }"
+                              x-text="formatTime(getElapsed(tasks[taskModalIdx]))"></span>
+                    </div>
+
+                    <div class="flex-shrink-0">
+                        {{-- Старт (pending) --}}
+                        <button x-show="tasks[taskModalIdx].status === 'pending'"
+                                @click.prevent="askStart(taskModalIdx)"
+                                :disabled="tasks[taskModalIdx].loading"
+                                class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                            <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
+                            Старт
+                        </button>
+
+                        {{-- Пауза + Стоп (running) --}}
+                        <span x-show="tasks[taskModalIdx].status === 'running'" class="inline-flex items-center gap-1.5">
+                            <button @click.prevent="pauseTask(taskModalIdx)"
+                                    :disabled="tasks[taskModalIdx].loading"
+                                    class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 text-amber-600 border border-amber-200 text-xs font-medium rounded-lg hover:bg-amber-100 disabled:opacity-50 transition-colors">
+                                <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+                                Пауза
+                            </button>
+                            <button @click.prevent="completeTask(taskModalIdx)"
+                                    :disabled="tasks[taskModalIdx].loading"
+                                    class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors">
+                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                                Стоп
+                            </button>
+                        </span>
+
+                        {{-- Продолжить + Стоп (paused) --}}
+                        <span x-show="tasks[taskModalIdx].status === 'paused'" class="inline-flex items-center gap-1.5">
+                            <button @click.prevent="resumeTask(taskModalIdx)"
+                                    :disabled="tasks[taskModalIdx].loading"
+                                    class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-600 border border-indigo-200 text-xs font-medium rounded-lg hover:bg-indigo-100 disabled:opacity-50 transition-colors">
+                                <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
+                                Продолжить
+                            </button>
+                            <button @click.prevent="completeTask(taskModalIdx)"
+                                    :disabled="tasks[taskModalIdx].loading"
+                                    class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors">
+                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                                Стоп
+                            </button>
+                        </span>
+
+                        {{-- Продолжить + Стоп (rework) --}}
+                        <span x-show="tasks[taskModalIdx].status === 'rework'" class="inline-flex items-center gap-1.5">
+                            <button @click.prevent="resumeTask(taskModalIdx)"
+                                    :disabled="tasks[taskModalIdx].loading"
+                                    class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 text-rose-600 border border-rose-200 text-xs font-medium rounded-lg hover:bg-rose-100 disabled:opacity-50 transition-colors">
+                                <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"/></svg>
+                                Продолжить
+                            </button>
+                            <button @click.prevent="completeTask(taskModalIdx)"
+                                    :disabled="tasks[taskModalIdx].loading"
+                                    class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors">
+                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                                Стоп
+                            </button>
+                        </span>
+
+                        {{-- На проверке (review) --}}
+                        <span x-show="tasks[taskModalIdx].status === 'review'"
+                              class="inline-flex items-center gap-1 text-xs text-sky-600 font-medium">
+                            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                            На проверке
+                        </span>
+
+                        {{-- Выполнено (completed) --}}
+                        <span x-show="tasks[taskModalIdx].status === 'completed'"
+                              class="inline-flex items-center gap-1 text-xs text-emerald-600 font-medium">
+                            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                            Выполнено
+                        </span>
+                    </div>
+                </div>
 
                 <div class="mt-4 space-y-3">
                     <template x-if="tasks[taskModalIdx].description">
@@ -952,10 +1084,139 @@
         </template>
     </div>
 
+    {{-- ===== МОДАЛ ВЫПОЛНЕННОЙ ЗАДАЧИ (история, только чтение) ===== --}}
+    <div x-show="completedItem !== null"
+         x-transition:enter="ease-out duration-200"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="ease-in duration-150"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+         @click.self="completedItem = null"
+         @keydown.escape.window="completedItem = null"
+         style="display:none">
+        <template x-if="completedItem !== null">
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 max-h-[85vh] overflow-y-auto">
+                <div class="flex items-start justify-between gap-4">
+                    <div class="min-w-0">
+                        <h3 class="text-base font-semibold text-slate-800" x-text="completedItem.name"></h3>
+                        <p class="text-sm text-slate-500 mt-0.5" x-text="completedItem.client_name"></p>
+                    </div>
+                    <button @click="completedItem = null" class="text-slate-300 hover:text-slate-500 transition-colors flex-shrink-0">
+                        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    </button>
+                </div>
+
+                {{-- Плашка «выполнено» --}}
+                <div class="mt-4 flex items-center gap-2 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-2.5 text-sm text-emerald-700">
+                    <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                    <span>Выполнено · <span x-text="fmtCompleted(completedItem.completed_at)"></span></span>
+                </div>
+
+                {{-- Затрачено + периодичность --}}
+                <div class="mt-4 flex items-center gap-6 bg-slate-50 rounded-xl px-4 py-3">
+                    <div>
+                        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Затрачено</p>
+                        <p class="font-mono text-base font-semibold text-slate-700" x-text="formatTime(completedItem.elapsed_seconds)"></p>
+                    </div>
+                    <template x-if="completedItem.periodicity">
+                        <div>
+                            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Периодичность</p>
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600" x-text="completedItem.periodicity"></span>
+                        </div>
+                    </template>
+                </div>
+
+                <div class="mt-4 space-y-3">
+                    <template x-if="completedItem.description">
+                        <div>
+                            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Описание</p>
+                            <p class="text-sm text-slate-600 whitespace-pre-line" x-text="completedItem.description"></p>
+                        </div>
+                    </template>
+                    <template x-if="completedItem.comment">
+                        <div>
+                            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Комментарий</p>
+                            <p class="text-sm text-slate-600 whitespace-pre-line" x-text="completedItem.comment"></p>
+                        </div>
+                    </template>
+                    <template x-if="!completedItem.description && !completedItem.comment">
+                        <p class="text-sm text-slate-400 italic">Описание и комментарий не заполнены</p>
+                    </template>
+                </div>
+
+                {{-- Количество (план / факт) --}}
+                <template x-if="completedItem.allows_quantity">
+                    <div class="mt-4 pt-4 border-t border-slate-100 flex items-center gap-8">
+                        <div>
+                            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-0.5">План</p>
+                            <p class="text-sm font-medium text-slate-800" x-text="completedItem.quantity"></p>
+                        </div>
+                        <div>
+                            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Факт</p>
+                            <p class="text-sm font-medium text-slate-800" x-text="completedItem.actual_quantity ?? '—'"></p>
+                        </div>
+                    </div>
+                </template>
+
+                {{-- Документ --}}
+                <template x-if="completedItem.requires_document">
+                    <div class="mt-4 pt-4 border-t border-slate-100">
+                        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Прикреплённый документ</p>
+                        <template x-if="completedItem.document_name">
+                            <a :href="'/storage/' + completedItem.document_path" target="_blank"
+                               class="inline-flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 underline truncate max-w-[320px]">
+                                <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                                <span x-text="completedItem.document_name"></span>
+                            </a>
+                        </template>
+                        <template x-if="!completedItem.document_name">
+                            <span class="text-sm text-slate-400 italic">Документ не прикреплён</span>
+                        </template>
+                    </div>
+                </template>
+
+                {{-- Подпункты (read-only) --}}
+                <template x-if="completedItem.children && completedItem.children.length > 0">
+                    <div class="mt-5 pt-4 border-t border-slate-100">
+                        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Подпункты</p>
+                        <div class="space-y-1.5">
+                            <template x-for="child in completedItem.children" :key="child.id">
+                                <div class="py-1">
+                                    <div class="flex items-center gap-2.5">
+                                        <span class="flex-shrink-0 w-4 h-4 inline-flex items-center justify-center rounded-full"
+                                              :class="child.status === 'completed' ? 'bg-emerald-100 text-emerald-600' : 'border border-slate-300'">
+                                            <svg x-show="child.status === 'completed'" class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+                                        </span>
+                                        <span class="text-sm flex-1"
+                                              :class="child.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-700'"
+                                              x-text="child.name"></span>
+                                        <span x-show="child.allows_quantity" class="text-xs text-slate-400 whitespace-nowrap"
+                                              x-text="'факт: ' + (child.actual_quantity ?? '—') + ' / ' + child.quantity"></span>
+                                    </div>
+                                    <template x-if="child.requires_document && child.document_name">
+                                        <div class="flex items-center gap-2 mt-1 text-xs" style="margin-left:1.625rem">
+                                            <a :href="'/storage/' + child.document_path" target="_blank"
+                                               class="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 underline truncate max-w-[260px]">
+                                                <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                                                <span x-text="child.document_name"></span>
+                                            </a>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </template>
+    </div>
+
 </div>
 
 <script>
-function buhTasks(initialTasks, year, month, allClients, allServices, completed) {
+function buhTasks(initialTasks, year, month, allClients, allServices, completed, employees, currentEmployeeId) {
     // File-объекты держим вне реактивного state — Alpine оборачивает объекты в Proxy,
     // что ломает внутренние методы File/Blob при передаче в FormData
     const pendingFiles = new Map();
@@ -971,10 +1232,15 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed)
             children: (t.children || []).map(c => ({ ...c, doc_uploading: false, pending_file_name: null })),
         })),
         completed: completed || [],
+        completedPage: 1,
+        completedPerPage: 20,
+        completedItem: null,
         year,
         month,
         allClients,
         allServices,
+        employees: employees || [],
+        currentEmployeeId,
         viewMode: 'list',
         ticker: null,
         now: Math.floor(Date.now() / 1000),
@@ -986,7 +1252,7 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed)
 
         showCreateModal: false,
         startConfirm: { show: false, idx: null },
-        newTask: { mode: 'catalog', client_id: '', service_id: '', name: '', cost: '', due_day: '' },
+        newTask: { mode: 'catalog', client_id: '', service_id: '', name: '', cost: '', due_day: '', employee_id: currentEmployeeId, due_date: '' },
         creating: false,
         createError: '',
 
@@ -1180,6 +1446,18 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed)
         },
         get visibleCount() {
             return this.tasks.filter(t => this.matchesFilter(t)).length;
+        },
+
+        // Пагинация вкладки «Выполненные» (по 20)
+        get completedTotalPages() {
+            return Math.max(1, Math.ceil(this.completed.length / this.completedPerPage));
+        },
+        get completedPageItems() {
+            const start = (this.completedPage - 1) * this.completedPerPage;
+            return this.completed.slice(start, start + this.completedPerPage);
+        },
+        openCompleted(c) {
+            this.completedItem = c;
         },
 
         get totalCompleted() {
@@ -1462,31 +1740,39 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed)
             }
         },
 
+        resetNewTask() {
+            this.newTask = { mode: this.newTask.mode, client_id: '', service_id: '', name: '', cost: '', due_day: '', employee_id: this.currentEmployeeId, due_date: '' };
+        },
+
         async createTask() {
             this.createError = '';
 
-            if (!this.newTask.client_id) { this.createError = 'Выберите компанию'; return; }
+            // Каталог — позиция в смете (нужна компания). Произвольная — внеплановая задача сотруднику (компания необязательна).
+            const isCustom = this.newTask.mode === 'custom';
 
-            if (this.newTask.mode === 'catalog') {
-                if (!this.newTask.service_id) { this.createError = 'Выберите бизнес-процесс'; return; }
+            if (isCustom) {
+                if (!this.newTask.name.trim())  { this.createError = 'Введите название задачи'; return; }
+                if (!this.newTask.employee_id)  { this.createError = 'Выберите сотрудника'; return; }
+                if (!this.newTask.due_date)     { this.createError = 'Укажите дату'; return; }
             } else {
-                if (!this.newTask.name.trim()) { this.createError = 'Введите название задачи'; return; }
-                if (this.newTask.cost === '' || this.newTask.cost < 0) { this.createError = 'Укажите стоимость'; return; }
+                if (!this.newTask.client_id)    { this.createError = 'Выберите компанию'; return; }
+                if (!this.newTask.service_id)   { this.createError = 'Выберите бизнес-процесс'; return; }
             }
 
             this.creating = true;
 
             try {
-                const body = { client_id: this.newTask.client_id, year: this.year, month: this.month };
-                if (this.newTask.mode === 'catalog') {
-                    body.service_id = this.newTask.service_id;
-                } else {
-                    body.name    = this.newTask.name.trim();
-                    body.cost    = parseFloat(this.newTask.cost) || 0;
-                    body.due_day = this.newTask.due_day ? parseInt(this.newTask.due_day) : null;
-                }
+                const url = isCustom ? '/buhtasks/adhoc' : '/buhtasks/extra';
+                const body = isCustom
+                    ? {
+                        employee_id: this.newTask.employee_id,
+                        client_id:   this.newTask.client_id || null,
+                        name:        this.newTask.name.trim(),
+                        due_date:    this.newTask.due_date,
+                    }
+                    : { client_id: this.newTask.client_id, year: this.year, month: this.month, service_id: this.newTask.service_id };
 
-                const r = await fetch('/buhtasks/extra', {
+                const r = await fetch(url, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1498,8 +1784,11 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed)
                 const data = await r.json();
 
                 if (data.success) {
-                    this.tasks.push(data.task);
-                    this.newTask = { mode: this.newTask.mode, client_id: '', service_id: '', name: '', cost: '', due_day: '' };
+                    // Добавляем в текущий список только если задача для меня (иначе она у назначенного сотрудника)
+                    if (data.mine === undefined || data.mine) {
+                        this.tasks.push(data.task);
+                    }
+                    this.resetNewTask();
                     this.showCreateModal = false;
                 } else {
                     this.createError = data.message || 'Ошибка создания задачи';
