@@ -456,92 +456,72 @@
             </table>
         </div>
 
-        {{-- ===== РЕЖИМ ЧЕКЛИСТ ===== --}}
-        <div x-show="viewMode === 'checklist'" class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-slate-200">
-                <thead class="bg-slate-50">
-                    <tr>
-                        <th class="w-10 px-4 py-3"></th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Задача</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Компания</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                            <button type="button" @click="toggleSort()"
-                                    class="group inline-flex items-center gap-1 uppercase tracking-wider hover:text-slate-700 transition-colors"
-                                    title="Сортировать по сроку">
-                                Периодичность
-                                <span class="inline-flex flex-col leading-[0]">
-                                    <svg class="w-2 h-2" :class="sortDir === 'asc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" viewBox="0 0 8 8" fill="currentColor"><path d="M4 0l4 5H0z"/></svg>
-                                    <svg class="w-2 h-2 mt-0.5" :class="sortDir === 'desc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" viewBox="0 0 8 8" fill="currentColor"><path d="M4 8L0 3h8z"/></svg>
-                                </span>
-                            </button>
-                        </th>
-                        <th class="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Стоимость</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100">
-                    <template x-for="(task, idx) in tasks" :key="task.uid">
-                        <tr :class="{
-                                'bg-emerald-50/30': task.status === 'completed',
-                                'bg-sky-50/40': task.status === 'review',
-                                'bg-rose-50/40': task.status === 'rework',
-                                'border-l-4 border-l-red-400 bg-red-50/40': task.status !== 'completed' && urgency(task) === 'overdue',
-                                'border-l-4 border-l-orange-400 bg-orange-50/30': task.status !== 'completed' && urgency(task) === 'today',
-                                'border-l-4 border-l-amber-300 bg-amber-50/20': task.status !== 'completed' && urgency(task) === 'soon',
-                                'hover:bg-slate-50/50': task.status !== 'completed' && !urgency(task),
-                            }"
-                            class="cursor-pointer" x-show="matchesFilter(task)" @click="toggleChecklist(idx)">
-                            <td class="px-4 py-3.5" @click.stop>
-                                <input type="checkbox"
-                                       :checked="task.status === 'completed'"
-                                       @change="toggleChecklist(idx)"
-                                       :disabled="task.loading || task.status === 'review'"
-                                       class="w-4 h-4 text-emerald-600 border-slate-300 rounded focus:ring-emerald-500 cursor-pointer">
-                            </td>
-                            <td class="px-4 py-3.5">
-                                <div class="flex items-center gap-2">
-                                    <span class="text-sm font-medium"
-                                          :class="task.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-800'"
-                                          x-text="task.name"></span>
-                                    <span x-show="task.type === 'adhoc'"
-                                          class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-violet-100 text-violet-700">произвольная</span>
-                                    <span x-show="task.status !== 'completed' && urgency(task) === 'overdue'"
-                                          class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">просрочена</span>
-                                    <span x-show="task.status !== 'completed' && urgency(task) === 'today'"
-                                          class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-700">сегодня</span>
-                                    <span x-show="task.status === 'review'"
-                                          class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-sky-100 text-sky-700">на проверке</span>
-                                    <span x-show="task.status === 'rework'"
-                                          class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-rose-100 text-rose-700">на доработку</span>
-                                </div>
-                            </td>
-                            <td class="px-4 py-3.5">
-                                <span class="text-sm text-slate-600" x-text="task.client_name || '—'"></span>
-                            </td>
-                            <td class="px-4 py-3.5">
-                                <div class="flex flex-col gap-0.5">
-                                    <span x-show="task.periodicity"
-                                          class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 w-fit"
-                                          x-text="task.periodicity"></span>
-                                    <span x-show="task.due_date"
-                                          class="text-xs font-medium w-fit"
-                                          :class="{
-                                              'text-red-600': urgency(task) === 'overdue',
-                                              'text-orange-600': urgency(task) === 'today',
-                                              'text-amber-600': urgency(task) === 'soon',
-                                              'text-slate-500': !urgency(task),
-                                          }"
-                                          x-text="'до ' + fmtDue(task.due_date)"></span>
-                                    <span x-show="!task.periodicity && !task.due_date" class="text-slate-300 text-sm">—</span>
-                                </div>
-                            </td>
-                            <td class="px-4 py-3.5 text-right">
-                                <span class="text-sm font-semibold text-slate-700"
-                                      x-text="task.cost > 0 ? formatPrice(task.cost) : '—'"></span>
-                            </td>
+        {{-- ===== РЕЖИМ ЧЕКЛИСТ (матрица: строки — компании, столбцы — задачи; только для чтения) ===== --}}
+        <div x-show="viewMode === 'checklist'">
+            {{-- Легенда статусов --}}
+            <div class="flex flex-wrap items-center gap-5 px-6 py-3 border-b border-slate-200 bg-slate-50/60 text-xs text-slate-500">
+                <span class="inline-flex items-center gap-1.5">
+                    <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-100 text-emerald-600">
+                        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                    </span>
+                    выполнено
+                </span>
+                <span class="inline-flex items-center gap-1.5">
+                    <span class="inline-block w-2.5 h-2.5 rounded-full bg-sky-500"></span>
+                    на проверке
+                </span>
+                <span class="inline-flex items-center gap-1.5">
+                    <span class="inline-block w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+                    в процессе
+                </span>
+                <span class="inline-flex items-center gap-1.5">
+                    <span class="inline-block w-2.5 h-2.5 rounded-full border border-slate-300"></span>
+                    не начато
+                </span>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="min-w-full border-separate border-spacing-0 border-t border-l border-slate-200">
+                    <thead>
+                        <tr>
+                            <th class="sticky left-0 z-20 bg-slate-100 px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider border-r border-b border-slate-200 min-w-[200px]">Компания</th>
+                            <template x-for="col in checklistData.cols" :key="col.name">
+                                <th class="bg-slate-100 px-3 py-3 text-center text-xs font-semibold text-slate-600 border-r border-b border-slate-200 whitespace-nowrap">
+                                    <span x-text="col.name"></span>
+                                </th>
+                            </template>
                         </tr>
-                    </template>
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody>
+                        <template x-for="company in checklistData.companies" :key="company.id">
+                            <tr class="group">
+                                <td class="sticky left-0 z-10 bg-white group-hover:bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 border-r border-b border-slate-200 whitespace-nowrap" x-text="company.name"></td>
+                                <template x-for="col in checklistData.cols" :key="col.name">
+                                    <td class="px-3 py-3 text-center border-r border-b border-slate-200 group-hover:bg-slate-50/50">
+                                        <template x-if="(checklistData.cells[company.id] || {})[col.name] === 'done'">
+                                            <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 text-emerald-600" title="выполнено">
+                                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                                            </span>
+                                        </template>
+                                        <template x-if="(checklistData.cells[company.id] || {})[col.name] === 'review'">
+                                            <span class="inline-block w-2.5 h-2.5 rounded-full bg-sky-500" title="на проверке"></span>
+                                        </template>
+                                        <template x-if="(checklistData.cells[company.id] || {})[col.name] === 'progress'">
+                                            <span class="inline-block w-2.5 h-2.5 rounded-full bg-amber-400" title="в процессе"></span>
+                                        </template>
+                                        <template x-if="(checklistData.cells[company.id] || {})[col.name] === 'none'">
+                                            <span class="inline-block w-2.5 h-2.5 rounded-full border border-slate-300" title="не начато"></span>
+                                        </template>
+                                        <template x-if="!checklistData.cells[company.id] || !(col.name in checklistData.cells[company.id])">
+                                            <span class="text-slate-200" title="нет такой задачи">·</span>
+                                        </template>
+                                    </td>
+                                </template>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
         </div>
 
         {{-- ===== РЕЖИМ ВЫПОЛНЕННЫЕ (история за 90 дней, только чтение, пагинация по 20) ===== --}}
@@ -1268,6 +1248,35 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
         },
         matchesFilter(task) {
             return this.clientFilter === 'all' || String(task.client_id) === String(this.clientFilter);
+        },
+
+        // Матрица вкладки «Чеклист»: строки — компании, столбцы — задачи, ячейка — статус (только чтение).
+        // done = выполнено (зелёная галочка), review = на проверке (синий), progress = начато, но не закрыто (жёлтый),
+        // none = задача есть, но не начата (пусто). Если у компании нет такой задачи — ячейка отсутствует.
+        get checklistData() {
+            const companyMap = {};
+            const colMap = {};
+            const cells = {};
+            const rank = { none: 0, done: 1, review: 2, progress: 3 };
+            this.tasks.filter(t => this.matchesFilter(t)).forEach(t => {
+                const cid = String(t.client_id ?? t.client_name);
+                if (!companyMap[cid]) companyMap[cid] = { id: cid, name: t.client_name || '—' };
+                if (!colMap[t.name]) colMap[t.name] = { name: t.name, count: 0 };
+                colMap[t.name].count++;
+                let cat;
+                if (t.status === 'completed')   cat = 'done';
+                else if (t.status === 'pending') cat = 'none';
+                else if (t.status === 'review')  cat = 'review';
+                else                             cat = 'progress';
+                if (!cells[cid]) cells[cid] = {};
+                const prev = cells[cid][t.name];
+                cells[cid][t.name] = (!prev || rank[cat] > rank[prev]) ? cat : prev;
+            });
+            return {
+                companies: Object.values(companyMap).sort((a, b) => a.name.localeCompare(b.name, 'ru')),
+                cols: Object.values(colMap).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'ru')),
+                cells,
+            };
         },
         openTaskModal(idx) {
             this.taskModalIdx = idx;
