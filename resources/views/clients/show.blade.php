@@ -384,7 +384,40 @@
                                         <p :class="client.has_marketplaces ? 'text-violet-600 font-semibold' : 'text-slate-400'" class="text-xs" x-text="client.has_marketplaces ? (client.marketplaces_count ? client.marketplaces_count + ' шт.' : 'Да') : 'Нет'"></p>
                                     </div>
                                 </div>
+                                <!-- Дополнительные характеристики с количеством -->
+                                <template x-for="opt in countFlags" :key="opt.key">
+                                    <div :class="client[opt.key] ? ('bg-' + opt.color + '-50 border-' + opt.color + '-200') : 'bg-slate-50 border-slate-100'" class="flex items-center gap-3 p-3 rounded-xl border transition-colors">
+                                        <div :class="client[opt.key] ? ('bg-' + opt.color + '-100 text-' + opt.color + '-500') : 'bg-slate-100 text-slate-300'" class="p-1.5 rounded-lg flex-shrink-0">
+                                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 7h.01M7 3h5a1.99 1.99 0 011.414.586l7 7a2 2 0 010 2.828l-5 5a2 2 0 01-2.828 0l-7-7A1.99 1.99 0 013 7V4a1 1 0 011-1z" /></svg>
+                                        </div>
+                                        <div class="min-w-0">
+                                            <p :class="client[opt.key] ? ('text-' + opt.color + '-700') : 'text-slate-400'" class="text-xs font-medium leading-tight" x-text="opt.label"></p>
+                                            <p :class="client[opt.key] ? ('text-' + opt.color + '-600 font-semibold') : 'text-slate-400'" class="text-xs" x-text="client[opt.key] ? (client[opt.count] ? client[opt.count] + ' шт.' : 'Да') : 'Нет'"></p>
+                                        </div>
+                                    </div>
+                                </template>
                             </div>
+                            <!-- Филиалы — список НО, куда сдаются «филиальные» отчёты -->
+                            <template x-if="client.has_branches && client.branches && client.branches.length">
+                                <div class="rounded-xl border border-purple-200 bg-purple-50/40 p-3">
+                                    <div class="flex items-center gap-2 mb-2">
+                                        <svg class="w-4 h-4 text-purple-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 6h4" /></svg>
+                                        <span class="text-xs font-semibold text-purple-700">Филиалы — отчёты сдаются в несколько НО</span>
+                                    </div>
+                                    <div class="flex flex-wrap gap-2">
+                                        <span x-show="client.tax_office_code" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-white border border-purple-200 text-purple-700">
+                                            <span class="font-semibold" x-text="client.tax_office_code"></span>
+                                            <span class="text-purple-400">· основной</span>
+                                        </span>
+                                        <template x-for="(b, i) in client.branches" :key="i">
+                                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-white border border-purple-200 text-purple-700">
+                                                <span class="font-semibold" x-text="b.no_code"></span>
+                                                <span x-show="b.city" class="text-purple-400" x-text="'· ' + b.city"></span>
+                                            </span>
+                                        </template>
+                                    </div>
+                                </div>
+                            </template>
                             <!-- Режимы и особенности — чипы -->
                             <div class="flex flex-wrap gap-2 pt-1">
                                 <span :class="client.import_eaeu ? 'bg-teal-50 text-teal-700 border-teal-200' : 'bg-slate-50 text-slate-400 border-slate-200'" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border">
@@ -413,14 +446,7 @@
                                     <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="client.has_alcohol ? 'bg-rose-500' : 'bg-slate-300'"></span>
                                     Алкоголь / ГосАлко
                                 </span>
-                                <template x-for="opt in [
-                                    { key: 'has_insurance_policy', label: 'ИП страховой полис' },
-                                    { key: 'has_mbt', label: 'МБТ' },
-                                    { key: 'has_crypto_exchange', label: 'Криптообменник' },
-                                    { key: 'has_payment_aggregators', label: 'Платёжные агрегаторы' },
-                                    { key: 'has_production', label: 'Производство' },
-                                    { key: 'has_management_report', label: 'Управленческий отчёт' },
-                                ]" :key="opt.key">
+                                <template x-for="opt in otherFlags" :key="opt.key">
                                     <span :class="client[opt.key] ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-slate-50 text-slate-400 border-slate-200'" class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border">
                                         <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="client[opt.key] ? 'bg-indigo-500' : 'bg-slate-300'"></span>
                                         <span x-text="opt.label"></span>
@@ -520,6 +546,59 @@
                                                    class="block w-full px-2.5 py-1.5 bg-white border border-violet-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/20 focus:border-violet-400 placeholder-slate-400">
                                         </div>
                                     </div>
+                                    <!-- Дополнительные характеристики с количеством -->
+                                    <template x-for="opt in countFlags" :key="opt.key">
+                                        <div :class="form.flags[opt.key] ? ('bg-' + opt.color + '-50 border-' + opt.color + '-200') : 'bg-white border-slate-200'" class="p-3.5 rounded-xl border transition-all duration-150">
+                                            <div class="flex items-center justify-between gap-2">
+                                                <div class="flex items-center gap-2.5">
+                                                    <div :class="form.flags[opt.key] ? ('bg-' + opt.color + '-100 text-' + opt.color + '-500') : 'bg-slate-100 text-slate-400'" class="p-1.5 rounded-lg flex-shrink-0 transition-colors">
+                                                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5a1.99 1.99 0 011.414.586l7 7a2 2 0 010 2.828l-5 5a2 2 0 01-2.828 0l-7-7A1.99 1.99 0 013 7V4a1 1 0 011-1z" /></svg>
+                                                    </div>
+                                                    <span class="text-sm font-medium text-slate-700" x-text="opt.label"></span>
+                                                </div>
+                                                <button type="button" @click="form.flags[opt.key] = !form.flags[opt.key]; if(!form.flags[opt.key]) form.flags[opt.count] = null"
+                                                        :class="form.flags[opt.key] ? ('bg-' + opt.color + '-500') : 'bg-slate-200'"
+                                                        class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none">
+                                                    <span :class="form.flags[opt.key] ? 'translate-x-5' : 'translate-x-0'" class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+                                                </button>
+                                            </div>
+                                            <div x-show="form.flags[opt.key]" x-transition class="mt-2.5">
+                                                <input type="number" x-model.number="form.flags[opt.count]" min="0" max="9999" placeholder="Количество"
+                                                       :class="'block w-full px-2.5 py-1.5 bg-white border border-' + opt.color + '-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-' + opt.color + '-500/20 focus:border-' + opt.color + '-400 placeholder-slate-400'">
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+
+                            <!-- Филиалы -->
+                            <div>
+                                <div class="flex items-center justify-between mb-3">
+                                    <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Филиалы (сдача отчётов в разные НО)</p>
+                                    <button type="button"
+                                            @click="form.flags.has_branches = !form.flags.has_branches; if(form.flags.has_branches && form.flags.branches.length === 0) form.flags.branches.push({no_code: '', city: ''}); if(!form.flags.has_branches) form.flags.branches = []"
+                                            :class="form.flags.has_branches ? 'bg-purple-500' : 'bg-slate-200'"
+                                            class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none">
+                                        <span :class="form.flags.has_branches ? 'translate-x-5' : 'translate-x-0'" class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+                                    </button>
+                                </div>
+                                <div x-show="form.flags.has_branches" x-transition class="space-y-2">
+                                    <p class="text-xs text-slate-500">
+                                        Основной НО: <span class="font-medium text-slate-700" x-text="client.tax_office_code || '— не указан'"></span>.
+                                        Добавьте НО филиалов — отчёты «по филиалам» (НСП, 161 форма) сдаются в каждый из них.
+                                    </p>
+                                    <template x-for="(b, i) in form.flags.branches" :key="i">
+                                        <div class="flex items-center gap-2">
+                                            <input type="text" x-model="b.no_code" placeholder="Код НО (напр. 032)" class="w-40 px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-400">
+                                            <input type="text" x-model="b.city" placeholder="Город / название филиала" class="flex-1 min-w-0 px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-400">
+                                            <button type="button" @click="form.flags.branches.splice(i, 1)" class="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors flex-shrink-0">
+                                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                                            </button>
+                                        </div>
+                                    </template>
+                                    <button type="button" @click="form.flags.branches.push({no_code: '', city: ''})" class="w-full py-2 border-2 border-dashed border-slate-200 rounded-lg text-xs text-slate-500 hover:border-purple-300 hover:text-purple-600 transition-colors">
+                                        + Добавить филиал
+                                    </button>
                                 </div>
                             </div>
 
@@ -608,14 +687,7 @@
                             <div>
                                 <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Прочие условия</p>
                                 <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                                    <template x-for="opt in [
-                                        { key: 'has_insurance_policy', label: 'ИП страховой полис' },
-                                        { key: 'has_mbt', label: 'МБТ' },
-                                        { key: 'has_crypto_exchange', label: 'Криптообменник' },
-                                        { key: 'has_payment_aggregators', label: 'Платёжные агрегаторы' },
-                                        { key: 'has_production', label: 'Производство' },
-                                        { key: 'has_management_report', label: 'Управленческий отчёт' },
-                                    ]" :key="opt.key">
+                                    <template x-for="opt in otherFlags" :key="opt.key">
                                         <div :class="form.flags[opt.key] ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-slate-200'" class="p-3 rounded-xl border transition-all duration-150 cursor-pointer select-none" @click="form.flags[opt.key] = !form.flags[opt.key]">
                                             <div class="flex items-center justify-between mb-1.5">
                                                 <div :class="form.flags[opt.key] ? 'bg-indigo-100 text-indigo-500' : 'bg-slate-100 text-slate-400'" class="p-1.5 rounded-lg transition-colors">
@@ -1707,6 +1779,31 @@ function clientShow() {
         clientStatuses: @json(\App\Models\ClientStatus::orderBy('sort_order')->orderBy('name')->get()),
         clientDocuments: @json($client->documents ?? []),
 
+        // Характеристики бизнеса с количеством (карточка-тоггл + поле числа)
+        countFlags: [
+            { key: 'has_fixed_assets', count: 'fixed_assets_count', label: 'ОС', color: 'blue' },
+            { key: 'has_fuel', count: 'fuel_count', label: 'Учёт ГСМ', color: 'yellow' },
+            { key: 'has_loans', count: 'loans_count', label: 'Кредиты / депозиты', color: 'green' },
+        ],
+        // Прочие условия — переключатели (чип в просмотре, карточка в редактировании)
+        otherFlags: [
+            { key: 'has_insurance_policy', label: 'ИП страховой полис' },
+            { key: 'has_mbt', label: 'МБТ' },
+            { key: 'has_crypto_exchange', label: 'Криптообменник' },
+            { key: 'has_payment_aggregators', label: 'Платёжные агрегаторы' },
+            { key: 'has_production', label: 'Производство' },
+            { key: 'has_management_report', label: 'Управленческий отчёт' },
+            { key: 'has_excise', label: 'Акциз / ЭТТН' },
+            { key: 'has_nonresident_services', label: 'Нерезиденты ДИО / эл.услуги' },
+            { key: 'has_property', label: 'Имущество / транспорт / земля' },
+            { key: 'has_bank_client', label: 'Банк-клиент (платёжки)' },
+            { key: 'has_separate_books', label: 'Раздельные базы УУ/ТК/НУ/УТ' },
+            { key: 'has_nonstandard_contracts', label: 'Нестандартные договоры' },
+            { key: 'has_foreign_trade', label: 'Внешнеторговая деятельность' },
+            { key: 'has_vat_refund', label: 'Возмещение НДС' },
+            { key: 'has_special_reporting', label: 'Спец. отчётность' },
+        ],
+
         showPasswords: false,
         uploadDragging: false,
         uploadingDocs: false,
@@ -1798,6 +1895,23 @@ function clientShow() {
                 has_payment_aggregators: this.client.has_payment_aggregators || false,
                 has_production: this.client.has_production || false,
                 has_management_report: this.client.has_management_report || false,
+                has_fixed_assets: this.client.has_fixed_assets || false,
+                fixed_assets_count: this.client.fixed_assets_count ?? null,
+                has_fuel: this.client.has_fuel || false,
+                fuel_count: this.client.fuel_count ?? null,
+                has_loans: this.client.has_loans || false,
+                loans_count: this.client.loans_count ?? null,
+                has_branches: this.client.has_branches || false,
+                branches: JSON.parse(JSON.stringify(this.client.branches || [])),
+                has_excise: this.client.has_excise || false,
+                has_nonresident_services: this.client.has_nonresident_services || false,
+                has_property: this.client.has_property || false,
+                has_bank_client: this.client.has_bank_client || false,
+                has_separate_books: this.client.has_separate_books || false,
+                has_nonstandard_contracts: this.client.has_nonstandard_contracts || false,
+                has_foreign_trade: this.client.has_foreign_trade || false,
+                has_vat_refund: this.client.has_vat_refund || false,
+                has_special_reporting: this.client.has_special_reporting || false,
                 edo_operator: this.client.edo_operator || '',
             };
             this.form.contacts_info = {
@@ -1865,6 +1979,12 @@ function clientShow() {
         async saveSection(section) {
             this.saving[section] = true;
 
+            // Отбрасываем пустые строки филиалов (без кода НО), чтобы не падала валидация
+            const payload = { section, ...this.form[section] };
+            if (section === 'flags' && Array.isArray(payload.branches)) {
+                payload.branches = payload.branches.filter(b => b.no_code && String(b.no_code).trim());
+            }
+
             try {
                 const response = await fetch(`/clients/${this.client.id}`, {
                     method: 'PATCH',
@@ -1873,10 +1993,7 @@ function clientShow() {
                         'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
                         'Accept': 'application/json',
                     },
-                    body: JSON.stringify({
-                        section: section,
-                        ...this.form[section],
-                    }),
+                    body: JSON.stringify(payload),
                 });
 
                 const data = await response.json();
