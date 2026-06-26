@@ -78,7 +78,8 @@ class GenerateTaskRemindersTest extends TestCase
 
     private function generate(): void
     {
-        $this->artisan('tasks:generate', ['--date' => '2026-06-05', '--horizon' => 120])
+        // lookback=0 — эти кейсы проверяют генерацию вперёд и прунинг; бэкфилл прошлого тестируется отдельно
+        $this->artisan('tasks:generate', ['--date' => '2026-06-05', '--horizon' => 120, '--lookback' => 0])
             ->assertSuccessful();
     }
 
@@ -148,6 +149,17 @@ class GenerateTaskRemindersTest extends TestCase
         $this->assertDatabaseHas('task_reminders', ['id' => $done->id, 'status' => 'done']);
         $this->assertSame(0, $this->mine()->where('status', TaskReminder::STATUS_PENDING)->count());
         $this->assertSame(1, $this->mine()->count());
+    }
+
+    public function test_backfills_past_overdue_within_lookback(): void
+    {
+        // База 2026-06-05, назад 180 дн (≈ 2025-12-07), вперёд 30 дн (до 2026-07-05)
+        $this->artisan('tasks:generate', ['--date' => '2026-06-05', '--horizon' => 30, '--lookback' => 180])
+            ->assertSuccessful();
+
+        // Ежеквартально 20-го: прошлые 2025-12-20 и 2026-03-20 (просрочка) + ближайшее 2026-06-20
+        $this->assertSame(['2025-12-20', '2026-03-20', '2026-06-20'], $this->myDates());
+        $this->assertSame(TaskReminder::STATUS_PENDING, $this->mine()->first()->status);
     }
 
     public function test_skips_inactive_employee(): void

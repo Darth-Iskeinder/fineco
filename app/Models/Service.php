@@ -239,10 +239,15 @@ class Service extends Model
         }
 
         $dates = [];
-        $add = function (int $year, int $month, int $day) use (&$dates, $from, $to) {
+        // Длина месяца кэшируется на время запроса: у разных клиентов/позиций
+        // повторяются одни и те же (год, месяц), Carbon тут дорогой.
+        static $daysInMonthCache = [];
+        $add = function (int $year, int $month, int $day) use (&$dates, $from, $to, &$daysInMonthCache) {
             // Зажимаем число под длину месяца: 31 в феврале → 28/29
-            $day = max(1, min($day, CarbonImmutable::create($year, $month, 1)->daysInMonth));
-            $d = CarbonImmutable::create($year, $month, $day)->startOfDay();
+            $mkey = $year * 100 + $month;
+            $dim = $daysInMonthCache[$mkey] ??= (int) CarbonImmutable::create($year, $month, 1)->daysInMonth;
+            $day = max(1, min($day, $dim));
+            $d = CarbonImmutable::create($year, $month, $day, 0, 0, 0);
             if ($d->gte($from) && $d->lte($to)) {
                 $dates[$d->toDateString()] = $d;
             }
@@ -254,8 +259,11 @@ class Service extends Model
                 if ($day === null) {
                     break;
                 }
-                for ($c = $from->startOfMonth(); $c->lte($to); $c = $c->addMonth()) {
-                    $add($c->year, $c->month, (int) $day);
+                // Идём по месяцам целочисленно, без создания Carbon на каждый шаг.
+                $start = $from->year * 12 + ($from->month - 1);
+                $end   = $to->year * 12 + ($to->month - 1);
+                for ($idx = $start; $idx <= $end; $idx++) {
+                    $add(intdiv($idx, 12), $idx % 12 + 1, (int) $day);
                 }
                 break;
 
@@ -276,10 +284,12 @@ class Service extends Model
                 if (empty($days)) {
                     break;
                 }
-                $wanted = array_map('intval', $days); // 1=Пн … 7=Вс (ISO)
-                for ($c = $from; $c->lte($to); $c = $c->addDay()) {
-                    if (in_array($c->dayOfWeekIso, $wanted, true)) {
-                        $dates[$c->toDateString()] = $c->startOfDay();
+                // Для каждого нужного дня недели прыгаем шагом в 7 дней от первого
+                // вхождения — без посуточного сканирования всего диапазона.
+                foreach (array_map('intval', $days) as $wd) { // 1=Пн … 7=Вс (ISO)
+                    $offset = (($wd - $from->dayOfWeekIso) % 7 + 7) % 7;
+                    for ($c = $from->addDays($offset); $c->lte($to); $c = $c->addDays(7)) {
+                        $dates[$c->toDateString()] = $c;
                     }
                 }
                 break;

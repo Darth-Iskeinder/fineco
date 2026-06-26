@@ -18,14 +18,15 @@ use Illuminate\Console\Command;
  *  - только реальные обязательства: БП должен быть включён в смету клиента, у клиента есть
  *    ответственный активный сотрудник, и у БП вычислимое расписание (иначе пропускаем);
  *  - учитывает индивидуальный срок клиента (ClientServiceSchedule) через dueDatesForClient;
- *  - ограниченный горизонт;
- *  - прунинг: будущие НЕвыполненные напоминания в окне, которые больше не подкреплены
+ *  - ограниченное окно: назад на --lookback (бэкфилл просрочки) и вперёд на --horizon;
+ *  - прунинг: НЕвыполненные напоминания в окне, которые больше не подкреплены
  *    активным БП (убрали из сметы / сменили расписание), удаляются. Выполненные — никогда.
  */
 class GenerateTaskReminders extends Command
 {
     protected $signature = 'tasks:generate
                             {--horizon=45 : На сколько дней вперёд генерировать}
+                            {--lookback=190 : На сколько дней назад бэкфиллить просрочку (с запасом покрывает 6 месяцев; показ ограничен 6 мес на странице)}
                             {--date= : База расчёта (YYYY-MM-DD), по умолчанию сегодня}';
 
     protected $description = 'Сгенерировать напоминания о сроках выполнения БП для ответственных сотрудников';
@@ -35,10 +36,13 @@ class GenerateTaskReminders extends Command
         $today = $this->option('date')
             ? CarbonImmutable::parse($this->option('date'))->startOfDay()
             : CarbonImmutable::now()->startOfDay();
-        $horizon = max(1, (int) $this->option('horizon'));
-        $to = $today->addDays($horizon);
+        $horizon  = max(1, (int) $this->option('horizon'));
+        $lookback = max(0, (int) $this->option('lookback'));
+        // Окно материализации: назад на $lookback (бэкфилл просрочки) и вперёд на $horizon.
+        $from = $today->subDays($lookback);
+        $to   = $today->addDays($horizon);
 
-        $this->info("Генерация напоминаний: {$today->toDateString()} .. {$to->toDateString()} (горизонт {$horizon} дн.)");
+        $this->info("Генерация напоминаний: {$from->toDateString()} .. {$to->toDateString()} (назад {$lookback} дн., вперёд {$horizon} дн.)");
 
         $clients = Client::query()
             ->whereNotNull('responsible_employee_id')
@@ -84,7 +88,7 @@ class GenerateTaskReminders extends Command
                 }
 
                 $override = $overrides->get($item->service_id);
-                $dates = $service->dueDatesForClient($override, $today, $to);
+                $dates = $service->dueDatesForClient($override, $from, $to);
                 if (empty($dates)) {
                     continue; // нет расписания → не плодим пустые задачи
                 }
@@ -111,12 +115,13 @@ class GenerateTaskReminders extends Command
                 }
             }
 
-            // Прунинг: будущие pending-напоминания в окне, потерявшие активный БП
+            // Прунинг: pending-напоминания в окне [$from, $to], потерявшие активный БП
+            // (убрали из сметы / сменили расписание). Выполненные не трогаем.
             $stale = TaskReminder::query()
                 ->where('employee_id', $employee->id)
                 ->where('client_id', $client->id)
                 ->where('status', TaskReminder::STATUS_PENDING)
-                ->whereBetween('due_date', [$today->toDateString(), $to->toDateString()])
+                ->whereBetween('due_date', [$from->toDateString(), $to->toDateString()])
                 ->get()
                 ->filter(fn ($r) => !isset($activeKeys["{$r->service_id}|{$r->due_date->toDateString()}"]));
 

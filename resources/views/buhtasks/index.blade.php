@@ -5,60 +5,44 @@
 
 @section('content')
 
-{{-- Сроки по клиентам: агенда (воркер) + календарь (живая проекция расписаний) --}}
-<div x-data="taskReminders({{ json_encode($reminders) }}, {{ json_encode($schedule) }})" x-cloak class="mb-6">
-    <template x-if="items.length > 0 || schedule.length > 0">
+{{-- Сроки по клиентам: агенда по срочности (выход воркера напоминаний) --}}
+<div x-data="taskReminders({{ json_encode($reminders) }})" x-cloak class="mb-6">
+    <template x-if="items.length > 0">
         <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
-            <div class="px-6 py-4 border-b border-slate-100 flex items-center gap-3 flex-wrap">
+            {{-- Компактная шапка: всегда видна, по клику раскрывает список --}}
+            <button type="button" @click="toggle()"
+                    class="w-full px-5 py-3 flex items-center gap-2.5 text-left hover:bg-slate-50/60 transition-colors">
                 <svg class="w-5 h-5 text-indigo-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
-                <h2 class="text-base font-bold text-slate-900">Сроки по клиентам</h2>
-                <span class="text-xs text-slate-400" x-show="viewMode === 'list'" x-text="filteredItems.length + ' ' + plural(filteredItems.length, 'срок', 'срока', 'сроков')"></span>
+                <h2 class="text-sm font-bold text-slate-900 flex-shrink-0">Сроки по клиентам</h2>
 
-                <div class="ml-auto flex items-center gap-2 flex-wrap">
-                    {{-- Переключатель Список / Календарь --}}
-                    <div class="flex items-center bg-slate-100 rounded-lg p-0.5">
-                        <button type="button" @click="viewMode = 'list'"
-                                :class="viewMode === 'list' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'"
-                                class="px-3 py-1.5 rounded-md text-xs font-medium transition-all">Список</button>
-                        <button type="button" @click="viewMode = 'calendar'"
-                                :class="viewMode === 'calendar' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'"
-                                class="px-3 py-1.5 rounded-md text-xs font-medium transition-all">Календарь</button>
-                    </div>
-
-                    {{-- Фильтр по компаниям --}}
-                    <div class="flex items-center gap-2" x-show="clientOptions.length > 1">
-                        <svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L14 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 018 21v-7.586L3.293 6.707A1 1 0 013 6V4z"/></svg>
-                        <select x-model="clientFilter"
-                                class="px-3 py-1.5 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                            <option value="all" x-text="'Все компании (' + currentTotal + ')'"></option>
-                            <template x-for="c in clientOptions" :key="c.id">
-                                <option :value="String(c.id)" x-text="c.name + ' (' + c.count + ')'"></option>
-                            </template>
-                        </select>
-                    </div>
+                {{-- Счётчики по срочности (показываем только ненулевые) --}}
+                <div class="flex items-center gap-1.5 flex-wrap">
+                    <span x-show="counts.overdue > 0" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700" x-text="'Просрочено ' + counts.overdue"></span>
+                    <span x-show="counts.today > 0" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-orange-100 text-orange-700" x-text="'Сегодня ' + counts.today"></span>
                 </div>
-            </div>
 
-            {{-- ===== РЕЖИМ СПИСОК (агенда по срочности) ===== --}}
-            <div x-show="viewMode === 'list'">
-                <template x-if="filteredItems.length === 0">
-                    <div class="px-6 py-8 text-center text-sm text-slate-400">Нет активных сроков по выбранной компании.</div>
-                </template>
+                <span class="ml-auto flex items-center gap-1.5 text-xs text-slate-400 flex-shrink-0">
+                    <span x-text="open ? 'скрыть' : 'показать'"></span>
+                    <svg class="w-4 h-4 transition-transform" :class="open ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                </span>
+            </button>
 
-                <div class="divide-y divide-slate-100">
+            {{-- Раскрывающийся список: агенда по срочности, с ограничением высоты --}}
+            <div x-show="open"
+                 x-transition:enter="transition ease-out duration-150"
+                 x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+                 class="border-t border-slate-100">
+                <div class="max-h-[22rem] overflow-y-auto divide-y divide-slate-100">
                     <template x-for="group in groups" :key="group.key">
                         <template x-if="group.items.length > 0">
                             <div>
-                                <button type="button" @click="group.key === 'later' ? (showLater = !showLater) : null"
-                                        class="w-full px-6 py-2 text-xs font-semibold uppercase tracking-wider flex items-center gap-2"
-                                        :class="[group.headClass, group.key === 'later' ? 'cursor-pointer hover:brightness-95' : 'cursor-default']">
+                                <div class="px-6 py-2 text-xs font-semibold uppercase tracking-wider flex items-center gap-2" :class="group.headClass">
                                     <span x-text="group.label"></span>
                                     <span class="opacity-70" x-text="'(' + group.items.length + ')'"></span>
-                                    <svg x-show="group.key === 'later'" class="w-3.5 h-3.5 ml-auto transition-transform" :class="showLater ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
-                                </button>
+                                </div>
 
-                                <div x-show="group.key !== 'later' || showLater" class="divide-y divide-slate-50">
-                                    <template x-for="r in group.items" :key="r.id">
+                                <div class="divide-y divide-slate-50">
+                                    <template x-for="(r, i) in group.items" :key="group.key + '|' + i">
                                         <div class="flex items-center gap-3 px-6 py-3" :class="group.rowClass">
                                             <div class="flex-1 min-w-0">
                                                 <p class="text-sm font-medium text-slate-800 truncate" x-text="r.name" :title="r.name"></p>
@@ -68,12 +52,6 @@
                                                 <p class="text-sm font-semibold" :class="group.dateClass" x-text="fmtDate(r.due_date)"></p>
                                                 <p class="text-xs" :class="group.dateClass" x-text="relLabel(r)"></p>
                                             </div>
-                                            <button type="button" @click="complete(r)" :disabled="r.loading"
-                                                    title="Отметить выполненным"
-                                                    class="flex-shrink-0 w-9 h-9 inline-flex items-center justify-center rounded-full border border-slate-200 text-slate-300 hover:border-emerald-400 hover:text-emerald-500 disabled:opacity-50 transition-colors">
-                                                <svg x-show="!r.loading" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                                                <svg x-show="r.loading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                                            </button>
                                         </div>
                                     </template>
                                 </div>
@@ -83,107 +61,11 @@
                 </div>
             </div>
 
-            {{-- ===== РЕЖИМ КАЛЕНДАРЬ (живая проекция, любой месяц) ===== --}}
-            <div x-show="viewMode === 'calendar'" class="p-4 sm:p-6">
-                <div class="flex items-center justify-center gap-4 mb-4">
-                    <button type="button" @click="prevMonth()" :disabled="!canPrev"
-                            class="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
-                        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
-                    </button>
-                    <span class="text-sm font-semibold text-slate-800 w-40 text-center" x-text="monthLabel"></span>
-                    <button type="button" @click="nextMonth()" :disabled="!canNext"
-                            class="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors">
-                        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                    </button>
-                </div>
-
-                <div class="grid grid-cols-7 gap-1 mb-1">
-                    <template x-for="w in ['Пн','Вт','Ср','Чт','Пт','Сб','Вс']" :key="w">
-                        <div class="text-center text-xs font-medium text-slate-400 py-1" x-text="w"></div>
-                    </template>
-                </div>
-
-                <div class="grid grid-cols-7 gap-1">
-                    <template x-for="(cell, i) in monthCells" :key="i">
-                        <div>
-                            <template x-if="cell.day">
-                                <button type="button" @click="cell.count ? selectDay(cell.date) : null"
-                                        class="relative w-full min-h-[84px] rounded-lg border p-1.5 flex flex-col gap-1 text-left overflow-hidden transition-colors"
-                                        :class="[
-                                            cell.count ? 'cursor-pointer hover:border-indigo-300 hover:shadow-sm' : 'cursor-default',
-                                            selectedDay === cell.date ? 'ring-2 ring-indigo-400 border-indigo-200' : 'border-slate-100',
-                                            isToday(cell.date) ? 'bg-indigo-50/60' : 'bg-white'
-                                        ]">
-                                    <span class="text-xs font-semibold leading-none"
-                                          :class="isToday(cell.date) ? 'text-indigo-600' : 'text-slate-500'"
-                                          x-text="cell.day"></span>
-                                    <div class="flex flex-col gap-0.5 w-full">
-                                        <template x-for="(e, ei) in cell.entries.slice(0, 2)" :key="ei">
-                                            <span class="block w-full truncate rounded-sm bg-slate-50 border-l-2 pl-1 pr-0.5 py-0.5 text-[10px] leading-tight text-slate-700"
-                                                  :class="barClass(cell.date)"
-                                                  :title="e.name + ' · ' + e.client_name"
-                                                  x-text="e.name"></span>
-                                        </template>
-                                        <template x-if="cell.count > 2">
-                                            <span class="pl-1 text-[10px] font-medium text-slate-400" x-text="'+' + (cell.count - 2) + ' ещё'"></span>
-                                        </template>
-                                    </div>
-                                </button>
-                            </template>
-                            <template x-if="!cell.day"><div class="min-h-[84px]"></div></template>
-                        </div>
-                    </template>
-                </div>
-
-                <template x-if="selectedDay && selectedEntries.length">
-                    <div class="mt-4 border-t border-slate-100 pt-3">
-                        <div class="flex items-center gap-2 mb-2">
-                            <p class="text-sm font-semibold text-slate-700" x-text="fmtFull(selectedDay)"></p>
-                            <span class="text-xs text-slate-400" x-text="'· ' + selectedEntries.length + ' ' + plural(selectedEntries.length, 'задача', 'задачи', 'задач')"></span>
-                        </div>
-                        <div class="space-y-1.5">
-                            <template x-for="(e, i) in selectedEntries" :key="i">
-                                <div class="flex items-center gap-2 text-sm">
-                                    <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="dotClass(selectedDay)"></span>
-                                    <span class="font-medium text-slate-800 truncate" x-text="e.name"></span>
-                                    <span class="text-slate-300">·</span>
-                                    <span class="text-slate-500 truncate" x-text="e.client_name"></span>
-                                </div>
-                            </template>
-                        </div>
-                    </div>
-                </template>
-
-                <template x-if="filteredSchedule.length === 0">
-                    <p class="mt-4 text-center text-sm text-slate-400">Нет запланированных сроков по выбранной компании.</p>
-                </template>
-            </div>
         </div>
     </template>
 </div>
 
 <div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($services) }}, {{ json_encode($completed) }}, {{ json_encode($employees) }}, {{ $employee->id }})" x-cloak>
-
-    {{-- Баннер срочных задач --}}
-    <template x-if="urgentSummary.overdue.length > 0 || urgentSummary.today.length > 0 || urgentSummary.soon.length > 0">
-        <div class="mb-4 rounded-2xl border px-4 py-3 flex flex-wrap items-center gap-x-5 gap-y-1"
-             :class="urgentSummary.overdue.length > 0 ? 'bg-red-50 border-red-200' : (urgentSummary.today.length > 0 ? 'bg-orange-50 border-orange-200' : 'bg-amber-50 border-amber-200')">
-            <svg class="w-5 h-5 flex-shrink-0"
-                 :class="urgentSummary.overdue.length > 0 ? 'text-red-500' : 'text-amber-500'"
-                 fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
-            </svg>
-            <span x-show="urgentSummary.overdue.length > 0"
-                  class="text-sm font-semibold text-red-700"
-                  x-text="'Просрочено: ' + urgentSummary.overdue.length + ' ' + plural(urgentSummary.overdue.length, 'задача', 'задачи', 'задач')"></span>
-            <span x-show="urgentSummary.today.length > 0"
-                  class="text-sm font-semibold text-orange-700"
-                  x-text="'Сегодня истекает: ' + urgentSummary.today.length + ' ' + plural(urgentSummary.today.length, 'задача', 'задачи', 'задач')"></span>
-            <span x-show="urgentSummary.soon.length > 0"
-                  class="text-sm text-amber-700"
-                  x-text="'Скоро истекает: ' + urgentSummary.soon.length + ' ' + plural(urgentSummary.soon.length, 'задача', 'задачи', 'задач')"></span>
-        </div>
-    </template>
 
     {{-- Шапка --}}
     <div class="flex items-center justify-between mb-2">
@@ -1496,16 +1378,6 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
             return null;
         },
 
-        get urgentSummary() {
-            const pending = this.tasks.filter(t => t.status !== 'completed' && t.status !== 'review' && t.due_date);
-            const diff = (t) => this.dueDiffDays(t);
-            return {
-                overdue: pending.filter(t => diff(t) < 0),
-                today:   pending.filter(t => diff(t) === 0),
-                soon:    pending.filter(t => { const d = diff(t); return d > 0 && d <= 3; }),
-            };
-        },
-
         // Срок задачи полной датой: «3.06.2026»
         fmtDue(dateStr) {
             if (!dateStr) return '';
@@ -1520,15 +1392,6 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
             const hh = String(d.getHours()).padStart(2, '0');
             const mm = String(d.getMinutes()).padStart(2, '0');
             return d.getDate() + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + d.getFullYear() + ', ' + hh + ':' + mm;
-        },
-
-        plural(n, one, few, many) {
-            const mod10  = n % 10;
-            const mod100 = n % 100;
-            if (mod100 >= 11 && mod100 <= 19) return many;
-            if (mod10 === 1) return one;
-            if (mod10 >= 2 && mod10 <= 4) return few;
-            return many;
         },
 
         init() {
@@ -1700,45 +1563,6 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
             else this.tasks[idx] = { ...this.tasks[idx], loading: false };
         },
 
-        async toggleChecklist(idx) {
-            const task = this.tasks[idx];
-            if (task.loading || task.status === 'review') return;
-            if (task.status === 'completed') {
-                await this.resetTask(idx);
-            } else {
-                // Задачу с подпунктами нельзя закрыть, пока не отмечены все чекбоксы
-                if (!this.allChildrenDone(task)) {
-                    this.checklistRequiredModal = { show: true, taskIdx: idx };
-                    return;
-                }
-
-                this.tasks[idx] = { ...this.tasks[idx], loading: true };
-
-                if (task.type === 'planned') {
-                    const logId = await this.ensureLog(idx);
-                    if (!logId) { this.tasks[idx] = { ...this.tasks[idx], loading: false }; return; }
-                    if (this.tasks[idx].status === 'pending') {
-                        await this.post(`/buhtasks/logs/${logId}/start`);
-                    }
-                    const data = await this.post(`/buhtasks/logs/${logId}/complete`);
-                    if (data.success) {
-                        this.applyResult(idx, data.log);
-                    } else {
-                        this.tasks[idx] = { ...this.tasks[idx], loading: false };
-                        if (data.requires_document) this.docRequiredModal = { show: true, taskIdx: idx };
-                        if (data.requires_checklist) this.checklistRequiredModal = { show: true, taskIdx: idx };
-                    }
-                } else {
-                    if (this.tasks[idx].status === 'pending') {
-                        await this.post(this.actionUrl(this.tasks[idx], 'start'));
-                    }
-                    const data = await this.post(this.actionUrl(this.tasks[idx], 'complete'));
-                    if (data.success) this.applyResult(idx, data.log);
-                    else this.tasks[idx] = { ...this.tasks[idx], loading: false };
-                }
-            }
-        },
-
         onServiceChange() {
             if (!this.newTask.service_id) { this.newTask.cost = ''; return; }
             const id = parseInt(this.newTask.service_id);
@@ -1811,22 +1635,25 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
     };
 }
 
-// Агенда сроков по клиентам — группировка по срочности + отметка «выполнено»
-function taskReminders(initial, schedule) {
+// «Сроки по клиентам» — уведомление (только чтение): срез просроченных/сегодняшних задач.
+// Источник тот же, что и у таблицы; завершать отсюда нельзя — задачу закрывают в таблице.
+function taskReminders(initial) {
     return {
-        items: (initial || []).map(r => ({ ...r, loading: false })),
-        schedule: schedule || [],          // живая проекция: [{date, name, client_id, client_name}]
-        viewMode: 'list',                  // list (агенда) | calendar
-        showLater: false,
-        clientFilter: 'all',
-        calYear: null,
-        calMonth: null,                    // 1–12
-        selectedDay: null,                 // 'YYYY-MM-DD'
+        items: initial || [],
+        open: false,
 
         init() {
-            const n = new Date();
-            this.calYear = n.getFullYear();
-            this.calMonth = n.getMonth() + 1;
+            // Интуитивно: если есть срочное (просрочено/сегодня) — раскрываем,
+            // иначе сворачиваем, чтобы таблица была сразу на виду.
+            // Ручной выбор пользователя запоминаем и уважаем при следующих заходах.
+            const saved = localStorage.getItem('buhReminders.open');
+            this.open = saved === null
+                ? (this.counts.overdue > 0 || this.counts.today > 0)
+                : saved === '1';
+        },
+        toggle() {
+            this.open = !this.open;
+            localStorage.setItem('buhReminders.open', this.open ? '1' : '0');
         },
 
         today() { const d = new Date(); d.setHours(0, 0, 0, 0); return d; },
@@ -1835,38 +1662,24 @@ function taskReminders(initial, schedule) {
             return Math.round((due - this.today()) / 86400000);
         },
 
-        // Текущий набор данных зависит от режима (агенда=items, календарь=schedule)
-        get currentDataset() { return this.viewMode === 'calendar' ? this.schedule : this.items; },
-        get currentTotal() { return this.currentDataset.length; },
-
-        // Список компаний для фильтра (с количеством по текущему режиму)
-        get clientOptions() {
-            const map = {};
-            this.currentDataset.forEach(r => {
-                const k = r.client_id ?? r.client_name;
-                if (!map[k]) map[k] = { id: r.client_id, name: r.client_name, count: 0 };
-                map[k].count++;
+        // Счётчики для компактной шапки: только просрочено и сегодня
+        get counts() {
+            let overdue = 0, today = 0;
+            this.items.forEach(r => {
+                const d = this.daysUntil(r);
+                if (d < 0) overdue++;
+                else if (d === 0) today++;
             });
-            return Object.values(map).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+            return { overdue, today };
         },
-
-        matchesClient(r) {
-            return this.clientFilter === 'all' || String(r.client_id) === String(this.clientFilter);
-        },
-        get filteredItems() { return this.items.filter(r => this.matchesClient(r)); },
-        get filteredSchedule() { return this.schedule.filter(r => this.matchesClient(r)); },
 
         get groups() {
-            const make = (key, label, filter, cls) => ({ key, label, items: this.filteredItems.filter(filter), ...cls });
+            const make = (key, label, filter, cls) => ({ key, label, items: this.items.filter(filter), ...cls });
             return [
                 make('overdue', 'Просрочено', r => this.daysUntil(r) < 0,
                     { headClass: 'text-red-600 bg-red-50', rowClass: 'bg-red-50/30', dateClass: 'text-red-600' }),
                 make('today', 'Сегодня', r => this.daysUntil(r) === 0,
                     { headClass: 'text-orange-600 bg-orange-50', rowClass: 'bg-orange-50/20', dateClass: 'text-orange-600' }),
-                make('week', 'На этой неделе', r => { const d = this.daysUntil(r); return d > 0 && d <= 7; },
-                    { headClass: 'text-amber-600 bg-amber-50', rowClass: '', dateClass: 'text-amber-600' }),
-                make('later', 'Позже', r => this.daysUntil(r) > 7,
-                    { headClass: 'text-slate-500 bg-slate-50', rowClass: '', dateClass: 'text-slate-500' }),
             ];
         },
 
@@ -1887,114 +1700,6 @@ function taskReminders(initial, schedule) {
             if (m10 === 1 && m100 !== 11) return one;
             if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
             return many;
-        },
-
-        // ===== Календарь =====
-        get monthLabel() {
-            const names = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
-            return names[this.calMonth - 1] + ' ' + this.calYear;
-        },
-        pad(n) { return String(n).padStart(2, '0'); },
-        get monthCells() {
-            const first = new Date(this.calYear, this.calMonth - 1, 1);
-            const lead = (first.getDay() + 6) % 7;               // Пн=0
-            const dim = new Date(this.calYear, this.calMonth, 0).getDate();
-            const byDate = {};
-            this.filteredSchedule.forEach(s => { (byDate[s.date] = byDate[s.date] || []).push(s); });
-            const cells = [];
-            for (let i = 0; i < lead; i++) cells.push({ day: null, date: null, count: 0, entries: [] });
-            for (let d = 1; d <= dim; d++) {
-                const date = this.calYear + '-' + this.pad(this.calMonth) + '-' + this.pad(d);
-                const entries = byDate[date] || [];
-                cells.push({ day: d, date, count: entries.length, entries });
-            }
-            return cells;
-        },
-        isToday(date) {
-            const n = new Date();
-            return date === (n.getFullYear() + '-' + this.pad(n.getMonth() + 1) + '-' + this.pad(n.getDate()));
-        },
-        // Срочность дня (для цветовой кодировки) — все записи одной даты одинаковой срочности
-        daysUntilDate(date) {
-            const due = new Date(date + 'T00:00:00');
-            return Math.round((due - this.today()) / 86400000);
-        },
-        urgencyOf(date) {
-            const d = this.daysUntilDate(date);
-            if (d < 0) return 'overdue';
-            if (d === 0) return 'today';
-            if (d <= 7) return 'soon';
-            return 'later';
-        },
-        barClass(date) {
-            return {
-                overdue: 'border-l-red-400',
-                today:   'border-l-orange-400',
-                soon:    'border-l-amber-300',
-                later:   'border-l-slate-300',
-            }[this.urgencyOf(date)];
-        },
-        dotClass(date) {
-            return {
-                overdue: 'bg-red-400',
-                today:   'bg-orange-400',
-                soon:    'bg-amber-300',
-                later:   'bg-slate-300',
-            }[this.urgencyOf(date)];
-        },
-        selectDay(date) { this.selectedDay = this.selectedDay === date ? null : date; },
-        get selectedEntries() {
-            return this.selectedDay ? this.filteredSchedule.filter(s => s.date === this.selectedDay) : [];
-        },
-        fmtFull(s) {
-            const [y, m, d] = s.split('-');
-            const months = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
-            return parseInt(d) + ' ' + months[parseInt(m) - 1] + ' ' + y;
-        },
-        get _monthIdx() { return this.calYear * 12 + this.calMonth; },
-        get _bounds() {
-            if (this.schedule.length === 0) return { min: this._monthIdx, max: this._monthIdx };
-            let min = Infinity, max = -Infinity;
-            this.schedule.forEach(s => {
-                const [y, m] = s.date.split('-');
-                const idx = (+y) * 12 + (+m);
-                if (idx < min) min = idx;
-                if (idx > max) max = idx;
-            });
-            return { min, max };
-        },
-        get canPrev() { return this._monthIdx > this._bounds.min; },
-        get canNext() { return this._monthIdx < this._bounds.max; },
-        prevMonth() {
-            if (!this.canPrev) return;
-            if (this.calMonth === 1) { this.calMonth = 12; this.calYear--; } else this.calMonth--;
-            this.selectedDay = null;
-        },
-        nextMonth() {
-            if (!this.canNext) return;
-            if (this.calMonth === 12) { this.calMonth = 1; this.calYear++; } else this.calMonth++;
-            this.selectedDay = null;
-        },
-
-        async complete(r) {
-            r.loading = true;
-            try {
-                const res = await fetch('/buhtasks/reminders/' + r.id + '/complete', {
-                    method: 'POST',
-                    headers: {
-                        'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]').content,
-                        'Accept': 'application/json',
-                    },
-                });
-                const data = await res.json();
-                if (data.success) {
-                    this.items = this.items.filter(x => x.id !== r.id);
-                } else {
-                    r.loading = false;
-                }
-            } catch (e) {
-                r.loading = false;
-            }
         },
     };
 }

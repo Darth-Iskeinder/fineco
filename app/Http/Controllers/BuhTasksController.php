@@ -88,12 +88,14 @@ class BuhTasksController extends Controller
             $items = $client->estimates->first()?->rootItems ?? collect();
             $overrides = $client->serviceSchedules->keyBy('service_id');
 
-            // Нижняя граница поиска просрочки — старт обслуживания (но не дальше 3 лет назад).
-            $lookbackStart = $client->service_start_date
-                ? CarbonImmutable::parse($client->service_start_date)->startOfDay()
-                : $today->subMonths(12);
-            if ($lookbackStart->lt($today->subYears(3))) {
-                $lookbackStart = $today->subYears(3);
+            // Просрочку показываем только за последние 6 месяцев (единая логика с воркером напоминаний),
+            // но не раньше старта обслуживания клиента.
+            $lookbackStart = $today->subMonths(6);
+            if ($client->service_start_date) {
+                $serviceStart = CarbonImmutable::parse($client->service_start_date)->startOfDay();
+                if ($serviceStart->gt($lookbackStart)) {
+                    $lookbackStart = $serviceStart;
+                }
             }
 
             foreach ($items as $item) {
@@ -311,51 +313,19 @@ class BuhTasksController extends Controller
         $completed = $completedPlanned->concat($completedAdhoc)
             ->sortByDesc('completed_at')->values()->toArray();
 
-        // Напоминания о сроках (выход воркера tasks:generate) — активные (невыполненные)
-        $reminders = TaskReminder::where('employee_id', $employee->id)
-            ->where('status', TaskReminder::STATUS_PENDING)
-            ->with('client:id,name')
-            ->orderBy('due_date')
-            ->get()
-            ->map(fn ($r) => [
-                'id'          => $r->id,
-                'client_id'   => $r->client_id,
-                'client_name' => $r->client?->name ?? '—',
-                'name'        => $r->name,
-                'periodicity' => $r->periodicity,
-                'due_date'    => $r->due_date->toDateString(),
-            ])->values()->toArray();
-
-        // Проекция расписаний на календарь — вживую из расписаний БП (не ограничена
-        // горизонтом воркера), чтобы видеть сроки на месяцы вперёд и ничего не терялось.
-        $calFrom = now()->startOfMonth()->subMonths(2);
-        $calTo   = now()->startOfMonth()->addMonths(12)->endOfMonth();
-
-        $calServiceIds = $clients
-            ->flatMap(fn ($c) => $c->estimates->flatMap->rootItems->pluck('service_id'))
-            ->filter()->unique();
-        $calServices = $calServiceIds->isNotEmpty()
-            ? Service::whereIn('id', $calServiceIds)->get()->keyBy('id')
-            : collect();
-
-        $schedule = [];
-        foreach ($clients as $client) {
-            $overrides = $client->serviceSchedules->keyBy('service_id');
-            foreach (($client->estimates->first()?->rootItems ?? collect()) as $item) {
-                $svc = $calServices->get($item->service_id);
-                if (!$svc) {
-                    continue;
-                }
-                foreach ($svc->dueDatesForClient($overrides->get($item->service_id), $calFrom, $calTo) as $date) {
-                    $schedule[] = [
-                        'date'        => $date->toDateString(),
-                        'name'        => $item->name,
-                        'client_id'   => $client->id,
-                        'client_name' => $client->name,
-                    ];
-                }
-            }
-        }
+        // «Сроки по клиентам» — уведомление (только чтение): просроченные и сегодняшние
+        // НЕвыполненные задачи из того же списка $tasks, что и таблица. Единый источник правды:
+        // закрыл задачу в таблице — она пропадает и из уведомления. Завершать отсюда нельзя.
+        $reminders = collect($tasks)
+            ->filter(fn ($t) => !empty($t['due_date'])
+                && $t['due_date'] <= $todayStr
+                && !in_array($t['status'], ['completed', 'review'], true))
+            ->map(fn ($t) => [
+                'client_name' => $t['client_name'] ?? '—',
+                'name'        => $t['name'],
+                'due_date'    => $t['due_date'],
+            ])
+            ->sortBy('due_date')->values()->toArray();
 
         $completedDays = self::COMPLETED_HISTORY_DAYS;
 
@@ -364,7 +334,7 @@ class BuhTasksController extends Controller
             ->orderBy('full_name')
             ->get(['id', 'full_name']);
 
-        return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'services', 'reminders', 'schedule', 'completed', 'completedDays', 'employees'));
+        return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'services', 'reminders', 'completed', 'completedDays', 'employees'));
     }
 
     // =============================================
