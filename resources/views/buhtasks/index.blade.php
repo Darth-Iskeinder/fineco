@@ -169,6 +169,7 @@
                 </thead>
                     <template x-for="(task, idx) in tasks" :key="task.uid">
                         <tbody class="divide-y divide-slate-100">
+                        <template x-if="visibleSet.has(task.uid)">
                         <tr :class="{
                                 'bg-emerald-50/30': task.status === 'completed',
                                 'bg-sky-50/40': task.status === 'review',
@@ -178,7 +179,7 @@
                                 'border-l-4 border-l-amber-300 bg-amber-50/20': task.status !== 'completed' && urgency(task) === 'soon',
                                 'border-l-4 border-l-violet-400 bg-violet-50/30': task.is_custom && task.status !== 'completed' && !urgency(task),
                                 'hover:bg-slate-50/50': task.status !== 'completed' && !urgency(task) && !task.is_custom,
-                            }" x-show="matchesFilter(task)" @dblclick="openTaskModal(idx)">
+                            }" @dblclick="openTaskModal(idx)">
 
                             {{-- Статус-точка --}}
                             <td class="px-4 py-3.5">
@@ -333,9 +334,17 @@
 
                             </td>
                         </tr>
+                        </template>
                         </tbody>
                     </template>
             </table>
+
+            {{-- Сентинел бесконечной прокрутки: догружает по 20 при приближении --}}
+            <div x-ref="loadMore" x-show="visibleLimit < visibleCount"
+                 class="flex items-center justify-center gap-2 py-4 text-xs text-slate-400">
+                <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                <span x-text="'Показано ' + Math.min(visibleLimit, visibleCount) + ' из ' + visibleCount"></span>
+            </div>
         </div>
 
         {{-- ===== РЕЖИМ ЧЕКЛИСТ (матрица: строки — компании, столбцы — задачи; только для чтения) ===== --}}
@@ -1082,6 +1091,8 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
     // File-объекты держим вне реактивного state — Alpine оборачивает объекты в Proxy,
     // что ломает внутренние методы File/Blob при передаче в FormData
     const pendingFiles = new Map();
+    // Кэш окна видимости вне реактивного state (чтобы геттер не пересобирал Set на каждую строку)
+    let visibleCache = { key: null, set: new Set() };
 
     return {
         tasks: initialTasks.map((t, i) => ({
@@ -1108,6 +1119,7 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
         now: Math.floor(Date.now() / 1000),
         clientFilter: 'all',
         sortDir: null, // null = исходный порядок | 'asc' | 'desc' (по сроку due_day)
+        visibleLimit: 20, // бесконечная прокрутка списка: сколько строк отрисовано (по 20)
         taskModalIdx: null,
         docRequiredModal: { show: false, taskIdx: null },
         checklistRequiredModal: { show: false, taskIdx: null },
@@ -1339,6 +1351,42 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
             return this.tasks.filter(t => this.matchesFilter(t)).length;
         },
 
+        // Окно бесконечной прокрутки: uid-ы первых visibleLimit задач, прошедших фильтр (в порядке списка).
+        // Мемоизируем по сигнатуре зависимостей — иначе Set пересобирался бы на каждую строку (O(n²)).
+        get visibleSet() {
+            const key = this.clientFilter + '|' + this.visibleLimit + '|' + this.sortDir + '|' + this.tasks.length;
+            if (visibleCache.key !== key) {
+                const set = new Set();
+                let count = 0;
+                for (const t of this.tasks) {
+                    if (!this.matchesFilter(t)) continue;
+                    if (count >= this.visibleLimit) break;
+                    set.add(t.uid);
+                    count++;
+                }
+                visibleCache = { key, set };
+            }
+            return visibleCache.set;
+        },
+        loadMore() {
+            if (this.visibleLimit < this.visibleCount) this.visibleLimit += 20;
+        },
+        _initInfiniteScroll() {
+            if (typeof IntersectionObserver === 'undefined') return;
+            this._io = new IntersectionObserver((entries) => {
+                if (!entries.some(e => e.isIntersecting)) return;
+                if (this.visibleLimit >= this.visibleCount) return;
+                this.loadMore();
+                // Сентинел мог остаться в зоне видимости после дорисовки —
+                // переподписываемся, чтобы получить свежий колбэк и продолжить.
+                this.$nextTick(() => {
+                    const s = this.$refs.loadMore;
+                    if (s) { this._io.unobserve(s); this._io.observe(s); }
+                });
+            }, { rootMargin: '400px' });
+            if (this.$refs.loadMore) this._io.observe(this.$refs.loadMore);
+        },
+
         // Пагинация вкладки «Выполненные» (по 20)
         get completedTotalPages() {
             return Math.max(1, Math.ceil(this.completed.length / this.completedPerPage));
@@ -1400,10 +1448,16 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
                 t.status === 'running' ? { ...t, client_resumed_at: clientNow } : t
             );
             this.ticker = setInterval(() => { this.now = Math.floor(Date.now() / 1000); }, 1000);
+
+            // Бесконечная прокрутка: при смене фильтра/сортировки начинаем показ заново с 20.
+            this.$watch('clientFilter', () => { this.visibleLimit = 20; });
+            this.$watch('sortDir', () => { this.visibleLimit = 20; });
+            this.$nextTick(() => this._initInfiniteScroll());
         },
 
         destroy() {
             clearInterval(this.ticker);
+            this._io?.disconnect();
         },
 
         getElapsed(task) {
@@ -1617,9 +1671,10 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
                 const data = await r.json();
 
                 if (data.success) {
-                    // Добавляем в текущий список только если задача для меня (иначе она у назначенного сотрудника)
+                    // Добавляем в текущий список только если задача для меня (иначе она у назначенного сотрудника).
+                    // unshift (в начало), чтобы созданная задача сразу попадала в видимое окно пагинации.
                     if (data.mine === undefined || data.mine) {
-                        this.tasks.push(data.task);
+                        this.tasks.unshift(data.task);
                     }
                     this.resetNewTask();
                     this.showCreateModal = false;
