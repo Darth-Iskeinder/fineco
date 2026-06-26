@@ -1363,9 +1363,8 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
                 this.feedTotal = data.total;
             } catch (e) { /* оставляем как есть */ }
             this.feedLoading = false;
-            this._reobserve();
         },
-        // Догрузка следующей страницы (скролл)
+        // Догрузка следующей страницы (скролл/кнопка)
         async loadMore() {
             if (this.feedLoading || this.tasks.length >= this.feedTotal) return;
             this.feedLoading = true;
@@ -1377,21 +1376,14 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
                 this.feedTotal = data.total;
             } catch (e) { /* оставляем как есть */ }
             this.feedLoading = false;
-            this._reobserve();
-        },
-        _reobserve() {
-            this.$nextTick(() => {
-                const s = this.$refs.loadMore;
-                if (this._io && s) { this._io.unobserve(s); this._io.observe(s); }
-            });
         },
         _initInfiniteScroll() {
             if (typeof IntersectionObserver === 'undefined') return;
+            // Обычный наблюдатель: при заходе сентинела в зону видимости грузим следующую страницу.
+            // НЕ переподписываемся вручную — иначе при оставшемся в зоне сентинеле уходит шквал запросов.
             this._io = new IntersectionObserver((entries) => {
-                if (!entries.some(e => e.isIntersecting)) return;
-                if (this.feedLoading || this.tasks.length >= this.feedTotal) return;
-                this.loadMore();
-            }, { rootMargin: '400px' });
+                if (entries.some(e => e.isIntersecting)) this.loadMore();
+            }, { rootMargin: '300px' });
             if (this.$refs.loadMore) this._io.observe(this.$refs.loadMore);
         },
 
