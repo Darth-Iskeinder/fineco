@@ -60,8 +60,11 @@ class BuhTasksController extends Controller
         $curMonthIdx = $year * 12 + $month; // для отсечения будущих месяцев в списке
         $historyFrom = $today->subDays(self::COMPLETED_HISTORY_DAYS)->startOfDay(); // глубина вкладки «Выполненные»
 
-        // Все логи плановых задач сотрудника (нужны статусы за прошлое для просрочки), ключ year-month-item
+        // Логи плановых задач сотрудника (нужны статусы за прошлое для просрочки), ключ year-month-item.
+        // Ограничиваем годом окна просрочки (6 мес назад) — старые логи всё равно не запрашиваются,
+        // а индекс (employee_id, year, month) поднимает в память кратно меньше строк.
         $logs = BuhTaskLog::where('employee_id', $employee->id)
+            ->where('year', '>=', $today->subMonths(6)->year)
             ->get()
             ->keyBy(fn ($l) => $l->year . '-' . $l->month . '-' . $l->estimate_item_id);
 
@@ -314,18 +317,24 @@ class BuhTasksController extends Controller
             ->sortByDesc('completed_at')->values()->toArray();
 
         // «Сроки по клиентам» — уведомление (только чтение): просроченные и сегодняшние
-        // НЕвыполненные задачи из того же списка $tasks, что и таблица. Единый источник правды:
-        // закрыл задачу в таблице — она пропадает и из уведомления. Завершать отсюда нельзя.
-        $reminders = collect($tasks)
+        // НЕвыполненные задачи из того же списка $tasks, что и таблица. Завершать отсюда нельзя.
+        // Это сводка-сигнал: их могут быть сотни, поэтому в разметку отдаём СЧЁТЧИКИ + первые N
+        // (самые свежие), а не все строки — иначе блок рисует сотни DOM-узлов на каждый заход.
+        $dueItems = collect($tasks)
             ->filter(fn ($t) => !empty($t['due_date'])
                 && $t['due_date'] <= $todayStr
                 && !in_array($t['status'], ['completed', 'review'], true))
-            ->map(fn ($t) => [
-                'client_name' => $t['client_name'] ?? '—',
-                'name'        => $t['name'],
-                'due_date'    => $t['due_date'],
-            ])
-            ->sortBy('due_date')->values()->toArray();
+            ->sortByDesc('due_date')->values(); // свежие сверху: сегодня и недавняя просрочка
+
+        $reminderCounts = [
+            'overdue' => $dueItems->where('due_date', '<', $todayStr)->count(),
+            'today'   => $dueItems->where('due_date', $todayStr)->count(),
+        ];
+        $reminders = $dueItems->take(50)->map(fn ($t) => [
+            'client_name' => $t['client_name'] ?? '—',
+            'name'        => $t['name'],
+            'due_date'    => $t['due_date'],
+        ])->all();
 
         $completedDays = self::COMPLETED_HISTORY_DAYS;
 
@@ -334,7 +343,7 @@ class BuhTasksController extends Controller
             ->orderBy('full_name')
             ->get(['id', 'full_name']);
 
-        return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'services', 'reminders', 'completed', 'completedDays', 'employees'));
+        return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'services', 'reminders', 'reminderCounts', 'completed', 'completedDays', 'employees'));
     }
 
     // =============================================

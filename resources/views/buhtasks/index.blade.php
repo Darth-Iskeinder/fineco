@@ -6,7 +6,7 @@
 @section('content')
 
 {{-- Сроки по клиентам: агенда по срочности (выход воркера напоминаний) --}}
-<div x-data="taskReminders({{ json_encode($reminders) }})" x-cloak class="mb-6">
+<div x-data="taskReminders({{ json_encode($reminders) }}, {{ json_encode($reminderCounts) }})" x-cloak class="mb-6">
     <template x-if="items.length > 0">
         <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
             {{-- Компактная шапка: всегда видна, по клику раскрывает список --}}
@@ -38,7 +38,7 @@
                             <div>
                                 <div class="px-6 py-2 text-xs font-semibold uppercase tracking-wider flex items-center gap-2" :class="group.headClass">
                                     <span x-text="group.label"></span>
-                                    <span class="opacity-70" x-text="'(' + group.items.length + ')'"></span>
+                                    <span class="opacity-70" x-text="'(' + (group.key === 'overdue' ? counts.overdue : counts.today) + ')'"></span>
                                 </div>
 
                                 <div class="divide-y divide-slate-50">
@@ -58,6 +58,10 @@
                             </div>
                         </template>
                     </template>
+                </div>
+                <div x-show="(counts.overdue + counts.today) > items.length"
+                     class="px-6 py-2.5 text-xs text-slate-400 border-t border-slate-100 bg-slate-50/40">
+                    Показаны первые <span x-text="items.length"></span> из <span x-text="counts.overdue + counts.today"></span> — остальные закрывайте в таблице задач ниже
                 </div>
             </div>
 
@@ -1692,9 +1696,11 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
 
 // «Сроки по клиентам» — уведомление (только чтение): срез просроченных/сегодняшних задач.
 // Источник тот же, что и у таблицы; завершать отсюда нельзя — задачу закрывают в таблице.
-function taskReminders(initial) {
+function taskReminders(initial, serverCounts) {
     return {
         items: initial || [],
+        // Истинные счётчики с сервера (items обрезаны до первых N для лёгкости рендера)
+        counts: serverCounts || { overdue: 0, today: 0 },
         open: false,
 
         init() {
@@ -1715,17 +1721,6 @@ function taskReminders(initial) {
         daysUntil(r) {
             const due = new Date(r.due_date + 'T00:00:00');
             return Math.round((due - this.today()) / 86400000);
-        },
-
-        // Счётчики для компактной шапки: только просрочено и сегодня
-        get counts() {
-            let overdue = 0, today = 0;
-            this.items.forEach(r => {
-                const d = this.daysUntil(r);
-                if (d < 0) overdue++;
-                else if (d === 0) today++;
-            });
-            return { overdue, today };
         },
 
         get groups() {
