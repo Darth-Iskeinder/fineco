@@ -83,7 +83,6 @@ Route::middleware('auth:employee')->group(function () {
     // Модуль БухЗадачник
     Route::prefix('buhtasks')->name('buhtasks.')->middleware('module:buhtasks')->group(function () {
         Route::get('/', [BuhTasksController::class, 'index'])->name('index');
-        Route::get('/feed', [BuhTasksController::class, 'feed'])->name('feed');
         Route::post('/extra', [BuhTasksController::class, 'storeExtra'])->name('extra.store');
         Route::post('/logs', [BuhTasksController::class, 'getOrCreateLog'])->name('logs.get');
         Route::post('/logs/{log}/start', [BuhTasksController::class, 'start'])->name('logs.start');

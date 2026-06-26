@@ -12,7 +12,6 @@ use App\Models\Service;
 use App\Models\TaskReminder;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 
 class BuhTasksController extends Controller
@@ -20,12 +19,8 @@ class BuhTasksController extends Controller
     /** Глубина истории вкладки «Выполненные» (дней назад) */
     private const COMPLETED_HISTORY_DAYS = 90;
 
-    /** Размер страницы списка задач (бесконечная прокрутка) */
-    private const TASKS_PER_PAGE = 20;
-
     public function index(Request $request)
     {
-        $t0 = microtime(true); // диагностика времени сборки (заголовок X-Buh-Ms)
         $employee = auth('employee')->user();
 
         $year  = (int) $request->get('year',  now()->year);
@@ -348,93 +343,7 @@ class BuhTasksController extends Controller
             ->orderBy('full_name')
             ->get(['id', 'full_name']);
 
-        // Серверная пагинация списка: полный посчитанный список кэшируем, в страницу кладём ТОЛЬКО
-        // первую страницу (20) + лёгкую сводку $tasksLite (для матрицы/фильтра/счётчиков).
-        // Остальные страницы — по скроллу через feed() (срез из кэша, без пересчёта).
-        Cache::put($this->feedCacheKey($employee->id), $tasks, now()->addMinutes(15));
-        $tasksLite  = $this->liteTasks($tasks);
-        $tasksTotal = count($tasks);
-        $firstPage  = array_slice($tasks, 0, self::TASKS_PER_PAGE);
-
-        return response()->view('buhtasks.index', compact(
-            'year', 'month', 'employee', 'allClients', 'services',
-            'reminders', 'reminderCounts', 'completed', 'completedDays', 'employees',
-            'tasksLite', 'tasksTotal'
-        ) + ['tasks' => $firstPage, 'perPage' => self::TASKS_PER_PAGE])
-            ->header('X-Buh-Ms', (string) round((microtime(true) - $t0) * 1000));
-    }
-
-    /** Следующая страница списка задач (бесконечная прокрутка) — срез из кэша, без пересчёта. */
-    public function feed(Request $request)
-    {
-        $employee = auth('employee')->user();
-        $tasks = Cache::get($this->feedCacheKey($employee->id));
-        if ($tasks === null) {
-            // Кэш истёк (полный пересчёт идёт только в index()) — просим страницу перезагрузиться.
-            return response()->json(['stale' => true]);
-        }
-
-        $offset = max(0, (int) $request->get('offset', 0));
-        $filter = (string) $request->get('filter', 'all');
-        $sort   = $request->get('sort');
-        $sort   = in_array($sort, ['asc', 'desc'], true) ? $sort : null;
-
-        $page = $this->sliceTasks($tasks, $filter, $sort, $offset, self::TASKS_PER_PAGE);
-
-        return response()->json([
-            'tasks'   => $page['tasks'],
-            'total'   => $page['total'],
-            'hasMore' => $offset + self::TASKS_PER_PAGE < $page['total'],
-        ]);
-    }
-
-    private function feedCacheKey(int $employeeId): string
-    {
-        return "buhtasks_feed:{$employeeId}";
-    }
-
-    /** Лёгкая сводка по всем задачам — для матрицы/фильтра/счётчиков на клиенте (без тяжёлых полей). */
-    private function liteTasks(array $tasks): array
-    {
-        return array_map(fn ($t) => [
-            'uid'         => $t['uid'],
-            'client_id'   => $t['client_id'] ?? null,
-            'client_name' => $t['client_name'] ?? null,
-            'name'        => $t['name'],
-            'status'      => $t['status'],
-        ], $tasks);
-    }
-
-    /** Фильтр (по компании) + сортировка (по сроку) + срез — повторяет клиентскую логику списка. */
-    private function sliceTasks(array $tasks, string $filter, ?string $sort, int $offset, int $limit): array
-    {
-        if ($filter !== '' && $filter !== 'all') {
-            $tasks = array_values(array_filter($tasks, fn ($t) => (string) ($t['client_id'] ?? '') === $filter));
-        }
-        $total = count($tasks);
-
-        if ($sort === 'asc' || $sort === 'desc') {
-            $mult = $sort === 'desc' ? -1 : 1;
-            $indexed = [];
-            foreach ($tasks as $i => $t) {
-                $indexed[] = [$i, $t];
-            }
-            usort($indexed, function ($a, $b) use ($mult) {
-                $av = $a[1]['due_date'] ?? null;
-                $bv = $b[1]['due_date'] ?? null;
-                if (!$av && !$bv) return $a[0] <=> $b[0];
-                if (!$av) return 1;
-                if (!$bv) return -1;
-                if ($av === $bv) return $a[0] <=> $b[0];
-                return ($av < $bv ? -1 : 1) * $mult;
-            });
-            $tasks = array_map(fn ($x) => $x[1], $indexed);
-        }
-
-        return [
-            'tasks' => array_slice($tasks, $offset, $limit),
-            'total' => $total,
-        ];
+        return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'services', 'reminders', 'reminderCounts', 'completed', 'completedDays', 'employees'));
     }
 
     // =============================================

@@ -69,7 +69,7 @@
     </template>
 </div>
 
-<div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($services) }}, {{ json_encode($completed) }}, {{ json_encode($employees) }}, {{ $employee->id }}, {{ json_encode($tasksLite) }}, {{ $tasksTotal }}, {{ $perPage }})" x-cloak>
+<div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($services) }}, {{ json_encode($completed) }}, {{ json_encode($employees) }}, {{ $employee->id }})" x-cloak>
 
     {{-- Шапка --}}
     <div class="flex items-center justify-between mb-2">
@@ -129,7 +129,7 @@
     </div>
 
     {{-- Нет задач --}}
-    <div x-show="viewMode !== 'completed' && tasksLite.length === 0"
+    <div x-show="viewMode !== 'completed' && tasks.length === 0"
          class="bg-white rounded-2xl border border-slate-200/50 shadow-sm px-6 py-16 text-center">
         <div class="w-14 h-14 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg class="w-7 h-7 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
@@ -138,12 +138,12 @@
     </div>
 
     {{-- Все задачи скрыты фильтром --}}
-    <div x-show="viewMode !== 'completed' && tasksLite.length > 0 && feedTotal === 0"
+    <div x-show="viewMode !== 'completed' && tasks.length > 0 && visibleCount === 0"
          class="bg-white rounded-2xl border border-slate-200/50 shadow-sm px-6 py-10 text-center text-sm text-slate-400">
         Нет задач по выбранной компании.
     </div>
 
-    <div x-show="viewMode === 'completed' || feedTotal > 0"
+    <div x-show="viewMode === 'completed' || (tasks.length > 0 && visibleCount > 0)"
          class="bg-white rounded-2xl border border-slate-200/50 shadow-sm overflow-hidden">
 
         {{-- ===== РЕЖИМ СПИСОК ===== --}}
@@ -173,6 +173,7 @@
                 </thead>
                     <template x-for="(task, idx) in tasks" :key="task.uid">
                         <tbody class="divide-y divide-slate-100">
+                        <template x-if="visibleSet.has(task.uid)">
                         <tr :class="{
                                 'bg-emerald-50/30': task.status === 'completed',
                                 'bg-sky-50/40': task.status === 'review',
@@ -337,17 +338,16 @@
 
                             </td>
                         </tr>
+                        </template>
                         </tbody>
                     </template>
             </table>
 
-            {{-- Догрузка: автоматически при скролле (observer на этом блоке) + кнопка как надёжный фолбэк --}}
-            <div x-ref="loadMore" x-show="tasks.length < feedTotal" class="px-6 py-4 text-center">
-                <button type="button" @click="loadMore()" :disabled="feedLoading"
-                        class="inline-flex items-center gap-2 px-4 py-2 text-xs font-medium text-slate-500 bg-slate-100 rounded-lg hover:bg-slate-200 disabled:opacity-50 transition-colors">
-                    <svg x-show="feedLoading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                    <span x-text="feedLoading ? 'Загрузка…' : ('Показать ещё · ' + tasks.length + ' из ' + feedTotal)"></span>
-                </button>
+            {{-- Сентинел бесконечной прокрутки: догружает по 20 при приближении --}}
+            <div x-ref="loadMore" x-show="visibleLimit < visibleCount"
+                 class="flex items-center justify-center gap-2 py-4 text-xs text-slate-400">
+                <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                <span x-text="'Показано ' + Math.min(visibleLimit, visibleCount) + ' из ' + visibleCount"></span>
             </div>
         </div>
 
@@ -1091,30 +1091,23 @@
 </div>
 
 <script>
-function buhTasks(initialTasks, year, month, allClients, allServices, completed, employees, currentEmployeeId, tasksLite, tasksTotal, perPage) {
+function buhTasks(initialTasks, year, month, allClients, allServices, completed, employees, currentEmployeeId) {
     // File-объекты держим вне реактивного state — Alpine оборачивает объекты в Proxy,
     // что ломает внутренние методы File/Blob при передаче в FormData
     const pendingFiles = new Map();
-
-    const decorate = (t, i) => ({
-        ...t,
-        loading: false,
-        client_resumed_at: null,
-        _seq: i,
-        doc_uploading: false,
-        pending_file_name: null,
-        children: (t.children || []).map(c => ({ ...c, doc_uploading: false, pending_file_name: null })),
-    });
+    // Кэш окна видимости вне реактивного state (чтобы геттер не пересобирал Set на каждую строку)
+    let visibleCache = { key: null, set: new Set() };
 
     return {
-        // tasks — текущая загруженная страница(ы) списка (полные объекты, с сервера порциями).
-        // tasksLite — лёгкая сводка по ВСЕМ задачам (для матрицы/фильтра/счётчиков).
-        tasks: (initialTasks || []).map(decorate),
-        tasksLite: tasksLite || [],
-        feedTotal: tasksTotal || 0,   // всего задач под текущим фильтром
-        feedPerPage: perPage || 20,
-        feedLoading: false,
-        decorate,
+        tasks: initialTasks.map((t, i) => ({
+            ...t,
+            loading: false,
+            client_resumed_at: null,
+            _seq: i,
+            doc_uploading: false,
+            pending_file_name: null,
+            children: (t.children || []).map(c => ({ ...c, doc_uploading: false, pending_file_name: null })),
+        })),
         completed: completed || [],
         completedPage: 1,
         completedPerPage: 20,
@@ -1130,6 +1123,7 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
         now: Math.floor(Date.now() / 1000),
         clientFilter: 'all',
         sortDir: null, // null = исходный порядок | 'asc' | 'desc' (по сроку due_day)
+        visibleLimit: 20, // бесконечная прокрутка списка: сколько строк отрисовано (по 20)
         taskModalIdx: null,
         docRequiredModal: { show: false, taskIdx: null },
         checklistRequiredModal: { show: false, taskIdx: null },
@@ -1140,10 +1134,10 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
         creating: false,
         createError: '',
 
-        // Фильтр по компаниям — по лёгкой сводке всех задач (tasksLite), не по загруженной странице
+        // Фильтр по компаниям (idx строк сохраняем — строки прячем через x-show)
         get clientOptions() {
             const map = {};
-            this.tasksLite.forEach(t => {
+            this.tasks.forEach(t => {
                 const k = t.client_id ?? t.client_name;
                 if (!map[k]) map[k] = { id: t.client_id, name: t.client_name, count: 0 };
                 map[k].count++;
@@ -1162,7 +1156,7 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
             const colMap = {};
             const cells = {};
             const rank = { none: 0, done: 1, review: 2, progress: 3 };
-            this.tasksLite.filter(t => this.matchesFilter(t)).forEach(t => {
+            this.tasks.filter(t => this.matchesFilter(t)).forEach(t => {
                 const cid = String(t.client_id ?? t.client_name);
                 if (!companyMap[cid]) companyMap[cid] = { id: cid, name: t.client_name || '—' };
                 if (!colMap[t.name]) colMap[t.name] = { name: t.name, count: 0 };
@@ -1337,53 +1331,63 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
         },
 
         // Сортировка по сроку (due_day): клик переключает asc → desc → исходный порядок
-        // Сортировка по сроку — на сервере; переключаем направление и перезагружаем список
         toggleSort() {
             this.sortDir = this.sortDir === null ? 'asc' : (this.sortDir === 'asc' ? 'desc' : null);
-            this.reloadList();
+            this.applySort();
+        },
+        applySort() {
+            const bySeq = (a, b) => a._seq - b._seq;
+            if (!this.sortDir) {
+                this.tasks = [...this.tasks].sort(bySeq);
+                return;
+            }
+            const mult = this.sortDir === 'desc' ? -1 : 1;
+            this.tasks = [...this.tasks].sort((a, b) => {
+                const av = a.due_date, bv = b.due_date;
+                if (!av && !bv) return bySeq(a, b); // обе без срока — сохраняем порядок
+                if (!av) return 1;  // без срока — всегда в конец
+                if (!bv) return -1;
+                if (av === bv) return bySeq(a, b);
+                return (av < bv ? -1 : 1) * mult;
+            });
+        },
+        get visibleCount() {
+            return this.tasks.filter(t => this.matchesFilter(t)).length;
         },
 
-        // ===== Серверная пагинация списка =====
-        feedUrl(offset) {
-            const p = new URLSearchParams({ offset: String(offset), filter: this.clientFilter, sort: this.sortDir || '' });
-            return '/buhtasks/feed?' + p.toString();
+        // Окно бесконечной прокрутки: uid-ы первых visibleLimit задач, прошедших фильтр (в порядке списка).
+        // Мемоизируем по сигнатуре зависимостей — иначе Set пересобирался бы на каждую строку (O(n²)).
+        get visibleSet() {
+            const key = this.clientFilter + '|' + this.visibleLimit + '|' + this.sortDir + '|' + this.tasks.length;
+            if (visibleCache.key !== key) {
+                const set = new Set();
+                let count = 0;
+                for (const t of this.tasks) {
+                    if (!this.matchesFilter(t)) continue;
+                    if (count >= this.visibleLimit) break;
+                    set.add(t.uid);
+                    count++;
+                }
+                visibleCache = { key, set };
+            }
+            return visibleCache.set;
         },
-        async fetchFeed(offset) {
-            const r = await fetch(this.feedUrl(offset), { headers: { 'Accept': 'application/json' } });
-            return r.json();
-        },
-        // Перезагрузка с нуля (смена фильтра/сортировки)
-        async reloadList() {
-            if (this.feedLoading) return;
-            this.feedLoading = true;
-            try {
-                const data = await this.fetchFeed(0);
-                if (data.stale) { window.location.reload(); return; }
-                this.tasks = data.tasks.map(this.decorate);
-                this.feedTotal = data.total;
-            } catch (e) { /* оставляем как есть */ }
-            this.feedLoading = false;
-        },
-        // Догрузка следующей страницы (скролл/кнопка)
-        async loadMore() {
-            if (this.feedLoading || this.tasks.length >= this.feedTotal) return;
-            this.feedLoading = true;
-            try {
-                const data = await this.fetchFeed(this.tasks.length);
-                if (data.stale) { window.location.reload(); return; }
-                const base = this.tasks.length;
-                data.tasks.forEach((t, i) => this.tasks.push(this.decorate(t, base + i)));
-                this.feedTotal = data.total;
-            } catch (e) { /* оставляем как есть */ }
-            this.feedLoading = false;
+        loadMore() {
+            if (this.visibleLimit < this.visibleCount) this.visibleLimit += 20;
         },
         _initInfiniteScroll() {
             if (typeof IntersectionObserver === 'undefined') return;
-            // Обычный наблюдатель: при заходе сентинела в зону видимости грузим следующую страницу.
-            // НЕ переподписываемся вручную — иначе при оставшемся в зоне сентинеле уходит шквал запросов.
             this._io = new IntersectionObserver((entries) => {
-                if (entries.some(e => e.isIntersecting)) this.loadMore();
-            }, { rootMargin: '300px' });
+                if (!entries.some(e => e.isIntersecting)) return;
+                if (this.visibleLimit >= this.visibleCount) return;
+                this.loadMore();
+                // Сентинел мог остаться в зоне видимости после дорисовки —
+                // переподписываемся, чтобы получить свежий колбэк и продолжить.
+                this.$nextTick(() => {
+                    const s = this.$refs.loadMore;
+                    if (s) { this._io.unobserve(s); this._io.observe(s); }
+                });
+            }, { rootMargin: '400px' });
             if (this.$refs.loadMore) this._io.observe(this.$refs.loadMore);
         },
 
@@ -1400,12 +1404,12 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
         },
 
         get totalCompleted() {
-            return this.tasksLite.filter(t => t.status === 'completed').length;
+            return this.tasks.filter(t => t.status === 'completed').length;
         },
 
         get totalProgressPct() {
-            if (!this.tasksLite.length) return 0;
-            return Math.round(this.totalCompleted / this.tasksLite.length * 100);
+            if (!this.tasks.length) return 0;
+            return Math.round(this.totalCompleted / this.tasks.length * 100);
         },
 
         // Разница в днях между сроком задачи и сегодня (отриц. = просрочено)
@@ -1449,8 +1453,9 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
             );
             this.ticker = setInterval(() => { this.now = Math.floor(Date.now() / 1000); }, 1000);
 
-            // Смена фильтра по компании — перезагружаем список с сервера с нуля (сортировка — через toggleSort).
-            this.$watch('clientFilter', () => { this.reloadList(); });
+            // Бесконечная прокрутка: при смене фильтра/сортировки начинаем показ заново с 20.
+            this.$watch('clientFilter', () => { this.visibleLimit = 20; });
+            this.$watch('sortDir', () => { this.visibleLimit = 20; });
             this.$nextTick(() => this._initInfiniteScroll());
         },
 
@@ -1505,12 +1510,6 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
                 review_comment:    log.review_comment ?? null,
                 client_resumed_at: log.status === 'running' ? this.now : null,
             };
-            this.syncLite(task.uid, log.status);
-        },
-        // Держим статус в лёгкой сводке в синхроне со списком — чтобы матрица/счётчики/прогресс обновлялись
-        syncLite(uid, status) {
-            const lite = this.tasksLite.find(t => t.uid === uid);
-            if (lite) lite.status = status;
         },
 
         // Возвращает URL для действия в зависимости от типа задачи
@@ -1677,12 +1676,9 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
 
                 if (data.success) {
                     // Добавляем в текущий список только если задача для меня (иначе она у назначенного сотрудника).
-                    // unshift (в начало), чтобы созданная задача сразу была видна; синхронизируем сводку и счётчик.
+                    // unshift (в начало), чтобы созданная задача сразу попадала в видимое окно пагинации.
                     if (data.mine === undefined || data.mine) {
-                        this.tasks.unshift(this.decorate(data.task, -1));
-                        const t = data.task;
-                        this.tasksLite.unshift({ uid: t.uid, client_id: t.client_id ?? null, client_name: t.client_name ?? null, name: t.name, status: t.status });
-                        this.feedTotal += 1;
+                        this.tasks.unshift(data.task);
                     }
                     this.resetNewTask();
                     this.showCreateModal = false;
