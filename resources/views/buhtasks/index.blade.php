@@ -341,11 +341,13 @@
                     </template>
             </table>
 
-            {{-- Сентинел бесконечной прокрутки: догружает следующие 20 с сервера при приближении --}}
-            <div x-ref="loadMore" x-show="tasks.length < feedTotal"
-                 class="flex items-center justify-center gap-2 py-4 text-xs text-slate-400">
-                <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                <span x-text="'Показано ' + tasks.length + ' из ' + feedTotal"></span>
+            {{-- Догрузка: автоматически при скролле (observer на этом блоке) + кнопка как надёжный фолбэк --}}
+            <div x-ref="loadMore" x-show="tasks.length < feedTotal" class="px-6 py-4 text-center">
+                <button type="button" @click="loadMore()" :disabled="feedLoading"
+                        class="inline-flex items-center gap-2 px-4 py-2 text-xs font-medium text-slate-500 bg-slate-100 rounded-lg hover:bg-slate-200 disabled:opacity-50 transition-colors">
+                    <svg x-show="feedLoading" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                    <span x-text="feedLoading ? 'Загрузка…' : ('Показать ещё · ' + tasks.length + ' из ' + feedTotal)"></span>
+                </button>
             </div>
         </div>
 

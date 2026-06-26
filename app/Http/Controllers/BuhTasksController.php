@@ -25,6 +25,7 @@ class BuhTasksController extends Controller
 
     public function index(Request $request)
     {
+        $t0 = microtime(true); // диагностика времени сборки (заголовок X-Buh-Ms)
         $employee = auth('employee')->user();
 
         $year  = (int) $request->get('year',  now()->year);
@@ -355,11 +356,12 @@ class BuhTasksController extends Controller
         $tasksTotal = count($tasks);
         $firstPage  = array_slice($tasks, 0, self::TASKS_PER_PAGE);
 
-        return view('buhtasks.index', compact(
+        return response()->view('buhtasks.index', compact(
             'year', 'month', 'employee', 'allClients', 'services',
             'reminders', 'reminderCounts', 'completed', 'completedDays', 'employees',
             'tasksLite', 'tasksTotal'
-        ) + ['tasks' => $firstPage, 'perPage' => self::TASKS_PER_PAGE]);
+        ) + ['tasks' => $firstPage, 'perPage' => self::TASKS_PER_PAGE])
+            ->header('X-Buh-Ms', (string) round((microtime(true) - $t0) * 1000));
     }
 
     /** Следующая страница списка задач (бесконечная прокрутка) — срез из кэша, без пересчёта. */
