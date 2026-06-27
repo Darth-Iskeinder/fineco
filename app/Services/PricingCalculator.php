@@ -2,82 +2,39 @@
 
 namespace App\Services;
 
+use App\Models\Billing;
 use App\Models\Service;
-use App\Models\Tariff;
 
+/**
+ * Единый источник цены БП. Режим биллинга — переключатель:
+ *   - included / none      → 0 (входит в абонентку / не тарифицируется);
+ *   - by_quantity / addon  → цена из привязанной ставки (rate);
+ *   - режим не задан        → откат на собственный cost БП (обратная совместимость).
+ *
+ * Единица измерения берётся из ставки и служит только подписью — на расчёт
+ * не влияет (сумма всегда «цена за единицу × количество»).
+ */
 class PricingCalculator
 {
-    /**
-     * Рассчитывает итоговую стоимость услуги для заданного количества и тарифа.
-     *
-     * Порядок приоритетов:
-     *   1. Ступенчатые цены (pricing_rules): unit_price × quantity
-     *   2. Поштучно с учётом тарифа: max(0, quantity - free_limit) × (price_override ?? cost)
-     *
-     * @return numeric-string  Итоговая сумма (не цена за единицу).
-     */
-    public function calculate(Service $service, ?Tariff $tariff, int $quantity): string
+    /** Эффективная цена за единицу для БП по режиму биллинга. */
+    public function unitPrice(Service $service): float
     {
-        // 1. Ступенчатые цены
-        $tieredUnitPrice = $this->applyPricingRules($service->pricing_rules, $quantity);
-        if ($tieredUnitPrice !== null) {
-            return (string) ($tieredUnitPrice * $quantity);
+        $code = $service->billingCode();
+
+        if (in_array($code, Billing::FREE_CODES, true)) {
+            return 0.0;
         }
 
-        // 2. Поштучно с учётом тарифного лимита и переопределённой цены
-        [$freeLimit, $unitPrice] = $this->resolvePivotPricing($service, $tariff);
+        if (in_array($code, Billing::PAID_CODES, true)) {
+            return $service->rate ? (float) $service->rate->price : 0.0;
+        }
 
-        $payableQty = max(0, $quantity - $freeLimit);
-
-        return (string) ($payableQty * $unitPrice);
+        return (float) $service->cost;
     }
 
-    // ---------------------------------------------------------------
-
-    /**
-     * Ищет первый тир в pricing_rules, где $quantity <= max_qty.
-     * Тиры должны быть отсортированы по max_qty по возрастанию.
-     *
-     * Структура: [['max_qty' => 10, 'price' => 2000], ['max_qty' => 50, 'price' => 1500], ...]
-     */
-    private function applyPricingRules(?array $rules, int $quantity): ?float
+    /** Сумма строки сметы: цена за единицу × количество (>= 0), округление до копеек. */
+    public function lineTotal(Service $service, int $quantity): float
     {
-        if (empty($rules)) {
-            return null;
-        }
-
-        foreach ($rules as $tier) {
-            if ($quantity <= (int) $tier['max_qty']) {
-                return (float) $tier['price'];
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Возвращает [free_limit, unit_price] из pivot-связи услуги с тарифом.
-     * Если тариф не передан или связи нет — лимит 0, цена = service->cost.
-     *
-     * @return array{int, float}
-     */
-    private function resolvePivotPricing(Service $service, ?Tariff $tariff): array
-    {
-        if ($tariff === null) {
-            return [0, (float) $service->cost];
-        }
-
-        $pivot = $service->tariffs->firstWhere('id', $tariff->id)?->pivot;
-
-        if ($pivot === null) {
-            return [0, (float) $service->cost];
-        }
-
-        $freeLimit = (int) $pivot->free_limit;
-        $unitPrice = $pivot->price_override !== null
-            ? (float) $pivot->price_override
-            : (float) $service->cost;
-
-        return [$freeLimit, $unitPrice];
+        return round($this->unitPrice($service) * max(0, $quantity), 2);
     }
 }

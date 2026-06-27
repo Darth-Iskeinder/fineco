@@ -152,6 +152,7 @@ class SettingsController extends Controller
     {
         return view('settings.rates', [
             'rates' => Rate::orderBy('name')->get(),
+            'units' => Rate::UNITS,
         ]);
     }
 
@@ -159,13 +160,14 @@ class SettingsController extends Controller
     {
         return view('settings.services', [
             'taxSystems' => TaxSystem::ordered()->get(),
-            'services' => Service::with(['taxSystems', 'children'])->roots()->ordered()->get(),
+            'services' => Service::with(['taxSystems', 'children', 'rate'])->roots()->ordered()->get(),
             'specialFlags' => Service::specialFlagsList(),
             'periodicities' => Periodicity::orderBy('name')->get(['name', 'kind'])->values(),
             'categories' => Category::orderBy('name')->pluck('name')->values(),
             'spheres' => Sphere::orderBy('name')->pluck('name')->values(),
             'groups' => ServiceGroup::orderBy('name')->pluck('name')->values(),
-            'billings' => Billing::orderBy('id')->pluck('name')->values(),
+            'billings' => Billing::orderBy('id')->get(['name', 'code']),
+            'rates' => Rate::orderBy('name')->get(['id', 'name', 'unit', 'price']),
         ]);
     }
 
@@ -446,6 +448,7 @@ class SettingsController extends Controller
             'check_type'                    => 'nullable|string|max:255',
             'requires_review'               => 'boolean',
             'billing'                       => 'nullable|string|max:255',
+            'rate_id'                       => 'nullable|exists:rates,id',
             'comment'                       => 'nullable|string',
             'allows_quantity'               => 'boolean',
             'sort_order'                    => 'integer',
@@ -470,6 +473,7 @@ class SettingsController extends Controller
             'business_process'   => $request->business_process ?: null,
             'category'           => $request->category ?: null,
             'cost'               => $request->cost,
+            'rate_id'            => $this->resolveRateId($request),
             'pricing_rules'      => $request->input('pricing_rules') ?: null,
             'periodicity'        => $request->periodicity,
             'due_day'            => $request->input('due_day') ?: null,
@@ -502,7 +506,7 @@ class SettingsController extends Controller
             ]);
         }
 
-        $service->load(['taxSystems', 'children']);
+        $service->load(['taxSystems', 'children', 'rate']);
 
         return response()->json([
             'success' => true,
@@ -536,6 +540,7 @@ class SettingsController extends Controller
             'check_type'                    => 'nullable|string|max:255',
             'requires_review'               => 'boolean',
             'billing'                       => 'nullable|string|max:255',
+            'rate_id'                       => 'nullable|exists:rates,id',
             'comment'                       => 'nullable|string',
             'allows_quantity'               => 'boolean',
             'sort_order'                    => 'integer|min:0',
@@ -558,6 +563,7 @@ class SettingsController extends Controller
             'business_process'   => $request->business_process ?: null,
             'category'           => $request->category ?: null,
             'cost'               => $request->cost,
+            'rate_id'            => $this->resolveRateId($request),
             'pricing_rules'      => $request->input('pricing_rules') ?: null,
             'periodicity'        => $request->periodicity,
             'due_day'            => $request->input('due_day') ?: null,
@@ -605,7 +611,7 @@ class SettingsController extends Controller
             }
         }
 
-        $service->load(['taxSystems', 'children']);
+        $service->load(['taxSystems', 'children', 'rate']);
 
         return response()->json([
             'success' => true,
@@ -625,6 +631,19 @@ class SettingsController extends Controller
             'success' => true,
             'message' => 'Бизнес-процесс удалён',
         ]);
+    }
+
+    /**
+     * Ставка к сохранению: только для платных режимов биллинга (by_quantity/addon),
+     * иначе null — у «входит в абонентку» / «не тарифицируется» ставки нет.
+     */
+    private function resolveRateId(Request $request): ?int
+    {
+        $code = Billing::codeForName($request->billing ?: null);
+        if (!in_array($code, Billing::PAID_CODES, true)) {
+            return null;
+        }
+        return $request->input('rate_id') ? (int) $request->input('rate_id') : null;
     }
 
     /** Значения флагов условий для сохранения (по конфигу Service::SPECIAL_FLAGS). */
@@ -663,6 +682,13 @@ class SettingsController extends Controller
             'business_process' => $service->business_process,
             'category'         => $service->category,
             'cost'            => $service->cost,
+            'rate_id'         => $service->rate_id,
+            'rate'            => $service->rate ? [
+                'id'    => $service->rate->id,
+                'name'  => $service->rate->name,
+                'unit'  => $service->rate->unit,
+                'price' => $service->rate->price,
+            ] : null,
             'pricing_rules'   => $service->pricing_rules ?? [],
             'periodicity'     => $service->periodicity,
             'due_day'         => $service->due_day,

@@ -15,6 +15,8 @@ $servicesJson = $services->map(fn($s) => array_merge([
     'business_process' => $s->business_process,
     'category'         => $s->category,
     'cost'             => $s->cost,
+    'rate_id'          => $s->rate_id,
+    'rate'             => $s->rate ? ['id' => $s->rate->id, 'name' => $s->rate->name, 'unit' => $s->rate->unit, 'price' => $s->rate->price] : null,
     'pricing_rules'   => $s->pricing_rules ?? [],
     'periodicity'       => $s->periodicity,
     'due_day'           => $s->due_day,
@@ -319,17 +321,38 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                 </div>
                                 <div>
                                     <label class="block text-sm font-medium text-slate-700 mb-1">Биллинг</label>
-                                    <select x-model="serviceForm.billing" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
+                                    <select x-model="serviceForm.billing" @change="onBillingChange()" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
                                         <option value="">— не указан —</option>
-                                        <template x-if="serviceForm.billing && !billings.includes(serviceForm.billing)">
+                                        <template x-if="serviceForm.billing && !billings.some(b => b.name === serviceForm.billing)">
                                             <option :value="serviceForm.billing" x-text="serviceForm.billing"></option>
                                         </template>
-                                        <template x-for="b in billings" :key="b">
-                                            <option :value="b" x-text="b"></option>
+                                        <template x-for="b in billings" :key="b.name">
+                                            <option :value="b.name" x-text="b.name"></option>
                                         </template>
                                     </select>
                                 </div>
                             </div>
+
+                            {{-- Тарификация: зависит от выбранного режима биллинга --}}
+                            <template x-if="isPaidBilling">
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-700 mb-1">Ставка <span class="text-red-500">*</span></label>
+                                    <select x-model="serviceForm.rate_id" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
+                                        <option value="">— выберите ставку —</option>
+                                        <template x-for="r in rates" :key="r.id">
+                                            <option :value="r.id" x-text="rateLabel(r)"></option>
+                                        </template>
+                                    </select>
+                                    <p class="mt-1 text-xs text-slate-500" x-show="selectedRate" x-text="selectedRate ? ('Цена в смете: ' + formatPrice(selectedRate.price) + (selectedRate.unit ? ' / ' + selectedRate.unit : '') + ' × кол-во') : ''"></p>
+                                    <p class="mt-1 text-xs text-amber-600" x-show="!serviceForm.rate_id">Выберите ставку — из неё берётся цена и единица измерения.</p>
+                                </div>
+                            </template>
+                            <template x-if="isFreeBilling">
+                                <div class="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-500">
+                                    <span x-show="selectedBillingCode === 'included'">Цена 0 — услуга входит в абонентскую плату.</span>
+                                    <span x-show="selectedBillingCode === 'none'">Не тарифицируется — цена 0 (контрольная задача).</span>
+                                </div>
+                            </template>
 
                             <div class="grid grid-cols-2 gap-4">
                                 <div class="col-span-2">
@@ -552,6 +575,7 @@ function servicesPage() {
         spheres: @json($spheres),
         groups: @json($groups),
         billings: @json($billings),
+        rates: @json($rates),
         selectedRowId: null,
 
         sphereFilter: '',
@@ -567,6 +591,17 @@ function servicesPage() {
             return p ? p.kind : null;
         },
         get monthFieldEnabled() { return ['quarterly','yearly'].includes(this.selectedKind); },
+
+        // Тарификация: код режима выбранного биллинга определяет, нужна ли ставка
+        get selectedBillingCode() {
+            const b = this.billings.find(x => x.name === this.serviceForm.billing);
+            return b ? b.code : null;
+        },
+        get isPaidBilling() { return ['by_quantity', 'addon'].includes(this.selectedBillingCode); },
+        get isFreeBilling() { return ['included', 'none'].includes(this.selectedBillingCode); },
+        get selectedRate() { return this.rates.find(r => r.id == this.serviceForm.rate_id) || null; },
+        rateLabel(r) { return r.name + ' · ' + this.formatPrice(r.price) + (r.unit ? ' / ' + r.unit : ''); },
+        onBillingChange() { if (!this.isPaidBilling) this.serviceForm.rate_id = null; },
         get monthMultiple() { return this.selectedKind === 'quarterly'; }, // ежегодно — только один месяц
         get dayIsWeekday() { return this.selectedKind === 'weekly'; },
         get monthDisabledHint() {
@@ -641,7 +676,7 @@ function servicesPage() {
         serviceForm: {
             id: null, parent_id: null, tax_systems: [], name: '', description: '',
             sphere: '', service_group: '', business_process: '', category: '',
-            cost: 0, pricing_rules: [], use_tiered_pricing: false,
+            cost: 0, rate_id: null, pricing_rules: [], use_tiered_pricing: false,
             periodicity: '', due_day: null, start_month: [], start_day: [], deadline_days: null, execution_minutes: null,
             closing_rule: '', requires_document: false, check_type: '', requires_review: false, billing: '', comment: '',
             allows_quantity: false, splits_by_branch: false, flags: {}, children: [],
@@ -674,7 +709,7 @@ function servicesPage() {
                     name: svc.name, description: svc.description || '',
                     sphere: svc.sphere || '', service_group: svc.service_group || '',
                     business_process: svc.business_process || '', category: svc.category || '',
-                    cost: svc.cost, pricing_rules: rules, use_tiered_pricing: rules.length > 0,
+                    cost: svc.cost, rate_id: svc.rate_id ?? null, pricing_rules: rules, use_tiered_pricing: rules.length > 0,
                     periodicity: svc.periodicity || '', due_day: svc.due_day || null,
                     start_month: Array.isArray(svc.start_month) ? svc.start_month : [], start_day: Array.isArray(svc.start_day) ? svc.start_day : [],
                     deadline_days: svc.deadline_days || null, execution_minutes: svc.execution_minutes || null,
@@ -689,7 +724,7 @@ function servicesPage() {
                 this.serviceForm = {
                     id: null, parent_id: null, tax_systems: [], name: '', description: '',
                     sphere: '', service_group: '', business_process: '', category: '',
-                    cost: 0, pricing_rules: [], use_tiered_pricing: false,
+                    cost: 0, rate_id: null, pricing_rules: [], use_tiered_pricing: false,
                     periodicity: '', due_day: null, start_month: [], start_day: [], deadline_days: null, execution_minutes: null,
                     closing_rule: '', requires_document: false, check_type: '', requires_review: false, billing: '', comment: '',
                     allows_quantity: false, splits_by_branch: false, flags: this.blankFlags(), children: [],

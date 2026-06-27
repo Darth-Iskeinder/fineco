@@ -55,11 +55,17 @@
                         <button type="button" @click="bp.quantity++"
                                 class="px-2 py-1 text-slate-500 hover:bg-slate-100 text-sm leading-none select-none">+</button>
                     </div>
+                    <span class="text-xs text-slate-400" x-show="bp.unit" x-text="bp.unit"></span>
                 </div>
             </template>
 
             <template x-if="bp.children.length > 0 && bp.enabled && !bp.children.some(c => c.enabled)">
                 <span class="text-xs text-slate-400 italic flex-shrink-0">выберите подпункты</span>
+            </template>
+
+            {{-- Сумма строки (цена×кол-во), для платных БП без подпунктов --}}
+            <template x-if="bp.enabled && bp.cost > 0 && bp.children.length === 0">
+                <span class="text-sm font-semibold text-slate-700 flex-shrink-0 tabular-nums" x-text="fmt(bpTotal(bp))"></span>
             </template>
         </div>
 

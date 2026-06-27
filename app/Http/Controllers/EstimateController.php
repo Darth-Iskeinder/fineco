@@ -6,6 +6,7 @@ use App\Models\Client;
 use App\Models\Estimate;
 use App\Models\EstimateItem;
 use App\Models\Service;
+use App\Services\PricingCalculator;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 
@@ -56,6 +57,7 @@ class EstimateController extends Controller
             || $s->taxSystems->contains('id', $clientTaxSystemId);         // РН клиента совпадает
 
         $flagKeys = array_keys(Service::SPECIAL_FLAGS);
+        $pricing  = new PricingCalculator();
 
         // Индивидуальные расписания БП этого клиента (override дефолтов), keyed by service_id
         $overrides = $client->serviceSchedules()->get()->keyBy('service_id');
@@ -65,7 +67,7 @@ class EstimateController extends Controller
         // Сборка структуры БП с состоянием тоглов.
         // $savedItem — сохранённая строка сметы для этого БП и НО (или null);
         // $taxOfficeCode/$branchLabel заданы только для филиальных копий.
-        $buildBpData = function ($bp, $savedItem, $taxOfficeCode = null, $branchLabel = null) use ($isFirstLoad, $flagKeys, $overrides) {
+        $buildBpData = function ($bp, $savedItem, $taxOfficeCode = null, $branchLabel = null) use ($isFirstLoad, $flagKeys, $overrides, $pricing) {
             $bpData = [
                 'service_id'      => $bp->id,
                 'row_key'         => $taxOfficeCode !== null ? $bp->id . ':' . $taxOfficeCode : (string) $bp->id,
@@ -73,7 +75,8 @@ class EstimateController extends Controller
                 'branch_label'    => $branchLabel,
                 'name'            => $bp->name,
                 'sphere'          => $bp->sphere,
-                'cost'            => (float) $bp->cost,
+                'cost'            => $pricing->unitPrice($bp),
+                'unit'            => $bp->rate?->unit,
                 'periodicity'     => $bp->periodicity ?? '',
                 'allows_quantity' => $bp->allows_quantity,
                 'enabled'         => $isFirstLoad ? true : ($savedItem !== null),
@@ -102,7 +105,8 @@ class EstimateController extends Controller
                 $bpData['children'][] = [
                     'service_id'     => $child->id,
                     'name'           => $child->name,
-                    'cost'           => (float) $child->cost,
+                    'cost'           => $pricing->unitPrice($child),
+                    'unit'           => $child->rate?->unit,
                     'periodicity'    => $child->periodicity ?? '',
                     'allows_quantity'=> $child->allows_quantity,
                     'enabled'        => $isFirstLoad ? false : ($savedChild !== null),
@@ -133,7 +137,7 @@ class EstimateController extends Controller
         // Обычные БП (без особых условий), применимые по режиму налогообложения,
         // подтягиваются из всего активного каталога — независимо от тарифа.
         $includedServiceIds = [];
-        $rootServices = Service::with(['taxSystems', 'children'])
+        $rootServices = Service::with(['taxSystems', 'children.rate', 'rate'])
             ->roots()->active()->ordered()->get()
             ->filter(fn($s) => $matchesTaxSystem($s) && !$hasAnyFlag($s))
             ->values();
@@ -150,7 +154,7 @@ class EstimateController extends Controller
                 continue;
             }
 
-            $flagServices = Service::with('children')
+            $flagServices = Service::with(['children.rate', 'rate'])
                 ->roots()->active()->where($col, true)->ordered()->get()
                 ->filter(fn($s) => !isset($includedServiceIds[$s->id]))
                 ->values();
@@ -167,7 +171,7 @@ class EstimateController extends Controller
             ->flatMap(fn($i) => collect([$i->service_id])->merge($i->children->pluck('service_id')))
             ->filter()->unique()->values()->toArray();
         $extraServicesById = $extraServiceIds
-            ? Service::whereIn('id', $extraServiceIds)->get()->keyBy('id')
+            ? Service::with('rate')->whereIn('id', $extraServiceIds)->get()->keyBy('id')
             : collect();
 
         $extras = $extraItems
@@ -177,6 +181,7 @@ class EstimateController extends Controller
                 'name'            => $item->name,
                 'periodicity'     => $item->periodicity ?? '',
                 'cost'            => (float) $item->cost,
+                'unit'            => $extraServicesById->get($item->service_id)?->rate?->unit,
                 'quantity'        => (int) $item->quantity,
                 'allows_quantity' => (bool) ($extraServicesById->get($item->service_id)?->allows_quantity ?? false),
                 'children'        => $item->children->map(fn($c) => [
@@ -192,7 +197,7 @@ class EstimateController extends Controller
             ])->values()->toArray();
 
         // All catalog BPs for "add extra" modal (root only, with children)
-        $allServices = Service::with('children')
+        $allServices = Service::with(['children.rate', 'rate'])
             ->roots()
             ->active()
             ->ordered()
@@ -201,13 +206,15 @@ class EstimateController extends Controller
                 'id'             => $s->id,
                 'name'           => $s->name,
                 'periodicity'    => $s->periodicity ?? '',
-                'cost'           => (float) $s->cost,
+                'cost'           => $pricing->unitPrice($s),
+                'unit'           => $s->rate?->unit,
                 'allows_quantity'=> $s->allows_quantity,
                 'children'       => $s->children->map(fn($c) => [
                     'id'             => $c->id,
                     'name'           => $c->name,
                     'periodicity'    => $c->periodicity ?? '',
-                    'cost'           => (float) $c->cost,
+                    'cost'           => $pricing->unitPrice($c),
+                    'unit'           => $c->rate?->unit,
                     'allows_quantity'=> $c->allows_quantity,
                 ])->values()->toArray(),
             ])->values()->toArray();
@@ -269,14 +276,15 @@ class EstimateController extends Controller
 
         $estimate->items()->delete();
 
-        $total = 0;
+        $pricing   = new PricingCalculator();
+        $total     = 0;
         $sortOrder = 0;
 
         // Tariff BPs (only enabled ones)
         foreach ($request->input('tariff_bps', []) as $bpData) {
             if (empty($bpData['enabled'])) continue;
 
-            $service = Service::find($bpData['service_id']);
+            $service = Service::with('rate')->find($bpData['service_id']);
             if (!$service) continue;
 
             $qty       = (int) ($bpData['quantity'] ?? 1);
@@ -290,7 +298,7 @@ class EstimateController extends Controller
                 'name'            => $service->name,
                 'periodicity'     => $service->periodicity,
                 'due_day'         => $service->due_day,
-                'cost'            => $service->cost,
+                'cost'            => $pricing->unitPrice($service),
                 'quantity'        => $qty,
                 'total'           => 0, // filled after children
                 'sort_order'      => $sortOrder++,
@@ -299,11 +307,11 @@ class EstimateController extends Controller
             $childTotal = 0;
             $childOrder = 0;
             foreach ($children as $childData) {
-                $childService = Service::find($childData['service_id']);
+                $childService = Service::with('rate')->find($childData['service_id']);
                 if (!$childService) continue;
 
                 $cqty  = (int) ($childData['quantity'] ?? 1);
-                $cTotal = round((float) $childService->cost * $cqty, 2);
+                $cTotal = $pricing->lineTotal($childService, $cqty);
                 $childTotal += $cTotal;
 
                 $estimate->items()->create([
@@ -313,7 +321,7 @@ class EstimateController extends Controller
                     'name'        => $childService->name,
                     'periodicity' => $childService->periodicity,
                     'due_day'     => $childService->due_day,
-                    'cost'        => $childService->cost,
+                    'cost'        => $pricing->unitPrice($childService),
                     'quantity'    => $cqty,
                     'total'       => $cTotal,
                     'sort_order'  => $childOrder++,
@@ -322,7 +330,7 @@ class EstimateController extends Controller
 
             $parentTotal = $children->isNotEmpty()
                 ? $childTotal
-                : round((float) $service->cost * $qty, 2);
+                : $pricing->lineTotal($service, $qty);
 
             $parent->update(['total' => $parentTotal]);
             $total += $parentTotal;

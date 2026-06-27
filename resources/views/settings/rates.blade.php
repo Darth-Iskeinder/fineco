@@ -74,7 +74,12 @@
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
                                     <label class="block text-sm font-medium text-slate-700 mb-1">Единица</label>
-                                    <input type="text" x-model="form.unit" placeholder="час, шт., услуга..." class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                    <input type="text" x-model="form.unit" list="rate-units" placeholder="за час, за раз, за сотрудника..." class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                    <datalist id="rate-units">
+                                        @foreach ($units as $u)
+                                            <option value="{{ $u }}"></option>
+                                        @endforeach
+                                    </datalist>
                                 </div>
                                 <div>
                                     <label class="block text-sm font-medium text-slate-700 mb-1">Цена <span class="text-red-500">*</span></label>

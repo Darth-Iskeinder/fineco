@@ -69,6 +69,7 @@ class Service extends Model
         'business_process',
         'category',
         'cost',
+        'rate_id',
         'pricing_rules',
         'periodicity',
         'due_day',
@@ -156,6 +157,18 @@ class Service extends Model
     public function parent(): BelongsTo
     {
         return $this->belongsTo(Service::class, 'parent_id');
+    }
+
+    /** Ставка из справочника (источник цены для платных режимов биллинга). */
+    public function rate(): BelongsTo
+    {
+        return $this->belongsTo(Rate::class);
+    }
+
+    /** Код режима тарификации этого БП (резолвится из справочника биллингов по имени). */
+    public function billingCode(): ?string
+    {
+        return Billing::codeForName($this->billing);
     }
 
     public function children(): HasMany
