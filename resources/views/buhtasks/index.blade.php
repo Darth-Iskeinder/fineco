@@ -387,10 +387,12 @@
                 <table class="min-w-full border-separate border-spacing-0 border-t border-l border-slate-200">
                     <thead>
                         <tr>
-                            <th class="sticky left-0 z-20 bg-slate-100 px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider border-r border-b border-slate-200 min-w-[200px]">Компания</th>
-                            <template x-for="col in checklistData.cols" :key="col.name">
-                                <th class="bg-slate-100 px-3 py-3 text-center text-xs font-semibold text-slate-600 border-r border-b border-slate-200 whitespace-nowrap">
-                                    <span x-text="col.name"></span>
+                            <th class="sticky left-0 z-20 bg-slate-100 px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider border-r border-b border-slate-200 min-w-[200px] align-bottom">Компания</th>
+                            <template x-for="col in checklistData.cols" :key="col.key">
+                                <th class="bg-slate-100 px-1.5 pt-3 pb-2 border-r border-b border-slate-200 align-bottom">
+                                    <div class="mx-auto" style="writing-mode: vertical-rl; transform: rotate(180deg);">
+                                        <span class="text-xs font-semibold text-slate-600 whitespace-nowrap" x-text="col.label" :title="col.label"></span>
+                                    </div>
                                 </th>
                             </template>
                         </tr>
@@ -399,23 +401,23 @@
                         <template x-for="company in checklistData.companies" :key="company.id">
                             <tr class="group">
                                 <td class="sticky left-0 z-10 bg-white group-hover:bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 border-r border-b border-slate-200 whitespace-nowrap" x-text="company.name"></td>
-                                <template x-for="col in checklistData.cols" :key="col.name">
-                                    <td class="px-3 py-3 text-center border-r border-b border-slate-200 group-hover:bg-slate-50/50">
-                                        <template x-if="(checklistData.cells[company.id] || {})[col.name] === 'done'">
+                                <template x-for="col in checklistData.cols" :key="col.key">
+                                    <td class="px-2 py-3 text-center border-r border-b border-slate-200 group-hover:bg-slate-50/50">
+                                        <template x-if="(checklistData.cells[company.id] || {})[col.key] === 'done'">
                                             <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 text-emerald-600" title="выполнено">
                                                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
                                             </span>
                                         </template>
-                                        <template x-if="(checklistData.cells[company.id] || {})[col.name] === 'review'">
+                                        <template x-if="(checklistData.cells[company.id] || {})[col.key] === 'review'">
                                             <span class="inline-block w-2.5 h-2.5 rounded-full bg-sky-500" title="на проверке"></span>
                                         </template>
-                                        <template x-if="(checklistData.cells[company.id] || {})[col.name] === 'progress'">
+                                        <template x-if="(checklistData.cells[company.id] || {})[col.key] === 'progress'">
                                             <span class="inline-block w-2.5 h-2.5 rounded-full bg-amber-400" title="в процессе"></span>
                                         </template>
-                                        <template x-if="(checklistData.cells[company.id] || {})[col.name] === 'none'">
+                                        <template x-if="(checklistData.cells[company.id] || {})[col.key] === 'none'">
                                             <span class="inline-block w-2.5 h-2.5 rounded-full border border-slate-300" title="не начато"></span>
                                         </template>
-                                        <template x-if="!checklistData.cells[company.id] || !(col.name in checklistData.cells[company.id])">
+                                        <template x-if="!checklistData.cells[company.id] || !(col.key in checklistData.cells[company.id])">
                                             <span class="text-slate-200" title="нет такой задачи">·</span>
                                         </template>
                                     </td>
@@ -1181,20 +1183,22 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
             this.tasks.filter(t => this.matchesFilter(t)).forEach(t => {
                 const cid = String(t.client_id ?? t.client_name);
                 if (!companyMap[cid]) companyMap[cid] = { id: cid, name: t.client_name || '—' };
-                if (!colMap[t.name]) colMap[t.name] = { name: t.name, count: 0 };
-                colMap[t.name].count++;
+                // Филиальные задачи — отдельный столбец на каждый НО (name + филиал).
+                const key = t.branch_label ? (t.name + ' · ' + t.branch_label) : t.name;
+                if (!colMap[key]) colMap[key] = { key, label: key, count: 0 };
+                colMap[key].count++;
                 let cat;
                 if (t.status === 'completed')   cat = 'done';
                 else if (t.status === 'pending') cat = 'none';
                 else if (t.status === 'review')  cat = 'review';
                 else                             cat = 'progress';
                 if (!cells[cid]) cells[cid] = {};
-                const prev = cells[cid][t.name];
-                cells[cid][t.name] = (!prev || rank[cat] > rank[prev]) ? cat : prev;
+                const prev = cells[cid][key];
+                cells[cid][key] = (!prev || rank[cat] > rank[prev]) ? cat : prev;
             });
             return {
                 companies: Object.values(companyMap).sort((a, b) => a.name.localeCompare(b.name, 'ru')),
-                cols: Object.values(colMap).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'ru')),
+                cols: Object.values(colMap).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'ru')),
                 cells,
             };
         },
