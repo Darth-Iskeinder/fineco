@@ -72,7 +72,7 @@
     </template>
 </div>
 
-<div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($services) }}, {{ json_encode($completed) }}, {{ json_encode($employees) }}, {{ $employee->id }})" x-cloak>
+<div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($completed) }}, {{ json_encode($employees) }}, {{ $employee->id }})" x-cloak>
 
     {{-- Шапка --}}
     <div class="flex items-center justify-between mb-2">
@@ -169,7 +169,6 @@
                             </button>
                         </th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Отчётный период</th>
-                        <th class="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Стоимость</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider w-24">Время</th>
                         <th class="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Действия</th>
                     </tr>
@@ -249,11 +248,6 @@
                             <td class="px-4 py-3.5">
                                 <span x-show="task.reporting_period" class="text-sm text-slate-700" x-text="task.reporting_period"></span>
                                 <span x-show="!task.reporting_period" class="text-slate-300 text-sm">—</span>
-                            </td>
-
-                            <td class="px-4 py-3.5 text-right">
-                                <span class="text-sm font-semibold text-slate-700"
-                                      x-text="task.cost > 0 ? formatPrice(task.cost) : '—'"></span>
                             </td>
 
                             <td class="px-4 py-3.5">
@@ -494,28 +488,12 @@
                 </button>
             </div>
 
-            {{-- Переключатель режима --}}
-            <div class="flex bg-slate-100 rounded-xl p-1 mb-5">
-                <button type="button"
-                        @click="newTask.mode = 'catalog'"
-                        :class="newTask.mode === 'catalog' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'"
-                        class="flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all">
-                    Из каталога БП
-                </button>
-                <button type="button"
-                        @click="newTask.mode = 'custom'"
-                        :class="newTask.mode === 'custom' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'"
-                        class="flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-all">
-                    Произвольная
-                </button>
-            </div>
-
             <div class="space-y-4">
                 {{-- Компания --}}
                 <div>
                     <label class="block text-sm font-medium text-slate-700 mb-1.5">
                         Компания
-                        <span x-show="newTask.mode === 'custom'" class="text-slate-400 font-normal">(необязательно)</span>
+                        <span class="text-slate-400 font-normal">(необязательно)</span>
                     </label>
                     <select x-model="newTask.client_id"
                             class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 bg-white">
@@ -526,68 +504,35 @@
                     </select>
                 </div>
 
-                {{-- Режим: из каталога --}}
-                <template x-if="newTask.mode === 'catalog'">
-                    <div>
-                        <label class="block text-sm font-medium text-slate-700 mb-1.5">Бизнес-процесс</label>
-                        <select x-model="newTask.service_id"
-                                @change="onServiceChange()"
+                {{-- Произвольная (внеплановая) задача сотруднику — в смету не попадает --}}
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 mb-1.5">Название задачи</label>
+                    <input type="text"
+                           x-model="newTask.name"
+                           placeholder="Например: Сверка с банком"
+                           class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50">
+                </div>
+                <div class="flex gap-3">
+                    <div class="flex-1">
+                        <label class="block text-sm font-medium text-slate-700 mb-1.5">Сотрудник</label>
+                        <select x-model="newTask.employee_id"
                                 class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 bg-white">
-                            <option value="">Выберите услугу...</option>
-                            <template x-for="svc in allServices" :key="'root_' + svc.id">
-                                <template x-if="svc.children.length === 0">
-                                    <option :value="svc.id" x-text="svc.name + (svc.cost > 0 ? ' — ' + formatPrice(svc.cost) : '')"></option>
-                                </template>
-                                <template x-if="svc.children.length > 0">
-                                    <optgroup :label="svc.name">
-                                        <template x-for="child in svc.children" :key="'child_' + child.id">
-                                            <option :value="child.id" x-text="child.name + (child.cost > 0 ? ' — ' + formatPrice(child.cost) : '')"></option>
-                                        </template>
-                                    </optgroup>
-                                </template>
+                            <template x-for="emp in employees" :key="emp.id">
+                                <option :value="emp.id" x-text="emp.full_name"></option>
                             </template>
                         </select>
-                        <template x-if="newTask.service_id && newTask.cost > 0">
-                            <p class="mt-1.5 text-xs text-slate-500">
-                                Стоимость: <span class="font-semibold text-slate-700" x-text="formatPrice(newTask.cost)"></span>
-                            </p>
-                        </template>
                     </div>
-                </template>
-
-                {{-- Режим: произвольная (внеплановая задача сотруднику, не в смете) --}}
-                <template x-if="newTask.mode === 'custom'">
-                    <div class="space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-slate-700 mb-1.5">Название задачи</label>
-                            <input type="text"
-                                   x-model="newTask.name"
-                                   placeholder="Например: Сверка с банком"
-                                   class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50">
-                        </div>
-                        <div class="flex gap-3">
-                            <div class="flex-1">
-                                <label class="block text-sm font-medium text-slate-700 mb-1.5">Сотрудник</label>
-                                <select x-model="newTask.employee_id"
-                                        class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 bg-white">
-                                    <template x-for="emp in employees" :key="emp.id">
-                                        <option :value="emp.id" x-text="emp.full_name"></option>
-                                    </template>
-                                </select>
-                            </div>
-                            <div class="w-40">
-                                <label class="block text-sm font-medium text-slate-700 mb-1.5">Дата</label>
-                                <input type="date"
-                                       x-model="newTask.due_date"
-                                       class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50">
-                            </div>
-                        </div>
-                        <p class="text-xs text-slate-400 flex items-center gap-1">
-                            <span class="inline-block w-2 h-2 rounded-full bg-violet-500"></span>
-                            Произвольная задача — не попадает в смету, напоминает назначенному сотруднику.
-                        </p>
+                    <div class="w-40">
+                        <label class="block text-sm font-medium text-slate-700 mb-1.5">Дата</label>
+                        <input type="date"
+                               x-model="newTask.due_date"
+                               class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50">
                     </div>
-                </template>
+                </div>
+                <p class="text-xs text-slate-400 flex items-center gap-1">
+                    <span class="inline-block w-2 h-2 rounded-full bg-violet-500"></span>
+                    Произвольная задача — не попадает в смету, напоминает назначенному сотруднику.
+                </p>
 
                 <div x-show="createError" class="px-3 py-2 bg-red-50 rounded-lg text-sm text-red-600" x-text="createError"></div>
             </div>
@@ -601,7 +546,7 @@
                         :disabled="creating"
                         class="flex-1 py-2.5 px-4 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 disabled:opacity-60 transition-colors flex items-center justify-center gap-2">
                     <svg x-show="creating" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                    <span x-text="creating ? 'Создание...' : (newTask.mode === 'custom' ? 'Создать задачу' : 'Добавить в смету')"></span>
+                    <span x-text="creating ? 'Создание...' : 'Создать задачу'"></span>
                 </button>
             </div>
         </div>
@@ -1115,7 +1060,7 @@
 </div>
 
 <script>
-function buhTasks(initialTasks, year, month, allClients, allServices, completed, employees, currentEmployeeId) {
+function buhTasks(initialTasks, year, month, allClients, completed, employees, currentEmployeeId) {
     // File-объекты держим вне реактивного state — Alpine оборачивает объекты в Proxy,
     // что ломает внутренние методы File/Blob при передаче в FormData
     const pendingFiles = new Map();
@@ -1139,7 +1084,6 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
         year,
         month,
         allClients,
-        allServices,
         employees: employees || [],
         currentEmployeeId,
         viewMode: 'list',
@@ -1154,7 +1098,7 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
 
         showCreateModal: false,
         startConfirm: { show: false, idx: null },
-        newTask: { mode: 'catalog', client_id: '', service_id: '', name: '', cost: '', due_day: '', employee_id: currentEmployeeId, due_date: '' },
+        newTask: { client_id: '', name: '', employee_id: currentEmployeeId, due_date: '' },
         creating: false,
         createError: '',
 
@@ -1647,47 +1591,28 @@ function buhTasks(initialTasks, year, month, allClients, allServices, completed,
             else this.tasks[idx] = { ...this.tasks[idx], loading: false };
         },
 
-        onServiceChange() {
-            if (!this.newTask.service_id) { this.newTask.cost = ''; return; }
-            const id = parseInt(this.newTask.service_id);
-            for (const svc of this.allServices) {
-                if (svc.id === id) { this.newTask.cost = svc.cost; return; }
-                const child = svc.children.find(c => c.id === id);
-                if (child) { this.newTask.cost = child.cost; return; }
-            }
-        },
-
         resetNewTask() {
-            this.newTask = { mode: this.newTask.mode, client_id: '', service_id: '', name: '', cost: '', due_day: '', employee_id: this.currentEmployeeId, due_date: '' };
+            this.newTask = { client_id: '', name: '', employee_id: this.currentEmployeeId, due_date: '' };
         },
 
         async createTask() {
             this.createError = '';
 
-            // Каталог — позиция в смете (нужна компания). Произвольная — внеплановая задача сотруднику (компания необязательна).
-            const isCustom = this.newTask.mode === 'custom';
-
-            if (isCustom) {
-                if (!this.newTask.name.trim())  { this.createError = 'Введите название задачи'; return; }
-                if (!this.newTask.employee_id)  { this.createError = 'Выберите сотрудника'; return; }
-                if (!this.newTask.due_date)     { this.createError = 'Укажите дату'; return; }
-            } else {
-                if (!this.newTask.client_id)    { this.createError = 'Выберите компанию'; return; }
-                if (!this.newTask.service_id)   { this.createError = 'Выберите бизнес-процесс'; return; }
-            }
+            // Только произвольная (внеплановая) задача сотруднику — в смету не пишем.
+            if (!this.newTask.name.trim())  { this.createError = 'Введите название задачи'; return; }
+            if (!this.newTask.employee_id)  { this.createError = 'Выберите сотрудника'; return; }
+            if (!this.newTask.due_date)     { this.createError = 'Укажите дату'; return; }
 
             this.creating = true;
 
             try {
-                const url = isCustom ? '/buhtasks/adhoc' : '/buhtasks/extra';
-                const body = isCustom
-                    ? {
-                        employee_id: this.newTask.employee_id,
-                        client_id:   this.newTask.client_id || null,
-                        name:        this.newTask.name.trim(),
-                        due_date:    this.newTask.due_date,
-                    }
-                    : { client_id: this.newTask.client_id, year: this.year, month: this.month, service_id: this.newTask.service_id };
+                const url = '/buhtasks/adhoc';
+                const body = {
+                    employee_id: this.newTask.employee_id,
+                    client_id:   this.newTask.client_id || null,
+                    name:        this.newTask.name.trim(),
+                    due_date:    this.newTask.due_date,
+                };
 
                 const r = await fetch(url, {
                     method: 'POST',

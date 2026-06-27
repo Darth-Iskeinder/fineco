@@ -231,20 +231,6 @@ class BuhTasksController extends Controller
             ];
         }
 
-        $services = Service::with('children')->roots()->active()->ordered()->get()
-            ->map(fn($s) => [
-                'id'          => $s->id,
-                'name'        => $s->name,
-                'cost'        => (float) $s->cost,
-                'periodicity' => $s->periodicity ?? '',
-                'children'    => $s->children->map(fn($c) => [
-                    'id'          => $c->id,
-                    'name'        => $c->name,
-                    'cost'        => (float) $c->cost,
-                    'periodicity' => $c->periodicity ?? '',
-                ])->values()->toArray(),
-            ])->values()->toArray();
-
         // Вкладка «Выполненные» — история за последние 90 дней (read-only): плановые + внеплановые.
         $completedPlanned = BuhTaskLog::where('employee_id', $employee->id)
             ->where('status', 'completed')
@@ -346,7 +332,7 @@ class BuhTasksController extends Controller
             ->orderBy('full_name')
             ->get(['id', 'full_name']);
 
-        return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'services', 'reminders', 'reminderCounts', 'completed', 'completedDays', 'employees'));
+        return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'reminders', 'reminderCounts', 'completed', 'completedDays', 'employees'));
     }
 
     // =============================================
@@ -382,95 +368,6 @@ class BuhTasksController extends Controller
     private function authorizeReminder(TaskReminder $reminder): void
     {
         abort_if($reminder->employee_id !== auth('employee')->id(), 403);
-    }
-
-    // =============================================
-    // ДОБАВИТЬ ЗАДАЧУ В СМЕТУ (extra EstimateItem)
-    // =============================================
-
-    public function storeExtra(Request $request)
-    {
-        $request->validate([
-            'client_id'  => 'required|exists:clients,id',
-            'service_id' => 'nullable|exists:services,id',
-            'name'       => 'required_without:service_id|nullable|string|max:255',
-            'cost'       => 'nullable|numeric|min:0',
-        ]);
-
-        $employee = auth('employee')->user();
-
-        abort_if(
-            !$employee->responsibleClients()->where('id', $request->client_id)->exists(),
-            403
-        );
-
-        $client = Client::find($request->client_id);
-
-        $estimate = Estimate::firstOrCreate(
-            ['client_id' => $client->id],
-            ['total' => 0]
-        );
-
-        if ($request->service_id) {
-            $service     = Service::findOrFail($request->service_id);
-            $name        = $service->name;
-            $cost        = (float) $service->cost;
-            $periodicity = $service->periodicity;
-            $dueDay      = $service->due_day;
-            $serviceId   = $service->id;
-        } else {
-            $name        = $request->name;
-            $cost        = (float) ($request->cost ?? 0);
-            $periodicity = null;
-            $dueDay      = $request->due_day ? (int) $request->due_day : null;
-            $serviceId   = null;
-        }
-
-        $sortOrder = ($estimate->items()->max('sort_order') ?? 0) + 1;
-
-        $item = $estimate->items()->create([
-            'service_id'  => $serviceId,
-            'type'        => 'one_time',
-            'name'        => $name,
-            'periodicity' => $periodicity,
-            'due_day'     => $dueDay,
-            'cost'        => $cost,
-            'quantity'    => 1,
-            'total'       => $cost,
-            'sort_order'  => $sortOrder,
-        ]);
-
-        $estimate->total = $estimate->items()->whereNull('parent_id')->sum('total');
-        $estimate->save();
-
-        // Новая задача создаётся в текущем месяце
-        $now = CarbonImmutable::now();
-        $dueDateStr = $item->due_day
-            ? $now->day(min((int) $item->due_day, $now->daysInMonth))->toDateString()
-            : null;
-
-        return response()->json([
-            'success' => true,
-            'task' => [
-                'uid'               => 'planned_' . $item->id . '_' . $now->year . '_' . $now->month,
-                'type'              => 'planned',
-                'item_id'           => $item->id,
-                'client_id'         => $client->id,
-                'client_name'       => $client->name,
-                'year'              => $now->year,
-                'month'             => $now->month,
-                'log_id'            => null,
-                'name'              => $item->name,
-                'cost'              => (float) $item->total,
-                'periodicity'       => $item->periodicity,
-                'due_day'           => $item->due_day,
-                'due_date'          => $dueDateStr,
-                'status'            => 'pending',
-                'elapsed_seconds'   => 0,
-                'loading'           => false,
-                'client_resumed_at' => null,
-            ],
-        ]);
     }
 
     // =============================================
