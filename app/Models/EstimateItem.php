@@ -12,6 +12,8 @@ class EstimateItem extends Model
         'estimate_id',
         'parent_id',
         'service_id',
+        'tax_office_code',
+        'branch_label',
         'type',
         'name',
         'periodicity',

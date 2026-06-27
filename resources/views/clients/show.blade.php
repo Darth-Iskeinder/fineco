@@ -84,7 +84,7 @@
                             </div>
                             <div>
                                 <dt class="text-sm font-medium text-slate-500">Код НО</dt>
-                                <dd class="mt-1 text-sm text-slate-900" x-text="client.tax_office_code || '—'"></dd>
+                                <dd class="mt-1 text-sm text-slate-900" x-text="taxAuthorityLabel(client.tax_office_code)"></dd>
                             </div>
                             <div>
                                 <dt class="text-sm font-medium text-slate-500">Основной вид деятельности</dt>
@@ -118,7 +118,12 @@
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-1">Код НО</label>
-                                <input type="text" x-model="form.basic.tax_office_code" maxlength="10" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                <select x-model="form.basic.tax_office_code" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                    <option value="">Не указан</option>
+                                    <template x-for="ta in taxAuthorities" :key="ta.id">
+                                        <option :value="ta.code" :selected="ta.code === form.basic.tax_office_code" x-text="ta.code + ' — ' + ta.name"></option>
+                                    </template>
+                                </select>
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-1">Основной вид деятельности</label>
@@ -575,30 +580,29 @@
                             <div>
                                 <div class="flex items-center justify-between mb-3">
                                     <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Филиалы (сдача отчётов в разные НО)</p>
-                                    <button type="button"
-                                            @click="form.flags.has_branches = !form.flags.has_branches; if(form.flags.has_branches && form.flags.branches.length === 0) form.flags.branches.push({no_code: '', city: ''}); if(!form.flags.has_branches) form.flags.branches = []"
-                                            :class="form.flags.has_branches ? 'bg-purple-500' : 'bg-slate-200'"
-                                            class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none">
-                                        <span :class="form.flags.has_branches ? 'translate-x-5' : 'translate-x-0'" class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
-                                    </button>
                                 </div>
-                                <div x-show="form.flags.has_branches" x-transition class="space-y-2">
+                                <div class="space-y-2">
                                     <p class="text-xs text-slate-500">
-                                        Основной НО: <span class="font-medium text-slate-700" x-text="client.tax_office_code || '— не указан'"></span>.
+                                        Основной НО: <span class="font-medium text-slate-700" x-text="taxAuthorityLabel(client.tax_office_code)"></span>.
                                         Добавьте НО филиалов — отчёты «по филиалам» (НСП, 161 форма) сдаются в каждый из них.
                                     </p>
-                                    <template x-for="(b, i) in form.flags.branches" :key="i">
-                                        <div class="flex items-center gap-2">
-                                            <input type="text" x-model="b.no_code" placeholder="Код НО (напр. 032)" class="w-40 px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-400">
-                                            <input type="text" x-model="b.city" placeholder="Город / название филиала" class="flex-1 min-w-0 px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-400">
-                                            <button type="button" @click="form.flags.branches.splice(i, 1)" class="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors flex-shrink-0">
-                                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
-                                            </button>
-                                        </div>
-                                    </template>
-                                    <button type="button" @click="form.flags.branches.push({no_code: '', city: ''})" class="w-full py-2 border-2 border-dashed border-slate-200 rounded-lg text-xs text-slate-500 hover:border-purple-300 hover:text-purple-600 transition-colors">
-                                        + Добавить филиал
-                                    </button>
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        <template x-for="(b, i) in form.flags.branches" :key="b.no_code">
+                                            <span class="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-lg text-xs font-medium bg-white border border-purple-200 text-purple-700">
+                                                <span class="font-semibold" x-text="taxAuthorityLabel(b.no_code)"></span>
+                                                <button type="button" @click="form.flags.branches.splice(i, 1)" class="text-purple-300 hover:text-red-500 transition-colors">
+                                                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                                                </button>
+                                            </span>
+                                        </template>
+                                        <select @change="addBranch($event.target.value); $event.target.value = ''"
+                                                class="w-44 px-2.5 py-1 border-2 border-dashed border-slate-200 rounded-lg text-xs text-slate-500 bg-white hover:border-purple-300 hover:text-purple-600 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-400 transition-colors">
+                                            <option value="">+ Добавить филиал</option>
+                                            <template x-for="ta in availableBranchAuthorities()" :key="ta.id">
+                                                <option :value="ta.code" x-text="ta.code + ' — ' + ta.name"></option>
+                                            </template>
+                                        </select>
+                                    </div>
                                 </div>
                             </div>
 
@@ -1777,6 +1781,7 @@ function clientShow() {
         connectionTypes: @json(\App\Models\Client::$connectionTypes),
         organizationForms: @json(\App\Models\OrganizationForm::orderBy('name')->get()),
         clientStatuses: @json(\App\Models\ClientStatus::orderBy('sort_order')->orderBy('name')->get()),
+        taxAuthorities: @json(\App\Models\TaxAuthority::orderBy('code')->get()),
         clientDocuments: @json($client->documents ?? []),
 
         // Характеристики бизнеса с количеством (карточка-тоггл + поле числа)
@@ -1983,6 +1988,7 @@ function clientShow() {
             const payload = { section, ...this.form[section] };
             if (section === 'flags' && Array.isArray(payload.branches)) {
                 payload.branches = payload.branches.filter(b => b.no_code && String(b.no_code).trim());
+                payload.has_branches = payload.branches.length > 0;
             }
 
             try {
@@ -2034,6 +2040,25 @@ function clientShow() {
 
         formatPrice(price) {
             return new Intl.NumberFormat('ru-RU').format(price) + ' сом';
+        },
+
+        taxAuthorityLabel(code) {
+            if (!code) return '—';
+            const ta = this.taxAuthorities.find(t => t.code === code);
+            return ta ? ta.code + ' — ' + ta.name : code;
+        },
+
+        // НО, доступные для добавления как филиал: без уже выбранных и без основного НО
+        availableBranchAuthorities() {
+            const taken = this.form.flags.branches.map(b => b.no_code);
+            return this.taxAuthorities.filter(t => t.code !== this.client.tax_office_code && !taken.includes(t.code));
+        },
+
+        addBranch(code) {
+            if (!code) return;
+            if (this.form.flags.branches.some(b => b.no_code === code)) return;
+            const ta = this.taxAuthorities.find(t => t.code === code);
+            this.form.flags.branches.push({ no_code: code, city: ta ? ta.name : '' });
         },
 
         isEdsExpired() {

@@ -15,6 +15,7 @@ use App\Models\ServiceGroup;
 use App\Models\ServiceType;
 use App\Models\Sphere;
 use App\Models\TaxpayerCategory;
+use App\Models\TaxAuthority;
 use App\Models\Service;
 use App\Models\Tariff;
 use App\Models\TaxSystem;
@@ -33,9 +34,9 @@ class SettingsController extends Controller
     // ПРОСТЫЕ СПРАВОЧНИКИ (общий паттерн)
     // =============================================
 
-    private function lookupView(string $title, string $endpoint, $items, string $description = '', array $fields = [])
+    private function lookupView(string $title, string $endpoint, $items, string $description = '', array $fields = [], string $nameLabel = 'Название')
     {
-        return view('settings.lookup', compact('title', 'description', 'items', 'fields') + [
+        return view('settings.lookup', compact('title', 'description', 'items', 'fields', 'nameLabel') + [
             'pageTitle'    => $title,
             'baseEndpoint' => $endpoint,
         ]);
@@ -74,6 +75,9 @@ class SettingsController extends Controller
     ]); }
     public function checkTypesPage()          { return $this->lookupView('Проверка',                    '/settings/check-types',           CheckType::orderBy('name')->get()); }
     public function billingsPage()            { return $this->lookupView('Биллинг',                     '/settings/billings',              Billing::orderBy('id')->get()); }
+    public function taxAuthoritiesPage()      { return $this->lookupView('Коды налоговых органов',      '/settings/tax-authorities',       TaxAuthority::orderBy('code')->get(), 'Справочник кодов районных ГНС. Используется при добавлении филиалов в карточке клиента.', [
+        ['key' => 'code', 'label' => 'Код районной ГНС', 'type' => 'text', 'required' => true],
+    ], 'Наименование УГНС'); }
 
     public function storeOrganizationForm(Request $r)                { return $this->lookupStore($r, OrganizationForm::class); }
     public function updateOrganizationForm(Request $r, OrganizationForm $organizationForm) { return $this->lookupUpdate($r, $organizationForm); }
@@ -118,6 +122,10 @@ class SettingsController extends Controller
     public function storeBilling(Request $r)                         { return $this->lookupStore($r, Billing::class); }
     public function updateBilling(Request $r, Billing $billing)                            { return $this->lookupUpdate($r, $billing); }
     public function destroyBilling(Billing $billing)                                       { return $this->lookupDestroy($billing); }
+
+    public function storeTaxAuthority(Request $r)                    { return $this->lookupStore($r, TaxAuthority::class, ['code' => ['required', 'string', 'max:10', Rule::unique('tax_authorities', 'code')]]); }
+    public function updateTaxAuthority(Request $r, TaxAuthority $taxAuthority)             { return $this->lookupUpdate($r, $taxAuthority, ['code' => ['required', 'string', 'max:10', Rule::unique('tax_authorities', 'code')->ignore($taxAuthority->id)]]); }
+    public function destroyTaxAuthority(TaxAuthority $taxAuthority)                         { return $this->lookupDestroy($taxAuthority); }
 
     public function taxSystemsPage()
     {
@@ -477,6 +485,7 @@ class SettingsController extends Controller
             'comment'            => $request->comment ?: null,
             'is_active'          => true,
             'allows_quantity'    => $request->boolean('allows_quantity', false),
+            'splits_by_branch'   => $request->boolean('splits_by_branch', false),
             'sort_order'         => $request->input('sort_order', $minSortOrder - 1),
         ], $this->serviceFlagValues($request)));
 
@@ -563,6 +572,7 @@ class SettingsController extends Controller
             'billing'            => $request->billing ?: null,
             'comment'            => $request->comment ?: null,
             'allows_quantity'    => $request->boolean('allows_quantity', false),
+            'splits_by_branch'   => $request->boolean('splits_by_branch', false),
             'sort_order'         => $request->input('sort_order', $service->sort_order),
         ], $this->serviceFlagValues($request)));
 
@@ -669,6 +679,7 @@ class SettingsController extends Controller
             'comment'           => $service->comment,
             'is_active'       => $service->is_active,
             'allows_quantity' => $service->allows_quantity,
+            'splits_by_branch'=> $service->splits_by_branch,
             'sort_order'      => $service->sort_order,
             'children'        => $service->children->map(fn($c) => [
                 'id'              => $c->id,

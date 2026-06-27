@@ -618,8 +618,8 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
             this.tariffBPs.forEach(bp => {
                 if (!bp.enabled) return;
                 items.push({
-                    key: 'bp-' + bp.service_id,
-                    name: bp.name,
+                    key: 'bp-' + bp.row_key,
+                    name: bp.branch_label ? (bp.name + ' — ' + bp.branch_label) : bp.name,
                     periodicity: bp.periodicity,
                     total: this.bpTotal(bp),
                     remove: () => { bp.enabled = false; },   // гасит тумблер слева

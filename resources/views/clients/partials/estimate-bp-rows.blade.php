@@ -1,5 +1,5 @@
 {{-- Строки БП сметы. Параметр $list — имя массива в Alpine-скоупе (regularBPs / pvtBPs). --}}
-<template x-for="(bp, bpIdx) in {{ $list }}" :key="bp.service_id">
+<template x-for="(bp, bpIdx) in {{ $list }}" :key="bp.row_key">
     <div>
         <!-- Строка БП -->
         <div class="flex items-center gap-4 px-6 py-4"
@@ -15,6 +15,12 @@
             <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2">
                     <p class="text-sm font-medium text-slate-800" x-text="bp.name"></p>
+                    <template x-if="bp.branch_label">
+                        <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700 flex-shrink-0">
+                            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 6h4"/></svg>
+                            <span x-text="bp.branch_label"></span>
+                        </span>
+                    </template>
                     <template x-if="bp.children.length > 0">
                         <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-500 flex-shrink-0">
                             <svg class="w-3 h-3 transition-transform duration-200" :class="bp.enabled ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>

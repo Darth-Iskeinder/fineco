@@ -213,5 +213,11 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/billings', [SettingsController::class, 'storeBilling'])->name('billings.store');
         Route::put('/billings/{billing}', [SettingsController::class, 'updateBilling'])->name('billings.update');
         Route::delete('/billings/{billing}', [SettingsController::class, 'destroyBilling'])->name('billings.destroy');
+
+        // Коды налоговых органов
+        Route::get('/tax-authorities', [SettingsController::class, 'taxAuthoritiesPage'])->name('tax-authorities');
+        Route::post('/tax-authorities', [SettingsController::class, 'storeTaxAuthority'])->name('tax-authorities.store');
+        Route::put('/tax-authorities/{taxAuthority}', [SettingsController::class, 'updateTaxAuthority'])->name('tax-authorities.update');
+        Route::delete('/tax-authorities/{taxAuthority}', [SettingsController::class, 'destroyTaxAuthority'])->name('tax-authorities.destroy');
     });
 });

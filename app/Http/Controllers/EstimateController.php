@@ -29,12 +29,18 @@ class EstimateController extends Controller
 
         $estimateHasItems = $estimate->items()->exists();
 
-        // Enabled service_ids from saved estimate
-        $savedByServiceId      = $tariffItems->keyBy('service_id');
-        $savedChildByServiceId = $tariffItems
-            ->flatMap(fn($i) => $i->children)
-            ->filter(fn($c) => $c->service_id !== null)
-            ->keyBy('service_id');
+        // Сохранённые позиции тарифа. Ключ = service_id + НО (для филиального размножения
+        // у одного service_id может быть несколько строк — по одной на каждый НО).
+        $savedByKey = $tariffItems->keyBy(fn($i) => $i->service_id . ':' . ($i->tax_office_code ?? ''));
+
+        // Налоговые органы клиента для филиальных БП: основной + филиалы.
+        $clientHasBranches = $client->has_branches
+            && collect($client->branches ?? [])->contains(fn($b) => !empty($b['no_code']));
+        $branchTargets = collect([['code' => $client->tax_office_code, 'label' => 'основной']])
+            ->concat(collect($client->branches ?? [])
+                ->filter(fn($b) => !empty($b['no_code']))
+                ->map(fn($b) => ['code' => $b['no_code'], 'label' => ($b['city'] ?? '') ?: $b['no_code']]))
+            ->values();
 
         $clientTaxSystemId = $client->tax_system_id;
 
@@ -48,19 +54,25 @@ class EstimateController extends Controller
         // Индивидуальные расписания БП этого клиента (override дефолтов), keyed by service_id
         $overrides = $client->serviceSchedules()->get()->keyBy('service_id');
 
-        // Сборка структуры БП с состоянием тоглов
-        $buildBpData = function ($bp) use ($isFirstLoad, $savedByServiceId, $savedChildByServiceId, $flagKeys, $overrides) {
-            $savedItem = $savedByServiceId->get($bp->id);
+        $tariffBPs = [];
+
+        // Сборка структуры БП с состоянием тоглов.
+        // $savedItem — сохранённая строка сметы для этого БП и НО (или null);
+        // $taxOfficeCode/$branchLabel заданы только для филиальных копий.
+        $buildBpData = function ($bp, $savedItem, $taxOfficeCode = null, $branchLabel = null) use ($isFirstLoad, $flagKeys, $overrides) {
             $bpData = [
-                'service_id'     => $bp->id,
-                'name'           => $bp->name,
-                'sphere'         => $bp->sphere,
-                'cost'           => (float) $bp->cost,
-                'periodicity'    => $bp->periodicity ?? '',
-                'allows_quantity'=> $bp->allows_quantity,
-                'enabled'        => $isFirstLoad ? true : $savedByServiceId->has($bp->id),
-                'quantity'       => $savedItem ? (int) $savedItem->quantity : 1,
-                'children'       => [],
+                'service_id'      => $bp->id,
+                'row_key'         => $taxOfficeCode !== null ? $bp->id . ':' . $taxOfficeCode : (string) $bp->id,
+                'tax_office_code' => $taxOfficeCode,
+                'branch_label'    => $branchLabel,
+                'name'            => $bp->name,
+                'sphere'          => $bp->sphere,
+                'cost'            => (float) $bp->cost,
+                'periodicity'     => $bp->periodicity ?? '',
+                'allows_quantity' => $bp->allows_quantity,
+                'enabled'         => $isFirstLoad ? true : ($savedItem !== null),
+                'quantity'        => $savedItem ? (int) $savedItem->quantity : 1,
+                'children'        => [],
             ];
 
             foreach ($flagKeys as $fk) {
@@ -78,20 +90,34 @@ class EstimateController extends Controller
                 'labels'      => $bp->deadlineLabelsForClient($override),
             ];
 
+            $savedChildren = $savedItem ? $savedItem->children->keyBy('service_id') : collect();
             foreach ($bp->children as $child) {
-                $savedChild = $savedChildByServiceId->get($child->id);
+                $savedChild = $savedChildren->get($child->id);
                 $bpData['children'][] = [
                     'service_id'     => $child->id,
                     'name'           => $child->name,
                     'cost'           => (float) $child->cost,
                     'periodicity'    => $child->periodicity ?? '',
                     'allows_quantity'=> $child->allows_quantity,
-                    'enabled'        => $isFirstLoad ? false : $savedChildByServiceId->has($child->id),
+                    'enabled'        => $isFirstLoad ? false : ($savedChild !== null),
                     'quantity'       => $savedChild ? (int) $savedChild->quantity : 1,
                 ];
             }
 
             return $bpData;
+        };
+
+        // Добавить БП в список: филиальный (splits_by_branch) с филиалами — размножаем по НО,
+        // иначе одна строка.
+        $pushBp = function ($bp) use (&$tariffBPs, $buildBpData, $savedByKey, $clientHasBranches, $branchTargets) {
+            if ($bp->splits_by_branch && $clientHasBranches) {
+                foreach ($branchTargets as $t) {
+                    $key = $bp->id . ':' . ($t['code'] ?? '');
+                    $tariffBPs[] = $buildBpData($bp, $savedByKey->get($key), $t['code'], $t['label']);
+                }
+            } else {
+                $tariffBPs[] = $buildBpData($bp, $savedByKey->get($bp->id . ':'), null, null);
+            }
         };
 
         // «Особый» БП — помеченный хотя бы одним особым условием (ПВТ, ВЭД, …).
@@ -100,7 +126,6 @@ class EstimateController extends Controller
 
         // Обычные БП (без особых условий), применимые по режиму налогообложения,
         // подтягиваются из всего активного каталога — независимо от тарифа.
-        $tariffBPs = [];
         $includedServiceIds = [];
         $rootServices = Service::with(['taxSystems', 'children'])
             ->roots()->active()->ordered()->get()
@@ -108,7 +133,7 @@ class EstimateController extends Controller
             ->values();
 
         foreach ($rootServices as $bp) {
-            $tariffBPs[] = $buildBpData($bp);
+            $pushBp($bp);
             $includedServiceIds[$bp->id] = true;
         }
 
@@ -125,7 +150,7 @@ class EstimateController extends Controller
                 ->values();
 
             foreach ($flagServices as $bp) {
-                $tariffBPs[] = $buildBpData($bp);
+                $pushBp($bp);
                 $includedServiceIds[$bp->id] = true;
             }
         }
@@ -217,6 +242,8 @@ class EstimateController extends Controller
             'notes'                                => 'nullable|string|max:1000',
             'tariff_bps'                           => 'nullable|array',
             'tariff_bps.*.service_id'              => 'required|integer',
+            'tariff_bps.*.tax_office_code'         => 'nullable|string|max:10',
+            'tariff_bps.*.branch_label'            => 'nullable|string|max:255',
             'tariff_bps.*.enabled'                 => 'boolean',
             'tariff_bps.*.quantity'                => 'nullable|integer|min:1',
             'tariff_bps.*.children'                => 'nullable|array',
@@ -250,15 +277,17 @@ class EstimateController extends Controller
             $children  = collect($bpData['children'] ?? [])->filter(fn($c) => !empty($c['enabled']));
 
             $parent = $estimate->items()->create([
-                'service_id'  => $service->id,
-                'type'        => 'recurring',
-                'name'        => $service->name,
-                'periodicity' => $service->periodicity,
-                'due_day'     => $service->due_day,
-                'cost'        => $service->cost,
-                'quantity'    => $qty,
-                'total'       => 0, // filled after children
-                'sort_order'  => $sortOrder++,
+                'service_id'      => $service->id,
+                'tax_office_code' => $bpData['tax_office_code'] ?? null,
+                'branch_label'    => $bpData['branch_label'] ?? null,
+                'type'            => 'recurring',
+                'name'            => $service->name,
+                'periodicity'     => $service->periodicity,
+                'due_day'         => $service->due_day,
+                'cost'            => $service->cost,
+                'quantity'        => $qty,
+                'total'           => 0, // filled after children
+                'sort_order'      => $sortOrder++,
             ]);
 
             $childTotal = 0;

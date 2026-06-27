@@ -89,6 +89,11 @@
                       {{ request()->routeIs('settings.billings') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
                 Биллинг
             </a>
+            <a href="{{ route('settings.tax-authorities') }}"
+               class="block px-3 py-2 rounded-lg text-sm transition-colors
+                      {{ request()->routeIs('settings.tax-authorities') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
+                Коды налоговых органов
+            </a>
         </nav>
     </aside>
 

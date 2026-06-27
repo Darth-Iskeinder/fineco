@@ -203,6 +203,11 @@
                                     <span class="text-sm font-medium cursor-pointer"
                                           :class="task.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-800'"
                                           x-text="task.name"></span>
+                                    <span x-show="task.branch_label"
+                                          class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
+                                        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 6h4"/></svg>
+                                        <span x-text="task.branch_label"></span>
+                                    </span>
                                     <span x-show="task.type === 'adhoc'"
                                           class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-violet-100 text-violet-700">произвольная</span>
                                     <span x-show="task.status !== 'completed' && urgency(task) === 'overdue'"
@@ -717,7 +722,14 @@
         <template x-if="taskModalIdx !== null">
             <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 max-h-[85vh] overflow-y-auto">
                 <div class="flex items-start justify-between gap-4">
-                    <h3 class="text-base font-semibold text-slate-800" x-text="tasks[taskModalIdx].name"></h3>
+                    <h3 class="text-base font-semibold text-slate-800">
+                        <span x-text="tasks[taskModalIdx].name"></span>
+                        <span x-show="tasks[taskModalIdx].branch_label"
+                              class="ml-1 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700 align-middle">
+                            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 6h4"/></svg>
+                            <span x-text="tasks[taskModalIdx].branch_label"></span>
+                        </span>
+                    </h3>
                     <button @click="closeTaskModal()" class="text-slate-300 hover:text-slate-500 transition-colors flex-shrink-0">
                         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                     </button>
@@ -975,7 +987,14 @@
             <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 max-h-[85vh] overflow-y-auto">
                 <div class="flex items-start justify-between gap-4">
                     <div class="min-w-0">
-                        <h3 class="text-base font-semibold text-slate-800" x-text="completedItem.name"></h3>
+                        <h3 class="text-base font-semibold text-slate-800">
+                            <span x-text="completedItem.name"></span>
+                            <span x-show="completedItem.branch_label"
+                                  class="ml-1 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700 align-middle">
+                                <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 6h4"/></svg>
+                                <span x-text="completedItem.branch_label"></span>
+                            </span>
+                        </h3>
                         <p class="text-sm text-slate-500 mt-0.5" x-text="completedItem.client_name"></p>
                     </div>
                     <button @click="completedItem = null" class="text-slate-300 hover:text-slate-500 transition-colors flex-shrink-0">

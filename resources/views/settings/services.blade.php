@@ -31,6 +31,7 @@ $servicesJson = $services->map(fn($s) => array_merge([
     'comment'           => $s->comment,
     'is_active'         => $s->is_active,
     'allows_quantity'   => $s->allows_quantity,
+    'splits_by_branch'  => $s->splits_by_branch,
     'sort_order'        => $s->sort_order,
     'children'        => $s->children->map(fn($c) => [
         'id'              => $c->id,
@@ -124,6 +125,10 @@ $servicesJson = $services->map(fn($s) => array_merge([
                             <td class="px-4 py-3 text-sm font-semibold text-slate-900 whitespace-nowrap">
                                 <span x-text="row.svc.name"></span>
                                 <span x-show="row.svc.allows_quantity" class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">кол-во</span>
+                                <span x-show="row.svc.splits_by_branch" class="ml-1 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
+                                    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 6h4"/></svg>
+                                    по филиалам
+                                </span>
                                 <template x-for="f in specialFlags" :key="f.key">
                                     <span x-show="row.svc[f.key]" class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium" :class="'bg-' + f.color + '-100 text-' + f.color + '-700'" x-text="f.label"></span>
                                 </template>
@@ -427,6 +432,17 @@ $servicesJson = $services->map(fn($s) => array_merge([
                             </template>
 
                             <template x-if="!serviceForm.parent_id">
+                                <label class="flex items-start gap-3 cursor-pointer px-3 py-2.5 rounded-xl border transition-colors select-none"
+                                       :class="serviceForm.splits_by_branch ? 'bg-purple-50 border-purple-200' : 'bg-white border-slate-200 hover:bg-slate-50'">
+                                    <input type="checkbox" x-model="serviceForm.splits_by_branch" class="mt-0.5 w-4 h-4 text-purple-600 border-slate-300 rounded focus:ring-purple-500">
+                                    <span class="leading-tight">
+                                        <span class="text-sm font-medium text-slate-800">Дублируется по филиалам</span>
+                                        <span class="block text-xs text-slate-500 mt-0.5">Если у клиента есть филиалы, в смете этот БП размножится по каждому НО (основной + филиалы) — отдельная задача на каждый.</span>
+                                    </span>
+                                </label>
+                            </template>
+
+                            <template x-if="!serviceForm.parent_id">
                                 <div class="space-y-2">
                                     <label class="block text-sm font-medium text-slate-700">Режим налогообложения</label>
                                     <div class="flex flex-wrap gap-2">
@@ -628,7 +644,7 @@ function servicesPage() {
             cost: 0, pricing_rules: [], use_tiered_pricing: false,
             periodicity: '', due_day: null, start_month: [], start_day: [], deadline_days: null, execution_minutes: null,
             closing_rule: '', requires_document: false, check_type: '', requires_review: false, billing: '', comment: '',
-            allows_quantity: false, flags: {}, children: [],
+            allows_quantity: false, splits_by_branch: false, flags: {}, children: [],
         },
 
         blankFlags() {
@@ -665,6 +681,7 @@ function servicesPage() {
                     closing_rule: svc.closing_rule || '', requires_document: !!svc.requires_document, check_type: svc.check_type || '', requires_review: !!svc.requires_review,
                     billing: svc.billing || '', comment: svc.comment || '',
                     allows_quantity: svc.allows_quantity || false,
+                    splits_by_branch: svc.splits_by_branch || false,
                     flags: this.flagsFromSvc(svc),
                     children: (svc.children || []).map(c => ({ id: c.id, name: c.name, cost: c.cost, periodicity: c.periodicity || '', allows_quantity: c.allows_quantity || false })),
                 };
@@ -675,7 +692,7 @@ function servicesPage() {
                     cost: 0, pricing_rules: [], use_tiered_pricing: false,
                     periodicity: '', due_day: null, start_month: [], start_day: [], deadline_days: null, execution_minutes: null,
                     closing_rule: '', requires_document: false, check_type: '', requires_review: false, billing: '', comment: '',
-                    allows_quantity: false, flags: this.blankFlags(), children: [],
+                    allows_quantity: false, splits_by_branch: false, flags: this.blankFlags(), children: [],
                 };
             }
             this.showServiceModal = true;
