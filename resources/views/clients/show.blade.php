@@ -411,13 +411,12 @@
                                     </div>
                                     <div class="flex flex-wrap gap-2">
                                         <span x-show="client.tax_office_code" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-white border border-purple-200 text-purple-700">
-                                            <span class="font-semibold" x-text="client.tax_office_code"></span>
+                                            <span class="font-semibold" x-text="taxAuthorityLabel(client.tax_office_code)"></span>
                                             <span class="text-purple-400">· основной</span>
                                         </span>
                                         <template x-for="(b, i) in client.branches" :key="i">
                                             <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-white border border-purple-200 text-purple-700">
-                                                <span class="font-semibold" x-text="b.no_code"></span>
-                                                <span x-show="b.city" class="text-purple-400" x-text="'· ' + b.city"></span>
+                                                <span class="font-semibold" x-text="taxAuthorityLabel(b.no_code)"></span>
                                             </span>
                                         </template>
                                     </div>

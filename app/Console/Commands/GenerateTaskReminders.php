@@ -95,18 +95,22 @@ class GenerateTaskReminders extends Command
 
                 foreach ($dates as $date) {
                     $dueStr = $date->toDateString();
-                    $activeKeys["{$item->service_id}|{$dueStr}"] = true;
+                    // Филиальные копии БП имеют один service_id, но разные НО — ключуем с учётом НО.
+                    $office = $item->tax_office_code;
+                    $activeKeys["{$item->service_id}|{$office}|{$dueStr}"] = true;
 
                     $reminder = TaskReminder::updateOrCreate(
                         [
-                            'employee_id' => $employee->id,
-                            'client_id'   => $client->id,
-                            'service_id'  => $item->service_id,
-                            'due_date'    => $dueStr,
+                            'employee_id'     => $employee->id,
+                            'client_id'       => $client->id,
+                            'service_id'      => $item->service_id,
+                            'tax_office_code' => $office,
+                            'due_date'        => $dueStr,
                         ],
                         [
-                            'name'        => $item->name,
-                            'periodicity' => $item->periodicity,
+                            'branch_label' => $item->branch_label,
+                            'name'         => $item->name,
+                            'periodicity'  => $item->periodicity,
                         ],
                     );
 
@@ -123,7 +127,7 @@ class GenerateTaskReminders extends Command
                 ->where('status', TaskReminder::STATUS_PENDING)
                 ->whereBetween('due_date', [$from->toDateString(), $to->toDateString()])
                 ->get()
-                ->filter(fn ($r) => !isset($activeKeys["{$r->service_id}|{$r->due_date->toDateString()}"]));
+                ->filter(fn ($r) => !isset($activeKeys["{$r->service_id}|{$r->tax_office_code}|{$r->due_date->toDateString()}"]));
 
             if ($stale->isNotEmpty()) {
                 TaskReminder::whereIn('id', $stale->pluck('id'))->delete();

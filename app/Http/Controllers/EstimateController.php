@@ -34,12 +34,18 @@ class EstimateController extends Controller
         $savedByKey = $tariffItems->keyBy(fn($i) => $i->service_id . ':' . ($i->tax_office_code ?? ''));
 
         // Налоговые органы клиента для филиальных БП: основной + филиалы.
+        // Название филиала берём из справочника по коду НО (единый источник с карточкой клиента),
+        // а не из снимка branches.city — иначе устаревший city разойдётся с кодом.
+        $taxAuthorityNames = \App\Models\TaxAuthority::pluck('name', 'code');
         $clientHasBranches = $client->has_branches
             && collect($client->branches ?? [])->contains(fn($b) => !empty($b['no_code']));
         $branchTargets = collect([['code' => $client->tax_office_code, 'label' => 'основной']])
             ->concat(collect($client->branches ?? [])
                 ->filter(fn($b) => !empty($b['no_code']))
-                ->map(fn($b) => ['code' => $b['no_code'], 'label' => ($b['city'] ?? '') ?: $b['no_code']]))
+                ->map(fn($b) => [
+                    'code'  => $b['no_code'],
+                    'label' => $taxAuthorityNames->get($b['no_code']) ?? $b['no_code'],
+                ]))
             ->values();
 
         $clientTaxSystemId = $client->tax_system_id;

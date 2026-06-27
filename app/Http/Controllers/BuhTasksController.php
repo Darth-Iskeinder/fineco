@@ -333,9 +333,10 @@ class BuhTasksController extends Controller
             'today'   => $dueItems->where('due_date', $todayStr)->count(),
         ];
         $reminders = $dueItems->take(50)->map(fn ($t) => [
-            'client_name' => $t['client_name'] ?? '—',
-            'name'        => $t['name'],
-            'due_date'    => $t['due_date'],
+            'client_name'  => $t['client_name'] ?? '—',
+            'name'         => $t['name'],
+            'branch_label' => $t['branch_label'] ?? null,
+            'due_date'     => $t['due_date'],
         ])->all();
 
         $completedDays = self::COMPLETED_HISTORY_DAYS;

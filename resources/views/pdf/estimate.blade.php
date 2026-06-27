@@ -78,7 +78,7 @@
             @php $rowNum++; @endphp
             <tr>
                 <td style="color: #94a3b8;">{{ $rowNum }}</td>
-                <td>{{ $item->name }}</td>
+                <td>{{ $item->name }}@if($item->branch_label) <span style="color: #7c3aed;">— {{ $item->branch_label }}</span>@endif</td>
                 <td>
                     @if($item->type === 'recurring')
                         <span class="badge badge-recurring">Постоянная</span>

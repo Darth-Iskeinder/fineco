@@ -16,6 +16,7 @@ class TaskReminder extends Model
 
     protected $fillable = [
         'employee_id', 'client_id', 'service_id',
+        'tax_office_code', 'branch_label',
         'name', 'periodicity', 'due_date',
         'status', 'completed_at', 'completed_by',
     ];

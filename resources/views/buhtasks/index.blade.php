@@ -45,7 +45,10 @@
                                     <template x-for="(r, i) in group.items" :key="group.key + '|' + i">
                                         <div class="flex items-center gap-3 px-6 py-3" :class="group.rowClass">
                                             <div class="flex-1 min-w-0">
-                                                <p class="text-sm font-medium text-slate-800 truncate" x-text="r.name" :title="r.name"></p>
+                                                <p class="text-sm font-medium text-slate-800 truncate" :title="r.name + (r.branch_label ? ' — ' + r.branch_label : '')">
+                                                    <span x-text="r.name"></span>
+                                                    <span x-show="r.branch_label" class="text-purple-600 font-normal" x-text="r.branch_label ? '· ' + r.branch_label : ''"></span>
+                                                </p>
                                                 <p class="text-xs text-slate-500 truncate" x-text="r.client_name"></p>
                                             </div>
                                             <div class="text-right flex-shrink-0">
