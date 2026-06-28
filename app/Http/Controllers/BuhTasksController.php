@@ -196,7 +196,8 @@ class BuhTasksController extends Controller
             }
         }
 
-        // Внеплановые задачи: невыполненные висят, пока не закроют; выполненные — только сегодня.
+        // Внеплановые задачи показываем ВСЕ независимо от месяца (ручные поручения, не в смете):
+        // невыполненные висят, пока не закроют; выполненные — только в день закрытия.
         foreach ($adhocs as $adhoc) {
             if ($adhoc->status === 'completed') {
                 $completedToday = $adhoc->completed_at && $adhoc->completed_at->toDateString() === $todayStr;
