@@ -386,8 +386,8 @@
                     не начато
                 </span>
 
-                {{-- Фильтр столбцов — совместный (группа + период) --}}
-                <div class="ml-auto inline-flex items-center gap-2">
+                {{-- Фильтр столбцов — совместный (группа + период); рядом со статусами, чтобы был на виду --}}
+                <div class="inline-flex items-center gap-2 pl-5 ml-1 border-l border-slate-200">
                     <span class="text-slate-400">Фильтр:</span>
                     <select x-model="checklistFilter.group"
                             class="px-2.5 py-1 text-xs text-slate-600 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50">
@@ -415,9 +415,12 @@
                         <tr>
                             <th class="sticky left-0 z-20 bg-slate-100 px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider border-r border-b border-slate-200 min-w-[200px] align-bottom">Компания</th>
                             <template x-for="col in checklistData.cols" :key="col.key">
-                                <th class="bg-slate-100 px-1.5 pt-3 pb-2 border-r border-b border-slate-200 align-bottom">
-                                    <div class="mx-auto" style="writing-mode: vertical-rl; transform: rotate(180deg);">
-                                        <span class="text-xs font-semibold text-slate-600 whitespace-nowrap" x-text="col.label" :title="col.label"></span>
+                                {{-- Заголовок с наклоном −45°: читается лучше вертикального, столбец остаётся узким --}}
+                                <th class="bg-slate-100 border-r border-b border-slate-200 align-bottom p-0 overflow-visible" style="height: 130px;">
+                                    <div class="relative h-full" style="width: 32px;">
+                                        <span class="absolute bottom-1.5 left-1/2 text-xs font-semibold text-slate-600 whitespace-nowrap leading-none"
+                                              style="transform-origin: bottom left; transform: rotate(-45deg);"
+                                              x-text="col.label" :title="col.label"></span>
                                     </div>
                                 </th>
                             </template>
