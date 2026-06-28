@@ -96,6 +96,7 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/adhoc/{task}/pause', [BuhTasksController::class, 'pauseAdhoc'])->name('adhoc.pause');
         Route::post('/adhoc/{task}/complete', [BuhTasksController::class, 'completeAdhoc'])->name('adhoc.complete');
         Route::post('/adhoc/{task}/reset', [BuhTasksController::class, 'resetAdhoc'])->name('adhoc.reset');
+        Route::post('/adhoc/{task}/document', [BuhTasksController::class, 'uploadDocumentAdhoc'])->name('adhoc.document');
         // Напоминания о сроках (выход воркера tasks:generate)
         Route::post('/reminders/{reminder}/complete', [BuhTasksController::class, 'completeReminder'])->name('reminders.complete');
         Route::post('/reminders/{reminder}/reopen', [BuhTasksController::class, 'reopenReminder'])->name('reminders.reopen');
@@ -106,6 +107,8 @@ Route::middleware('auth:employee')->group(function () {
         Route::get('/', [ReviewController::class, 'index'])->name('index');
         Route::post('/{log}/approve', [ReviewController::class, 'approve'])->name('approve');
         Route::post('/{log}/reject', [ReviewController::class, 'reject'])->name('reject');
+        Route::post('/adhoc/{task}/approve', [ReviewController::class, 'approveAdhoc'])->name('adhoc.approve');
+        Route::post('/adhoc/{task}/reject', [ReviewController::class, 'rejectAdhoc'])->name('adhoc.reject');
     });
 
     // Настройки (доступ по модулю settings; админ имеет доступ всегда)

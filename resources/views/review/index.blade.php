@@ -67,7 +67,7 @@
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-100">
-                            <template x-for="(item, idx) in items" :key="item.id">
+                            <template x-for="(item, idx) in items" :key="(item.type || 'planned') + '-' + item.id">
                                 <tr class="hover:bg-slate-50/50 cursor-pointer" @dblclick="openDetail(item, true)">
                                     <td class="px-4 py-3.5 text-sm text-slate-800" x-text="item.employee_name"></td>
                                     <td class="px-4 py-3.5 text-sm text-slate-600" x-text="item.client_name"></td>
@@ -125,7 +125,7 @@
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-slate-100">
-                            <template x-for="item in reviewedItems" :key="item.id">
+                            <template x-for="item in reviewedItems" :key="(item.type || 'planned') + '-' + item.id">
                                 <tr class="hover:bg-slate-50/50 cursor-pointer" @dblclick="openDetail(item, false)">
                                     <td class="px-4 py-3.5 text-sm text-slate-800" x-text="item.employee_name"></td>
                                     <td class="px-4 py-3.5 text-sm text-slate-600" x-text="item.client_name"></td>
@@ -421,20 +421,27 @@ function reviewList(initial, reviewedInitial, slaDays, historyDays) {
         },
 
         approveFromDetail() {
-            const idx = this.items.findIndex(i => i.id === this.detailItem.id);
+            const idx = this.items.findIndex(i => i.id === this.detailItem.id && (i.type || 'planned') === (this.detailItem.type || 'planned'));
             if (idx !== -1) this.approve(idx);
         },
 
         rejectFromDetail() {
-            const idx = this.items.findIndex(i => i.id === this.detailItem.id);
+            const idx = this.items.findIndex(i => i.id === this.detailItem.id && (i.type || 'planned') === (this.detailItem.type || 'planned'));
             if (idx === -1) return;
             this.closeDetail();
             this.openReject(idx);
         },
 
+        // URL проверки зависит от типа задачи: плановая (BuhTaskLog) или внеплановая (BuhAdhocTask).
+        reviewUrl(item, action) {
+            return item.type === 'adhoc'
+                ? `/review/adhoc/${item.id}/${action}`
+                : `/review/${item.id}/${action}`;
+        },
+
         async approve(idx) {
             this.items[idx] = { ...this.items[idx], loading: true };
-            const r = await fetch(`/review/${this.items[idx].id}/approve`, {
+            const r = await fetch(this.reviewUrl(this.items[idx], 'approve'), {
                 method: 'POST',
                 headers: { 'X-CSRF-TOKEN': this.csrf(), 'Accept': 'application/json' },
             });
@@ -466,7 +473,7 @@ function reviewList(initial, reviewedInitial, slaDays, historyDays) {
             }
             this.rejectLoading = true;
             const idx = this.rejectIdx;
-            const r = await fetch(`/review/${this.items[idx].id}/reject`, {
+            const r = await fetch(this.reviewUrl(this.items[idx], 'reject'), {
                 method: 'POST',
                 headers: {
                     'X-CSRF-TOKEN': this.csrf(),

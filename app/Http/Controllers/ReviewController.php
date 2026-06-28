@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\BuhAdhocTask;
 use App\Models\BuhTaskLog;
 use Illuminate\Http\Request;
 
@@ -34,12 +35,65 @@ class ReviewController extends Controller
         // Логи подпунктов для обоих списков — одной выборкой
         $childLogs = $this->childLogsFor($pending->concat($reviewed));
 
+        // Внеплановые задачи «на проверку» (вариант a — общий с плановыми Review-модуль)
+        $adhocWith = ['employee:id,full_name', 'client:id,name', 'reviewer:id,full_name'];
+        $pendingAdhoc = BuhAdhocTask::where('status', 'review')->with($adhocWith)
+            ->orderByRaw('COALESCE(review_started_at, updated_at) asc')->get();
+        $reviewedAdhoc = BuhAdhocTask::where('status', 'completed')
+            ->whereNotNull('reviewed_at')
+            ->where('reviewed_at', '>=', now()->subDays(self::HISTORY_DAYS))
+            ->with($adhocWith)->orderByDesc('reviewed_at')->get();
+
+        // Объединяем плановые и внеплановые, сортируя единообразно по сроку/проверке.
+        $logs = $pending->map(fn (BuhTaskLog $log) => $this->formatForReview($log, $childLogs))
+            ->concat($pendingAdhoc->map(fn (BuhAdhocTask $t) => $this->formatAdhocForReview($t)))
+            ->sortBy('review_started_date')->values();
+        $reviewed = $reviewed->map(fn (BuhTaskLog $log) => $this->formatForReview($log, $childLogs))
+            ->concat($reviewedAdhoc->map(fn (BuhAdhocTask $t) => $this->formatAdhocForReview($t)))
+            ->sortByDesc('reviewed_at')->values();
+
         return view('review.index', [
-            'logs'        => $pending->map(fn (BuhTaskLog $log) => $this->formatForReview($log, $childLogs))->values(),
-            'reviewed'    => $reviewed->map(fn (BuhTaskLog $log) => $this->formatForReview($log, $childLogs))->values(),
+            'logs'        => $logs,
+            'reviewed'    => $reviewed,
             'slaDays'     => self::REVIEW_SLA_DAYS,
             'historyDays' => self::HISTORY_DAYS,
         ]);
+    }
+
+    public function approveAdhoc(BuhAdhocTask $task)
+    {
+        abort_if($task->status !== 'review', 422, 'Задача не на проверке');
+
+        $task->update([
+            'status'       => 'completed',
+            'completed_at' => now(),
+            'reviewed_at'  => now(),
+            'reviewed_by'  => auth('employee')->id(),
+        ]);
+
+        $task->load(['employee:id,full_name', 'client:id,name', 'reviewer:id,full_name']);
+
+        return response()->json(['success' => true, 'item' => $this->formatAdhocForReview($task)]);
+    }
+
+    public function rejectAdhoc(Request $request, BuhAdhocTask $task)
+    {
+        abort_if($task->status !== 'review', 422, 'Задача не на проверке');
+
+        $validated = $request->validate([
+            'comment' => ['required', 'string', 'max:2000'],
+        ], [
+            'comment.required' => 'Укажите, что нужно исправить',
+        ]);
+
+        $task->update([
+            'status'         => 'rework',
+            'review_comment' => $validated['comment'],
+            'reviewed_at'    => now(),
+            'reviewed_by'    => auth('employee')->id(),
+        ]);
+
+        return response()->json(['success' => true]);
     }
 
     public function approve(BuhTaskLog $log)
@@ -102,6 +156,7 @@ class ReviewController extends Controller
 
         return [
             'id'              => $log->id,
+            'type'            => 'planned',
             'employee_name'   => $log->employee?->full_name,
             'client_name'     => $log->client?->name,
             'service_name'    => $service?->name ?? $item?->name,
@@ -143,6 +198,34 @@ class ReviewController extends Controller
                     'document_path'     => $childLog?->document_path,
                 ];
             })->values()->toArray(),
+        ];
+    }
+
+    /** Формат внеплановой задачи для Review-экрана — та же форма, что и у плановой. */
+    private function formatAdhocForReview(BuhAdhocTask $task): array
+    {
+        return [
+            'id'              => $task->id,
+            'type'            => 'adhoc',
+            'employee_name'   => $task->employee?->full_name,
+            'client_name'     => $task->client?->name,
+            'service_name'    => $task->name,
+            'elapsed_seconds' => $task->paused_seconds,
+            'submitted_at'    => $task->updated_at?->format('d.m.Y H:i'),
+            'submitted_ts'    => $task->updated_at?->timestamp,
+            'review_started_date' => ($task->review_started_at ?? $task->updated_at)?->format('Y-m-d'),
+            'reviewed_by_name' => $task->reviewer?->full_name,
+            'reviewed_at'      => $task->reviewed_at?->format('d.m.Y H:i'),
+            'description'       => $task->description,
+            'comment'          => null,
+            'periodicity'      => null,
+            'allows_quantity'  => false,
+            'quantity'         => 0,
+            'actual_quantity'  => null,
+            'requires_document' => false, // документ опционален
+            'document_name'    => $task->document_name,
+            'document_path'    => $task->document_path,
+            'children'         => [],
         ];
     }
 }

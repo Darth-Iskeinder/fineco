@@ -72,7 +72,7 @@
     </template>
 </div>
 
-<div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($completed) }}, {{ json_encode($employees) }}, {{ $employee->id }})" x-cloak>
+<div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($completed) }}, {{ json_encode($employees) }}, {{ $employee->id }}, {{ json_encode($catalog) }})" x-cloak>
 
     {{-- Шапка --}}
     <div class="flex items-center justify-between mb-2">
@@ -514,13 +514,74 @@
                     </select>
                 </div>
 
-                {{-- Произвольная (внеплановая) задача сотруднику — в смету не попадает --}}
+                {{-- Источник задачи: из каталога (берём только название) или своя --}}
                 <div>
-                    <label class="block text-sm font-medium text-slate-700 mb-1.5">Название задачи</label>
-                    <input type="text"
-                           x-model="newTask.name"
-                           placeholder="Например: Сверка с банком"
-                           class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50">
+                    <div class="inline-flex p-0.5 bg-slate-100 rounded-lg mb-3">
+                        <button type="button" @click="newTask.source = 'custom'"
+                                :class="newTask.source === 'custom' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'"
+                                class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors">Своя задача</button>
+                        <button type="button" @click="newTask.source = 'catalog'"
+                                :class="newTask.source === 'catalog' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'"
+                                class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors">Из каталога</button>
+                    </div>
+
+                    {{-- Из каталога: выбор услуги, переносим ТОЛЬКО название --}}
+                    <div x-show="newTask.source === 'catalog'">
+                        <label class="block text-sm font-medium text-slate-700 mb-1.5">Услуга из каталога</label>
+                        <select x-model="newTask.service_id" @change="onCatalogPick()"
+                                class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 bg-white">
+                            <option value="">Выберите услугу...</option>
+                            <template x-for="s in catalog" :key="s.id">
+                                <option :value="s.id" x-text="s.name"></option>
+                            </template>
+                        </select>
+                        <p class="text-xs text-slate-400 mt-1">Из каталога берётся только название — остальное настраивается ниже.</p>
+                    </div>
+
+                    {{-- Своя: произвольное название --}}
+                    <div x-show="newTask.source === 'custom'">
+                        <label class="block text-sm font-medium text-slate-700 mb-1.5">Название задачи</label>
+                        <input type="text"
+                               x-model="newTask.name"
+                               placeholder="Например: Сверка с банком"
+                               class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50">
+                    </div>
+                </div>
+
+                {{-- Описание (необязательно) --}}
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 mb-1.5">
+                        Описание <span class="text-slate-400 font-normal">(необязательно)</span>
+                    </label>
+                    <textarea x-model="newTask.description" rows="2"
+                              placeholder="Детали задачи для сотрудника"
+                              class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50"></textarea>
+                </div>
+
+                {{-- На проверку — тогл как в попапе БП --}}
+                <div class="flex items-center justify-between gap-3">
+                    <span class="text-sm text-slate-700">Отправлять на проверку после выполнения</span>
+                    <button type="button" @click="newTask.requires_review = !newTask.requires_review"
+                            class="flex-shrink-0 w-11 h-6 rounded-full relative transition-colors duration-200"
+                            :class="newTask.requires_review ? 'bg-indigo-600' : 'bg-slate-200'">
+                        <span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200"
+                              :style="newTask.requires_review ? 'transform: translateX(20px)' : ''"></span>
+                    </button>
+                </div>
+
+                {{-- Документ (необязательно) --}}
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 mb-1.5">
+                        Документ <span class="text-slate-400 font-normal">(необязательно)</span>
+                    </label>
+                    <div class="flex items-center gap-2">
+                        <label class="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 text-slate-600 text-sm font-medium rounded-xl hover:bg-slate-200 cursor-pointer transition-colors">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
+                            <span x-text="newTaskFileName ? 'Заменить файл' : 'Выбрать файл'"></span>
+                            <input type="file" class="hidden" @change="selectCreateDocument($event)">
+                        </label>
+                        <span x-show="newTaskFileName" class="text-sm text-slate-600 truncate max-w-[180px]" x-text="newTaskFileName"></span>
+                    </div>
                 </div>
                 <div class="flex gap-3">
                     <div class="flex-1">
@@ -835,9 +896,10 @@
                     </div>
                 </template>
 
-                <template x-if="tasks[taskModalIdx].requires_document">
+                <template x-if="tasks[taskModalIdx].requires_document || tasks[taskModalIdx].type === 'adhoc'">
                     <div class="mt-4 pt-4 border-t border-slate-100">
-                        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Документ для закрытия</p>
+                        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5"
+                           x-text="tasks[taskModalIdx].requires_document ? 'Документ для закрытия' : 'Документ (необязательно)'"></p>
                         <div class="flex items-center gap-2">
                             <template x-if="tasks[taskModalIdx].document_name && !tasks[taskModalIdx].pending_file_name">
                                 <a :href="'/storage/' + tasks[taskModalIdx].document_path" target="_blank"
@@ -1015,7 +1077,7 @@
                 </template>
 
                 {{-- Документ --}}
-                <template x-if="completedItem.requires_document">
+                <template x-if="completedItem.requires_document || completedItem.document_name">
                     <div class="mt-4 pt-4 border-t border-slate-100">
                         <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Прикреплённый документ</p>
                         <template x-if="completedItem.document_name">
@@ -1070,7 +1132,7 @@
 </div>
 
 <script>
-function buhTasks(initialTasks, year, month, allClients, completed, employees, currentEmployeeId) {
+function buhTasks(initialTasks, year, month, allClients, completed, employees, currentEmployeeId, catalog) {
     // File-объекты держим вне реактивного state — Alpine оборачивает объекты в Proxy,
     // что ломает внутренние методы File/Blob при передаче в FormData
     const pendingFiles = new Map();
@@ -1109,7 +1171,14 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
 
         showCreateModal: false,
         startConfirm: { show: false, idx: null },
-        newTask: { client_id: '', name: '', employee_id: currentEmployeeId, due_date: '' },
+        catalog: catalog || [],
+        newTask: {
+            source: 'custom',       // 'custom' | 'catalog'
+            service_id: '',         // выбранная услуга из каталога (берём только имя)
+            client_id: '', name: '', description: '', requires_review: false,
+            employee_id: currentEmployeeId, due_date: '',
+        },
+        newTaskFileName: null,      // имя выбранного документа (сам File — в pendingFiles)
         creating: false,
         createError: '',
 
@@ -1254,15 +1323,23 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         async saveRootDocument(taskIdx) {
             const file = pendingFiles.get('root_' + taskIdx);
             if (!file) return;
+            const task = this.tasks[taskIdx];
 
             this.patch(taskIdx, { doc_uploading: true });
 
-            const logId = await this.ensureLog(taskIdx);
-            if (!logId) { this.patch(taskIdx, { doc_uploading: false }); return; }
+            // Внеплановая задача грузит документ прямо в себя; плановая — через лог.
+            let docUrl;
+            if (task.type === 'adhoc') {
+                docUrl = `/buhtasks/adhoc/${task.adhoc_id}/document`;
+            } else {
+                const logId = await this.ensureLog(taskIdx);
+                if (!logId) { this.patch(taskIdx, { doc_uploading: false }); return; }
+                docUrl = `/buhtasks/logs/${logId}/document`;
+            }
 
             const fd = new FormData();
             fd.append('file', file);
-            const r = await fetch(`/buhtasks/logs/${logId}/document`, {
+            const r = await fetch(docUrl, {
                 method: 'POST',
                 headers: { 'X-CSRF-TOKEN': this.csrf(), 'Accept': 'application/json' },
                 body: fd,
@@ -1621,13 +1698,34 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         },
 
         resetNewTask() {
-            this.newTask = { client_id: '', name: '', employee_id: this.currentEmployeeId, due_date: '' };
+            this.newTask = {
+                source: 'custom', service_id: '',
+                client_id: '', name: '', description: '', requires_review: false,
+                employee_id: this.currentEmployeeId, due_date: '',
+            };
+            pendingFiles.delete('create');
+            this.newTaskFileName = null;
+        },
+
+        // При выборе услуги из каталога подставляем её название (берём только имя).
+        onCatalogPick() {
+            const svc = this.catalog.find(s => String(s.id) === String(this.newTask.service_id));
+            if (svc) this.newTask.name = svc.name;
+        },
+
+        // Необязательный документ к новой задаче (File держим вне реактивного state).
+        selectCreateDocument(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            pendingFiles.set('create', file);
+            this.newTaskFileName = file.name;
+            event.target.value = '';
         },
 
         async createTask() {
             this.createError = '';
 
-            // Только произвольная (внеплановая) задача сотруднику — в смету не пишем.
+            // Внеплановая задача сотруднику — в смету не пишем. Источник: своя или из каталога.
             if (!this.newTask.name.trim())  { this.createError = 'Введите название задачи'; return; }
             if (!this.newTask.employee_id)  { this.createError = 'Выберите сотрудника'; return; }
             if (!this.newTask.due_date)     { this.createError = 'Укажите дату'; return; }
@@ -1635,26 +1733,29 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             this.creating = true;
 
             try {
-                const url = '/buhtasks/adhoc';
-                const body = {
-                    employee_id: this.newTask.employee_id,
-                    client_id:   this.newTask.client_id || null,
-                    name:        this.newTask.name.trim(),
-                    due_date:    this.newTask.due_date,
-                };
+                // FormData — чтобы приложить необязательный документ в одном запросе.
+                const fd = new FormData();
+                fd.append('employee_id', this.newTask.employee_id);
+                if (this.newTask.client_id) fd.append('client_id', this.newTask.client_id);
+                if (this.newTask.source === 'catalog' && this.newTask.service_id) {
+                    fd.append('service_id', this.newTask.service_id);
+                }
+                fd.append('name', this.newTask.name.trim());
+                if (this.newTask.description.trim()) fd.append('description', this.newTask.description.trim());
+                fd.append('requires_review', this.newTask.requires_review ? '1' : '0');
+                fd.append('due_date', this.newTask.due_date);
+                const file = pendingFiles.get('create');
+                if (file) fd.append('file', file);
 
-                const r = await fetch(url, {
+                const r = await fetch('/buhtasks/adhoc', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': this.csrf(),
-                        'Accept': 'application/json',
-                    },
-                    body: JSON.stringify(body),
+                    headers: { 'X-CSRF-TOKEN': this.csrf(), 'Accept': 'application/json' },
+                    body: fd,
                 });
                 const data = await r.json();
 
                 if (data.success) {
+                    pendingFiles.delete('create');
                     // Добавляем в текущий список только если задача для меня (иначе она у назначенного сотрудника).
                     // unshift (в начало), чтобы созданная задача сразу попадала в видимое окно пагинации.
                     if (data.mine === undefined || data.mine) {

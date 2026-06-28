@@ -225,16 +225,17 @@ class BuhTasksController extends Controller
                 'due_day'         => $adhoc->due_day,
                 'due_date'        => $adhocDate?->toDateString(),
                 'comment'         => null,
-                'description'     => null,
+                'description'     => $adhoc->description,
+                'requires_review' => $adhoc->requires_review,
                 'status'          => $adhoc->status,
                 'elapsed_seconds' => $this->calcElapsed($adhoc),
-                'review_comment'  => null,
+                'review_comment'  => $adhoc->review_comment,
                 'quantity'        => 1,
                 'allows_quantity' => false,
                 'actual_quantity' => null,
-                'requires_document' => false,
-                'document_name'   => null,
-                'document_path'  => null,
+                'requires_document' => false, // документ всегда опционален для внеплановых
+                'document_name'   => $adhoc->document_name,
+                'document_path'  => $adhoc->document_path,
                 'children'        => [],
             ];
         }
@@ -299,15 +300,15 @@ class BuhTasksController extends Controller
                 'client_name'  => $a->client?->name ?? '—',
                 'completed_at' => $a->completed_at->toIso8601String(),
                 'elapsed_seconds'   => $this->calcElapsed($a),
-                'description'       => null,
+                'description'       => $a->description,
                 'comment'          => null,
                 'periodicity'      => null,
                 'allows_quantity'  => false,
                 'quantity'         => 1,
                 'actual_quantity'  => null,
                 'requires_document' => false,
-                'document_name'    => null,
-                'document_path'    => null,
+                'document_name'    => $a->document_name,
+                'document_path'    => $a->document_path,
                 'children'         => [],
             ]);
         $completed = $completedPlanned->concat($completedAdhoc)
@@ -341,7 +342,12 @@ class BuhTasksController extends Controller
             ->orderBy('full_name')
             ->get(['id', 'full_name']);
 
-        return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'reminders', 'reminderCounts', 'completed', 'completedDays', 'employees'));
+        // Каталог услуг для создания задачи «из каталога» — берём только id+name (имя переносится в задачу).
+        $catalog = Service::roots()->active()->ordered()->get(['id', 'name'])
+            ->map(fn ($s) => ['id' => $s->id, 'name' => $s->name])
+            ->values()->toArray();
+
+        return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'reminders', 'reminderCounts', 'completed', 'completedDays', 'employees', 'catalog'));
     }
 
     // =============================================
@@ -571,31 +577,55 @@ class BuhTasksController extends Controller
         // Произвольная задача: не в смете, без стоимости, с датой-напоминанием,
         // назначается любому активному сотруднику (по умолчанию — себе). Клиент необязателен.
         $validated = $request->validate([
-            'employee_id' => 'required|exists:employees,id',
-            'client_id'   => 'nullable|exists:clients,id',
-            'name'        => 'required|string|max:255',
-            'due_date'    => 'required|date',
+            'employee_id'     => 'required|exists:employees,id',
+            'client_id'       => 'nullable|exists:clients,id',
+            'service_id'      => 'nullable|exists:services,id', // выбор из каталога — берём только имя
+            'name'            => 'required|string|max:255',
+            'description'     => 'nullable|string|max:2000',
+            'requires_review' => 'boolean',
+            'due_date'        => 'required|date',
+            'file'            => 'nullable|file|max:40960', // необязательный документ
         ], [
             'employee_id.required' => 'Выберите сотрудника',
             'name.required'        => 'Введите название задачи',
             'due_date.required'    => 'Укажите дату',
+            'file.max'             => 'Файл не должен превышать 40 МБ',
         ]);
 
         $author   = auth('employee')->user();
         $assignee = Employee::where('status', 'active')->findOrFail($validated['employee_id']);
         $due      = CarbonImmutable::parse($validated['due_date']);
 
+        // Из каталога переносим ТОЛЬКО название (по договорённости); описание/проверка — ручные.
+        $name = $validated['name'];
+        if (!empty($validated['service_id'])) {
+            $name = Service::find($validated['service_id'])?->name ?? $name;
+        }
+
         $adhoc = BuhAdhocTask::create([
-            'employee_id'    => $assignee->id,
-            'client_id'      => $validated['client_id'] ?? null,
-            'name'           => $validated['name'],
-            'cost'           => 0,
-            'year'           => $due->year,
-            'month'          => $due->month,
-            'due_day'        => $due->day,
-            'status'         => 'pending',
-            'paused_seconds' => 0,
+            'employee_id'     => $assignee->id,
+            'client_id'       => $validated['client_id'] ?? null,
+            'service_id'      => $validated['service_id'] ?? null,
+            'name'            => $name,
+            'description'     => $validated['description'] ?? null,
+            'requires_review' => (bool) ($validated['requires_review'] ?? false),
+            'cost'            => 0,
+            'year'            => $due->year,
+            'month'           => $due->month,
+            'due_day'         => $due->day,
+            'status'          => 'pending',
+            'paused_seconds'  => 0,
         ]);
+
+        // Необязательный документ — прикрепляем сразу при создании (автор может приложить
+        // даже когда задача назначена другому сотруднику).
+        if ($request->hasFile('file')) {
+            $file         = $request->file('file');
+            $originalName = $file->getClientOriginalName();
+            $safeName     = pathinfo($originalName, PATHINFO_FILENAME) . '_' . time() . '.' . $file->getClientOriginalExtension();
+            $path         = $file->storeAs('buh_adhoc_documents/' . $adhoc->id, $safeName, 'public');
+            $adhoc->update(['document_path' => $path, 'document_name' => $originalName]);
+        }
 
         return response()->json([
             'success' => true,
@@ -612,6 +642,12 @@ class BuhTasksController extends Controller
                 'year'            => $adhoc->year,
                 'month'           => $adhoc->month,
                 'name'            => $adhoc->name,
+                'description'     => $adhoc->description,
+                'requires_review' => $adhoc->requires_review,
+                'requires_document' => false, // документ всегда опционален для внеплановых
+                'document_name'   => $adhoc->document_name,
+                'document_path'   => $adhoc->document_path,
+                'review_comment'  => null,
                 'cost'            => 0,
                 'periodicity'     => null,
                 'reporting_period' => null,
@@ -635,7 +671,7 @@ class BuhTasksController extends Controller
             $task->status     = 'running';
             $task->started_at = $now;
             $task->resumed_at = $now;
-        } elseif ($task->status === 'paused') {
+        } elseif (in_array($task->status, ['paused', 'rework'], true)) {
             $task->status     = 'running';
             $task->resumed_at = $now;
         }
@@ -674,8 +710,44 @@ class BuhTasksController extends Controller
             $task->paused_seconds += max(0, $now->timestamp - $task->resumed_at->timestamp);
         }
 
-        $task->status       = 'completed';
-        $task->completed_at = $now;
+        // Задача с проверкой уходит на ревью (3-дневный срок), иначе сразу завершена.
+        if ($task->requires_review) {
+            $task->status            = 'review';
+            $task->review_comment    = null;
+            $task->review_started_at = $now;
+        } else {
+            $task->status       = 'completed';
+            $task->completed_at = $now;
+        }
+        $task->save();
+
+        return response()->json(['success' => true, 'log' => $this->formatAdhoc($task)]);
+    }
+
+    public function uploadDocumentAdhoc(Request $request, BuhAdhocTask $task)
+    {
+        $this->authorizeAdhoc($task);
+
+        $request->validate([
+            'file' => ['required', 'file', 'max:40960'],
+        ], [
+            'file.required' => 'Выберите файл',
+            'file.file'     => 'Не удалось прочитать файл — возможно, он превышает лимит сервера',
+            'file.max'      => 'Файл не должен превышать 40 МБ',
+        ]);
+
+        if ($task->document_path) {
+            Storage::disk('public')->delete($task->document_path);
+        }
+
+        $file         = $request->file('file');
+        $originalName = $file->getClientOriginalName();
+        $extension    = $file->getClientOriginalExtension();
+        $safeName     = pathinfo($originalName, PATHINFO_FILENAME) . '_' . time() . '.' . $extension;
+        $path         = $file->storeAs('buh_adhoc_documents/' . $task->id, $safeName, 'public');
+
+        $task->document_path = $path;
+        $task->document_name = $originalName;
         $task->save();
 
         return response()->json(['success' => true, 'log' => $this->formatAdhoc($task)]);
@@ -685,11 +757,15 @@ class BuhTasksController extends Controller
     {
         $this->authorizeAdhoc($task);
 
-        $task->status         = 'pending';
-        $task->started_at     = null;
-        $task->resumed_at     = null;
-        $task->paused_seconds = 0;
-        $task->completed_at   = null;
+        $task->status            = 'pending';
+        $task->started_at        = null;
+        $task->resumed_at        = null;
+        $task->paused_seconds    = 0;
+        $task->completed_at      = null;
+        $task->review_comment    = null;
+        $task->review_started_at = null;
+        $task->reviewed_at       = null;
+        $task->reviewed_by       = null;
         $task->save();
 
         return response()->json(['success' => true, 'log' => $this->formatAdhoc($task)]);
@@ -730,6 +806,9 @@ class BuhTasksController extends Controller
             'id'              => $task->id,
             'status'          => $task->status,
             'elapsed_seconds' => $this->calcElapsed($task),
+            'review_comment'  => $task->review_comment,
+            'document_name'   => $task->document_name,
+            'document_path'   => $task->document_path,
         ];
     }
 
