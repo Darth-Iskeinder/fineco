@@ -158,17 +158,27 @@
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Задача</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Компания</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                            <button type="button" @click="toggleSort()"
+                            <button type="button" @click="toggleSort('due')"
                                     class="group inline-flex items-center gap-1 uppercase tracking-wider hover:text-slate-700 transition-colors"
                                     title="Сортировать по сроку">
                                 Периодичность
                                 <span class="inline-flex flex-col leading-[0]">
-                                    <svg class="w-2 h-2" :class="sortDir === 'asc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" viewBox="0 0 8 8" fill="currentColor"><path d="M4 0l4 5H0z"/></svg>
-                                    <svg class="w-2 h-2 mt-0.5" :class="sortDir === 'desc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" viewBox="0 0 8 8" fill="currentColor"><path d="M4 8L0 3h8z"/></svg>
+                                    <svg class="w-2 h-2" :class="sortBy === 'due' && sortDir === 'asc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" viewBox="0 0 8 8" fill="currentColor"><path d="M4 0l4 5H0z"/></svg>
+                                    <svg class="w-2 h-2 mt-0.5" :class="sortBy === 'due' && sortDir === 'desc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" viewBox="0 0 8 8" fill="currentColor"><path d="M4 8L0 3h8z"/></svg>
                                 </span>
                             </button>
                         </th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Отчётный период</th>
+                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
+                            <button type="button" @click="toggleSort('period')"
+                                    class="group inline-flex items-center gap-1 uppercase tracking-wider hover:text-slate-700 transition-colors"
+                                    title="Сортировать по отчётному периоду">
+                                Отчётный период
+                                <span class="inline-flex flex-col leading-[0]">
+                                    <svg class="w-2 h-2" :class="sortBy === 'period' && sortDir === 'asc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" viewBox="0 0 8 8" fill="currentColor"><path d="M4 0l4 5H0z"/></svg>
+                                    <svg class="w-2 h-2 mt-0.5" :class="sortBy === 'period' && sortDir === 'desc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" viewBox="0 0 8 8" fill="currentColor"><path d="M4 8L0 3h8z"/></svg>
+                                </span>
+                            </button>
+                        </th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider w-24">Время</th>
                         <th class="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Действия</th>
                     </tr>
@@ -1090,7 +1100,8 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         ticker: null,
         now: Math.floor(Date.now() / 1000),
         clientFilter: 'all',
-        sortDir: null, // null = исходный порядок | 'asc' | 'desc' (по сроку due_day)
+        sortBy: null, // null | 'due' (срок/периодичность) | 'period' (отчётный период)
+        sortDir: null, // null = исходный порядок | 'asc' | 'desc'
         visibleLimit: 20, // бесконечная прокрутка списка: сколько строк отрисовано (по 20)
         taskModalIdx: null,
         docRequiredModal: { show: false, taskIdx: null },
@@ -1214,7 +1225,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
 
             const data = await this.post(`/buhtasks/logs/${logId}/quantity`, { actual_quantity: value });
             if (data.success) {
-                this.tasks[taskIdx] = { ...this.tasks[taskIdx], actual_quantity: data.log.actual_quantity };
+                this.patch(taskIdx, { actual_quantity: data.log.actual_quantity });
             }
         },
 
@@ -1235,7 +1246,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             const file = event.target.files[0];
             if (!file) return;
             pendingFiles.set('root_' + taskIdx, file);
-            this.tasks[taskIdx] = { ...this.tasks[taskIdx], pending_file_name: file.name };
+            this.patch(taskIdx, { pending_file_name: file.name });
             event.target.value = '';
         },
 
@@ -1243,10 +1254,10 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             const file = pendingFiles.get('root_' + taskIdx);
             if (!file) return;
 
-            this.tasks[taskIdx] = { ...this.tasks[taskIdx], doc_uploading: true };
+            this.patch(taskIdx, { doc_uploading: true });
 
             const logId = await this.ensureLog(taskIdx);
-            if (!logId) { this.tasks[taskIdx] = { ...this.tasks[taskIdx], doc_uploading: false }; return; }
+            if (!logId) { this.patch(taskIdx, { doc_uploading: false }); return; }
 
             const fd = new FormData();
             fd.append('file', file);
@@ -1258,9 +1269,9 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             const data = await r.json();
             if (data.success) {
                 pendingFiles.delete('root_' + taskIdx);
-                this.tasks[taskIdx] = { ...this.tasks[taskIdx], doc_uploading: false, pending_file_name: null, document_name: data.log.document_name, document_path: data.log.document_path };
+                this.patch(taskIdx, { doc_uploading: false, pending_file_name: null, document_name: data.log.document_name, document_path: data.log.document_path });
             } else {
-                this.tasks[taskIdx] = { ...this.tasks[taskIdx], doc_uploading: false };
+                this.patch(taskIdx, { doc_uploading: false });
             }
         },
 
@@ -1300,18 +1311,28 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             }
         },
 
-        // Сортировка по сроку (due_day): клик переключает asc → desc → исходный порядок
-        toggleSort() {
-            this.sortDir = this.sortDir === null ? 'asc' : (this.sortDir === 'asc' ? 'desc' : null);
+        // Сортировка колонок: клик переключает asc → desc → исходный порядок.
+        // field: 'due' — по сроку (колонка «Периодичность»), 'period' — по отчётному периоду.
+        // Переключение на другую колонку начинает с asc.
+        toggleSort(field) {
+            if (this.sortBy !== field) {
+                this.sortBy = field;
+                this.sortDir = 'asc';
+            } else {
+                this.sortDir = this.sortDir === 'asc' ? 'desc' : (this.sortDir === 'desc' ? null : 'asc');
+                if (!this.sortDir) this.sortBy = null;
+            }
             this.applySort();
         },
         applySort() {
             const bySeq = (a, b) => a._seq - b._seq;
-            if (!this.sortDir) {
+            if (!this.sortDir || !this.sortBy) {
                 this.tasks = [...this.tasks].sort(bySeq);
                 return;
             }
             const mult = this.sortDir === 'desc' ? -1 : 1;
+            // Сортируем по сроку напрямую; отчётный период — тоже по сроку (метка периода
+            // монотонна по due_date), так одинаковые периоды идут подряд и хронологично.
             this.tasks = [...this.tasks].sort((a, b) => {
                 const av = a.due_date, bv = b.due_date;
                 if (!av && !bv) return bySeq(a, b); // обе без срока — сохраняем порядок
@@ -1328,7 +1349,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         // Окно бесконечной прокрутки: uid-ы первых visibleLimit задач, прошедших фильтр (в порядке списка).
         // Мемоизируем по сигнатуре зависимостей — иначе Set пересобирался бы на каждую строку (O(n²)).
         get visibleSet() {
-            const key = this.clientFilter + '|' + this.visibleLimit + '|' + this.sortDir + '|' + this.tasks.length;
+            const key = this.clientFilter + '|' + this.visibleLimit + '|' + this.sortBy + '|' + this.sortDir + '|' + this.tasks.length;
             if (visibleCache.key !== key) {
                 const set = new Set();
                 let count = 0;
@@ -1426,6 +1447,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             // Бесконечная прокрутка: при смене фильтра/сортировки начинаем показ заново с 20.
             this.$watch('clientFilter', () => { this.visibleLimit = 20; });
             this.$watch('sortDir', () => { this.visibleLimit = 20; });
+            this.$watch('sortBy', () => { this.visibleLimit = 20; });
             this.$nextTick(() => this._initInfiniteScroll());
         },
 
@@ -1468,18 +1490,23 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             return r.json();
         },
 
+        // Точечно мутирует поля одной задачи. Важно для производительности:
+        // замена элемента массива (this.tasks[idx] = {...}) заставляет x-for пере-сверять
+        // все задачи (у сотрудника их сотни) — мутация свойств обновляет только одну строку.
+        patch(idx, props) {
+            const t = this.tasks[idx];
+            for (const k in props) t[k] = props[k];
+        },
+
         // Применяет результат (работает для обоих типов задач)
         applyResult(idx, log) {
             const task = this.tasks[idx];
-            this.tasks[idx] = {
-                ...task,
-                loading:           false,
-                log_id:            task.type === 'planned' ? log.id : task.log_id,
-                status:            log.status,
-                elapsed_seconds:   log.elapsed_seconds,
-                review_comment:    log.review_comment ?? null,
-                client_resumed_at: log.status === 'running' ? this.now : null,
-            };
+            task.loading = false;
+            if (task.type === 'planned') task.log_id = log.id;
+            task.status = log.status;
+            task.elapsed_seconds = log.elapsed_seconds;
+            task.review_comment = log.review_comment ?? null;
+            task.client_resumed_at = log.status === 'running' ? this.now : null;
         },
 
         // Возвращает URL для действия в зависимости от типа задачи
@@ -1510,7 +1537,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             });
             const data = await r.json();
             if (data.success) {
-                this.tasks[idx] = { ...this.tasks[idx], log_id: data.log.id };
+                this.tasks[idx].log_id = data.log.id;
                 return data.log.id;
             }
             return null;
@@ -1528,30 +1555,30 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
 
         async startTask(idx) {
             const task = this.tasks[idx];
-            this.tasks[idx] = { ...task, loading: true };
+            this.patch(idx, { loading: true });
 
             if (task.type === 'planned') {
                 const logId = await this.ensureLog(idx);
-                if (!logId) { this.tasks[idx] = { ...this.tasks[idx], loading: false }; return; }
+                if (!logId) { this.patch(idx, { loading: false }); return; }
             }
 
             const data = await this.post(this.actionUrl(this.tasks[idx], 'start'));
             if (data.success) this.applyResult(idx, data.log);
-            else this.tasks[idx] = { ...this.tasks[idx], loading: false };
+            else this.patch(idx, { loading: false });
         },
 
         async resumeTask(idx) {
-            this.tasks[idx] = { ...this.tasks[idx], loading: true };
+            this.patch(idx, { loading: true });
             const data = await this.post(this.actionUrl(this.tasks[idx], 'start'));
             if (data.success) this.applyResult(idx, data.log);
-            else this.tasks[idx] = { ...this.tasks[idx], loading: false };
+            else this.patch(idx, { loading: false });
         },
 
         async pauseTask(idx) {
-            this.tasks[idx] = { ...this.tasks[idx], loading: true };
+            this.patch(idx, { loading: true });
             const data = await this.post(this.actionUrl(this.tasks[idx], 'pause'));
             if (data.success) this.applyResult(idx, data.log);
-            else this.tasks[idx] = { ...this.tasks[idx], loading: false };
+            else this.patch(idx, { loading: false });
         },
 
         // Все подпункты (чекбоксы) отмечены? Без подпунктов — считается выполнимой.
@@ -1567,28 +1594,28 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 return;
             }
 
-            this.tasks[idx] = { ...this.tasks[idx], loading: true };
+            this.patch(idx, { loading: true });
 
             if (this.tasks[idx].type === 'planned') {
                 const logId = await this.ensureLog(idx);
-                if (!logId) { this.tasks[idx] = { ...this.tasks[idx], loading: false }; return; }
+                if (!logId) { this.patch(idx, { loading: false }); return; }
             }
 
             const data = await this.post(this.actionUrl(this.tasks[idx], 'complete'));
             if (data.success) {
                 this.applyResult(idx, data.log);
             } else {
-                this.tasks[idx] = { ...this.tasks[idx], loading: false };
+                this.patch(idx, { loading: false });
                 if (data.requires_document) this.docRequiredModal = { show: true, taskIdx: idx };
                 if (data.requires_checklist) this.checklistRequiredModal = { show: true, taskIdx: idx };
             }
         },
 
         async resetTask(idx) {
-            this.tasks[idx] = { ...this.tasks[idx], loading: true };
+            this.patch(idx, { loading: true });
             const data = await this.post(this.actionUrl(this.tasks[idx], 'reset'));
             if (data.success) this.applyResult(idx, data.log);
-            else this.tasks[idx] = { ...this.tasks[idx], loading: false };
+            else this.patch(idx, { loading: false });
         },
 
         resetNewTask() {
