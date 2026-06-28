@@ -385,6 +385,28 @@
                     <span class="inline-block w-2.5 h-2.5 rounded-full border border-slate-300"></span>
                     не начато
                 </span>
+
+                {{-- Фильтр столбцов — совместный (группа + период) --}}
+                <div class="ml-auto inline-flex items-center gap-2">
+                    <span class="text-slate-400">Фильтр:</span>
+                    <select x-model="checklistFilter.group"
+                            class="px-2.5 py-1 text-xs text-slate-600 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50">
+                        <option value="">Все группы</option>
+                        <template x-for="g in checklistGroups" :key="g">
+                            <option :value="g" x-text="g"></option>
+                        </template>
+                    </select>
+                    <select x-model="checklistFilter.period"
+                            class="px-2.5 py-1 text-xs text-slate-600 rounded-lg border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50">
+                        <option value="">Все периоды</option>
+                        <template x-for="p in checklistPeriods" :key="p">
+                            <option :value="p" x-text="p"></option>
+                        </template>
+                    </select>
+                    <button type="button" x-show="checklistFilter.group || checklistFilter.period"
+                            @click="checklistFilter.group = ''; checklistFilter.period = ''"
+                            class="px-2 py-1 text-xs text-slate-400 hover:text-slate-600 transition-colors" title="Сбросить фильтр">✕</button>
+                </div>
             </div>
 
             <div class="overflow-x-auto">
@@ -1159,6 +1181,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         employees: employees || [],
         currentEmployeeId,
         viewMode: 'list',
+        checklistFilter: { group: '', period: '' }, // совместный фильтр столбцов чеклиста (группа + период)
         ticker: null,
         now: Math.floor(Date.now() / 1000),
         clientFilter: 'all',
@@ -1204,7 +1227,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             const colMap = {};
             const cells = {};
             const rank = { none: 0, done: 1, review: 2, progress: 3 };
-            this.tasks.filter(t => this.matchesFilter(t)).forEach(t => {
+            this.tasks.filter(t => this.matchesFilter(t) && this.matchesChecklistFilter(t)).forEach(t => {
                 const cid = String(t.client_id ?? t.client_name);
                 if (!companyMap[cid]) companyMap[cid] = { id: cid, name: t.client_name || '—' };
                 // Филиальные задачи — отдельный столбец на каждый НО (name + филиал).
@@ -1225,6 +1248,26 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 cols: Object.values(colMap).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'ru')),
                 cells,
             };
+        },
+
+        // Совпадает ли задача с активными фильтрами чеклиста (группа + период, совместно/AND).
+        matchesChecklistFilter(t) {
+            const f = this.checklistFilter;
+            if (f.group  && (t.service_group   || '') !== f.group)  return false;
+            if (f.period && (t.reporting_period || '') !== f.period) return false;
+            return true;
+        },
+
+        // Доступные значения для выпадающих фильтров (из всех задач, без учёта текущего фильтра).
+        get checklistGroups() {
+            const s = new Set();
+            this.tasks.forEach(t => { if (t.service_group) s.add(t.service_group); });
+            return [...s].sort((a, b) => a.localeCompare(b, 'ru'));
+        },
+        get checklistPeriods() {
+            const s = new Set();
+            this.tasks.forEach(t => { if (t.reporting_period) s.add(t.reporting_period); });
+            return [...s].sort((a, b) => a.localeCompare(b, 'ru'));
         },
         openTaskModal(idx) {
             this.taskModalIdx = idx;

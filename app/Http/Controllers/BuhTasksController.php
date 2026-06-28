@@ -157,6 +157,7 @@ class BuhTasksController extends Controller
                         'log_id'          => $log?->id,
                         'name'            => $item->name,
                         'branch_label'    => $item->branch_label,
+                        'service_group'   => $service?->service_group, // для сортировки чеклиста по группе
                         'cost'            => (float) $item->total,
                         'periodicity'     => $item->periodicity,
                         'reporting_period' => Service::reportingPeriodLabel($kind, $dueObj, $today->year),
@@ -219,6 +220,7 @@ class BuhTasksController extends Controller
                 'year'            => $adhoc->year,
                 'month'           => $adhoc->month,
                 'name'            => $adhoc->name,
+                'service_group'   => null,
                 'cost'            => (float) $adhoc->cost,
                 'periodicity'     => null,
                 'reporting_period' => null,
