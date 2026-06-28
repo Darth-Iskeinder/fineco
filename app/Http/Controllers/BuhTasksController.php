@@ -63,10 +63,14 @@ class BuhTasksController extends Controller
         // Логи плановых задач сотрудника (нужны статусы за прошлое для просрочки), ключ year-month-item.
         // Ограничиваем годом окна просрочки (6 мес назад) — старые логи всё равно не запрашиваются,
         // а индекс (employee_id, year, month) поднимает в память кратно меньше строк.
+        // Ключ лога — «слот»: year-month-item + дата для weekly (due_date), иначе пусто.
+        // Так weekly-вхождения в одном месяце различаются, а помесячные логи (due_date=NULL)
+        // продолжают матчиться как раньше — без бэкфилла.
         $logs = BuhTaskLog::where('employee_id', $employee->id)
             ->where('year', '>=', $today->subMonths(6)->year)
             ->get()
-            ->keyBy(fn ($l) => $l->year . '-' . $l->month . '-' . $l->estimate_item_id);
+            ->keyBy(fn ($l) => $l->year . '-' . $l->month . '-' . $l->estimate_item_id
+                . ($l->due_date ? '-' . $l->due_date->toDateString() : ''));
 
         // Все внеплановые задачи сотрудника (невыполненные висят, пока не закроют)
         $adhocs = BuhAdhocTask::where('employee_id', $employee->id)
@@ -121,7 +125,10 @@ class BuhTasksController extends Controller
                 }
 
                 foreach ($occurrences as [$wy, $wm, $dueDateStr, $dueDay, $dueObj]) {
-                    $log = $logs->get($wy . '-' . $wm . '-' . $item->id);
+                    // Слот: для weekly различаем вхождения по дате; для остальных — помесячно (пусто).
+                    $slot    = $kind === 'weekly' ? $dueDateStr : null;
+                    $slotKey = $slot ? '-' . $slot : '';
+                    $log = $logs->get($wy . '-' . $wm . '-' . $item->id . $slotKey);
                     $status = $log?->status ?? 'pending';
 
                     // Фильтр видимости в активном списке:
@@ -139,9 +146,10 @@ class BuhTasksController extends Controller
                     // позиции без даты (ручные без срока) — показываем как текущую задачу
 
                     $tasks[] = [
-                        'uid'             => 'planned_' . $item->id . '_' . $wy . '_' . $wm,
+                        'uid'             => 'planned_' . $item->id . '_' . $wy . '_' . $wm . ($slot ? '_' . $slot : ''),
                         'type'            => 'planned',
                         'item_id'         => $item->id,
+                        'slot'            => $slot, // weekly → дата вхождения, иначе null (передаётся при создании лога)
                         'client_id'       => $client->id,
                         'client_name'     => $client->name,
                         'year'            => $wy,
@@ -165,8 +173,8 @@ class BuhTasksController extends Controller
                         'requires_document' => (bool) ($service?->requires_document),
                         'document_name'    => $log?->document_name,
                         'document_path'    => $log?->document_path,
-                        'children'        => $item->children->map(function ($child) use ($logs, $wy, $wm) {
-                            $childLog = $logs->get($wy . '-' . $wm . '-' . $child->id);
+                        'children'        => $item->children->map(function ($child) use ($logs, $wy, $wm, $slotKey, $slot) {
+                            $childLog = $logs->get($wy . '-' . $wm . '-' . $child->id . $slotKey);
 
                             return [
                                 'id'                 => $child->id,
@@ -260,7 +268,8 @@ class BuhTasksController extends Controller
                     'document_name'    => $l->document_name,
                     'document_path'    => $l->document_path,
                     'children'         => ($item?->children ?? collect())->map(function ($child) use ($logs, $l) {
-                        $childLog = $logs->get($l->year . '-' . $l->month . '-' . $child->id);
+                        $cSlotKey = $l->due_date ? '-' . $l->due_date->toDateString() : '';
+                        $childLog = $logs->get($l->year . '-' . $l->month . '-' . $child->id . $cSlotKey);
                         $cs = $child->service;
 
                         return [
@@ -381,6 +390,7 @@ class BuhTasksController extends Controller
             'estimate_item_id' => 'required|exists:estimate_items,id',
             'year'             => 'required|integer',
             'month'            => 'required|integer|min:1|max:12',
+            'due_date'         => 'nullable|date', // weekly → дата вхождения; иначе null (помесячный слот)
         ]);
 
         $employee = auth('employee')->user();
@@ -391,6 +401,7 @@ class BuhTasksController extends Controller
             'estimate_item_id' => $request->estimate_item_id,
             'year'             => $request->year,
             'month'            => $request->month,
+            'due_date'         => $request->due_date,
         ], [
             'status'         => 'pending',
             'paused_seconds' => 0,
@@ -456,6 +467,9 @@ class BuhTasksController extends Controller
             $doneChildren = BuhTaskLog::where('employee_id', $log->employee_id)
                 ->where('year', $log->year)
                 ->where('month', $log->month)
+                ->when($log->due_date,
+                    fn ($q) => $q->whereDate('due_date', $log->due_date),
+                    fn ($q) => $q->whereNull('due_date'))
                 ->whereIn('estimate_item_id', $childIds)
                 ->where('status', 'completed')
                 ->count();

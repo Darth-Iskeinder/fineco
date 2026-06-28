@@ -9,13 +9,14 @@ class BuhTaskLog extends Model
 {
     protected $fillable = [
         'employee_id', 'client_id', 'estimate_item_id',
-        'year', 'month', 'status', 'review_comment',
+        'year', 'month', 'due_date', 'status', 'review_comment',
         'started_at', 'resumed_at', 'paused_seconds', 'completed_at',
         'reviewed_at', 'reviewed_by', 'review_started_at', 'actual_quantity',
         'document_path', 'document_name',
     ];
 
     protected $casts = [
+        'due_date'     => 'date',
         'started_at'   => 'datetime',
         'resumed_at'   => 'datetime',
         'completed_at' => 'datetime',

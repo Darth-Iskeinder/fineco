@@ -1178,6 +1178,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                     estimate_item_id: child.id,
                     year:             task.year,
                     month:            task.month,
+                    due_date:         task.slot, // weekly → дата вхождения, иначе null
                 }),
             });
             const data = await r.json();
@@ -1533,6 +1534,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                     estimate_item_id: task.item_id,
                     year:             task.year,
                     month:            task.month,
+                    due_date:         task.slot, // weekly → дата вхождения, иначе null
                 }),
             });
             const data = await r.json();
