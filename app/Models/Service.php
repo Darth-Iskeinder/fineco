@@ -60,6 +60,33 @@ class Service extends Model
             ->all();
     }
 
+    /**
+     * ХАРДКОД — TODO УНИФИЦИРОВАТЬ: вынести поведение категорий в справочник категорий
+     * (например поле default_mode: auto | recommended), чтобы каждая бухкомпания настраивала
+     * режим подтягивания на самой категории. Сейчас сопоставление зашито по имени категории.
+     *
+     * RECOMMENDED_CATEGORIES — «рекомендательные / контрольные»: подтягиваются в смету
+     *   НЕЗАВИСИМО от РН и особых условий, но с выключенным тумблером.
+     * MANDATORY_CATEGORIES — «обязательные»: подтягиваются по совпадению РН и особых условий,
+     *   но НЕ подтягиваются клиенту-нулёвке (is_zero_movement).
+     */
+    public const RECOMMENDED_CATEGORIES = ['Рекомендованная контрольная'];
+    public const MANDATORY_CATEGORIES = ['Обязательная'];
+
+    /** Является ли категория БП рекомендательной/контрольной (см. RECOMMENDED_CATEGORIES). */
+    public static function isRecommendedCategory(?string $category): bool
+    {
+        return $category !== null
+            && in_array(trim($category), self::RECOMMENDED_CATEGORIES, true);
+    }
+
+    /** Является ли категория БП обязательной (см. MANDATORY_CATEGORIES). */
+    public static function isMandatoryCategory(?string $category): bool
+    {
+        return $category !== null
+            && in_array(trim($category), self::MANDATORY_CATEGORIES, true);
+    }
+
     protected $fillable = [
         'parent_id',
         'name',

@@ -51,10 +51,11 @@ class EstimateController extends Controller
 
         $clientTaxSystemId = $client->tax_system_id;
 
-        // БП применим к клиенту по режиму налогообложения
-        $matchesTaxSystem = fn($s) => !$clientTaxSystemId                  // у клиента не задан РН — показываем всё
-            || $s->taxSystems->isEmpty()                                   // у БП ещё нет РН — показываем (обратная совмест.)
-            || $s->taxSystems->contains('id', $clientTaxSystemId);         // РН клиента совпадает
+        // БП применим к клиенту, только если РН клиента явно указан у БП.
+        // Без РН у клиента или без РН у БП обычные БП не подтягиваются —
+        // в смету попадают лишь необходимые (особые БП идут отдельной веткой по флагам).
+        $matchesTaxSystem = fn($s) => $clientTaxSystemId
+            && $s->taxSystems->contains('id', $clientTaxSystemId);
 
         $flagKeys = array_keys(Service::SPECIAL_FLAGS);
         $pricing  = new PricingCalculator();
@@ -79,7 +80,11 @@ class EstimateController extends Controller
                 'unit'            => $bp->rate?->unit,
                 'periodicity'     => $bp->periodicity ?? '',
                 'allows_quantity' => $bp->allows_quantity,
-                'enabled'         => $isFirstLoad ? true : ($savedItem !== null),
+                // Рекомендательные/контрольные БП на первой загрузке приходят выключенными;
+                // обычные — включёнными. На повторных загрузках всегда побеждает сохранённое состояние.
+                'enabled'         => $isFirstLoad
+                    ? !Service::isRecommendedCategory($bp->category)
+                    : ($savedItem !== null),
                 'quantity'        => $savedItem ? (int) $savedItem->quantity : 1,
                 'children'        => [],
             ];
@@ -134,12 +139,17 @@ class EstimateController extends Controller
         // Такие тянутся только по флагу клиента (ниже), а не по РН.
         $hasAnyFlag = fn($s) => collect($flagKeys)->contains(fn($k) => (bool) $s->$k);
 
+        // Клиент-нулёвка: обязательные БП ему не подтягиваются (см. фильтр ниже).
+        $clientIsZero = (bool) $client->is_zero_movement;
+
         // Обычные БП (без особых условий), применимые по режиму налогообложения,
         // подтягиваются из всего активного каталога — независимо от тарифа.
+        // Дополнительно: клиенту-нулёвке не подтягиваем БП категории «Обязательная».
         $includedServiceIds = [];
         $rootServices = Service::with(['taxSystems', 'children.rate', 'rate'])
             ->roots()->active()->ordered()->get()
-            ->filter(fn($s) => $matchesTaxSystem($s) && !$hasAnyFlag($s))
+            ->filter(fn($s) => $matchesTaxSystem($s) && !$hasAnyFlag($s)
+                && !($clientIsZero && Service::isMandatoryCategory($s->category)))
             ->values();
 
         foreach ($rootServices as $bp) {
@@ -163,6 +173,19 @@ class EstimateController extends Controller
                 $pushBp($bp);
                 $includedServiceIds[$bp->id] = true;
             }
+        }
+
+        // Рекомендательные/контрольные БП: тянутся независимо от РН и особых условий
+        // (тумблер выключен — состояние задаётся в buildBpData по категории).
+        $recommendedServices = Service::with(['children.rate', 'rate'])
+            ->roots()->active()->ordered()->get()
+            ->filter(fn($s) => Service::isRecommendedCategory($s->category)
+                && !isset($includedServiceIds[$s->id]))
+            ->values();
+
+        foreach ($recommendedServices as $bp) {
+            $pushBp($bp);
+            $includedServiceIds[$bp->id] = true;
         }
 
         // Extra items = всё что не относится к тарифным (recurring с service_id)
