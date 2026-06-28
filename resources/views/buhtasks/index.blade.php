@@ -415,7 +415,7 @@
                         {{-- Фон на строке: наклонный текст столбцов выходит за свою ячейку,
                              прозрачные th не перекрывают его соседними фонами. --}}
                         <tr class="bg-slate-100">
-                            <th class="sticky left-0 z-20 bg-slate-100 px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider border-r border-b border-slate-200 min-w-[200px] align-bottom">Компания</th>
+                            <th class="sticky left-0 z-20 bg-slate-100 px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider border-r border-b border-slate-200 w-px whitespace-nowrap align-bottom">Компания</th>
                             <template x-for="(col, ci) in checklistData.cols" :key="col.key">
                                 {{-- Шапка с наклоном −45°: название лежит в наклонной «дорожке» между диагональными линиями --}}
                                 <th class="relative border-b border-slate-200 p-0 align-bottom overflow-visible"
@@ -434,14 +434,16 @@
                                           x-text="col.label" :title="col.label"></span>
                                 </th>
                             </template>
+                            {{-- Распорка: забирает лишнюю ширину, чтобы «Компания» и столбцы не растягивались --}}
+                            <th class="border-b border-slate-200" style="width:100%"></th>
                         </tr>
                     </thead>
                     <tbody>
                         <template x-for="company in checklistData.companies" :key="company.id">
                             <tr class="group">
-                                <td class="sticky left-0 z-10 bg-white group-hover:bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 border-r border-b border-slate-200 whitespace-nowrap" x-text="company.name"></td>
+                                <td class="sticky left-0 z-10 bg-white group-hover:bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 border-r border-b border-slate-200 whitespace-nowrap w-px" x-text="company.name"></td>
                                 <template x-for="col in checklistData.cols" :key="col.key">
-                                    <td class="px-2 py-3 text-center border-r border-b border-slate-200 group-hover:bg-slate-50/50">
+                                    <td class="px-2 py-3 text-center border-b border-slate-200 group-hover:bg-slate-50/50">
                                         <template x-if="(checklistData.cells[company.id] || {})[col.key] === 'done'">
                                             <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 text-emerald-600" title="выполнено">
                                                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
@@ -461,6 +463,8 @@
                                         </template>
                                     </td>
                                 </template>
+                                {{-- Распорка под шапочную: забирает лишнюю ширину строки --}}
+                                <td class="border-b border-slate-200 group-hover:bg-slate-50/50" style="width:100%"></td>
                             </tr>
                         </template>
                     </tbody>
