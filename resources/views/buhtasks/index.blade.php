@@ -412,16 +412,26 @@
             <div class="overflow-x-auto">
                 <table class="min-w-full border-separate border-spacing-0 border-t border-l border-slate-200">
                     <thead>
-                        <tr>
+                        {{-- Фон на строке: наклонный текст столбцов выходит за свою ячейку,
+                             прозрачные th не перекрывают его соседними фонами. --}}
+                        <tr class="bg-slate-100">
                             <th class="sticky left-0 z-20 bg-slate-100 px-4 py-3 text-left text-xs font-semibold text-slate-600 uppercase tracking-wider border-r border-b border-slate-200 min-w-[200px] align-bottom">Компания</th>
-                            <template x-for="col in checklistData.cols" :key="col.key">
-                                {{-- Заголовок с наклоном −45°: читается лучше вертикального, столбец остаётся узким --}}
-                                <th class="bg-slate-100 border-r border-b border-slate-200 align-bottom p-0 overflow-visible" style="height: 130px;">
-                                    <div class="relative h-full" style="width: 32px;">
-                                        <span class="absolute bottom-1.5 left-1/2 text-xs font-semibold text-slate-600 whitespace-nowrap leading-none"
-                                              style="transform-origin: bottom left; transform: rotate(-45deg);"
-                                              x-text="col.label" :title="col.label"></span>
-                                    </div>
+                            <template x-for="(col, ci) in checklistData.cols" :key="col.key">
+                                {{-- Шапка с наклоном −45°: название лежит в наклонной «дорожке» между диагональными линиями --}}
+                                <th class="relative border-b border-slate-200 p-0 align-bottom overflow-visible"
+                                    :style="`height:${checklistData.headerHeight}px; width:36px;`">
+                                    {{-- диагональная линия-разделитель слева --}}
+                                    <div class="absolute bottom-0 left-0 bg-slate-200 pointer-events-none"
+                                         :style="`height:1px; width:${Math.round(checklistData.headerHeight*1.414)}px; transform-origin:bottom left; transform:rotate(-45deg);`"></div>
+                                    {{-- закрывающая линия справа у последнего столбца --}}
+                                    <template x-if="ci === checklistData.cols.length - 1">
+                                        <div class="absolute bottom-0 bg-slate-200 pointer-events-none"
+                                             :style="`left:36px; height:1px; width:${Math.round(checklistData.headerHeight*1.414)}px; transform-origin:bottom left; transform:rotate(-45deg);`"></div>
+                                    </template>
+                                    {{-- название по центру дорожки (базовая линия посередине между диагоналями) --}}
+                                    <span class="absolute bottom-0.5 left-1/2 text-[11px] font-semibold text-slate-600 whitespace-nowrap leading-none"
+                                          style="transform-origin: bottom left; transform: rotate(-45deg);"
+                                          x-text="col.label" :title="col.label"></span>
                                 </th>
                             </template>
                         </tr>
@@ -1246,10 +1256,15 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 const prev = cells[cid][key];
                 cells[cid][key] = (!prev || rank[cat] > rank[prev]) ? cat : prev;
             });
+            // Высота шапки под самое длинное название: при −45° вертикальная проекция
+            // текста = длина/√2. ~6.2px на символ при 12px шрифте; ограничиваем разумным диапазоном.
+            const maxLen = Object.values(colMap).reduce((m, c) => Math.max(m, c.label.length), 0);
+            const headerHeight = Math.min(340, Math.max(96, Math.round(maxLen * 6.2 / 1.414) + 24));
             return {
                 companies: Object.values(companyMap).sort((a, b) => a.name.localeCompare(b.name, 'ru')),
                 cols: Object.values(colMap).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'ru')),
                 cells,
+                headerHeight,
             };
         },
 
