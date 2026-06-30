@@ -73,6 +73,7 @@ class Client extends Model
         'has_foreign_trade',
         'has_vat_refund',
         'has_special_reporting',
+        'has_currency_operations',
         'edo_operator',
         // Договор и обслуживание
         'service_type',
@@ -149,6 +150,7 @@ class Client extends Model
         'has_foreign_trade' => 'boolean',
         'has_vat_refund' => 'boolean',
         'has_special_reporting' => 'boolean',
+        'has_currency_operations' => 'boolean',
         // Числа
         'employees_count' => 'integer',
         'kkm_count' => 'integer',

@@ -238,6 +238,7 @@ class ClientController extends Controller
                 'has_foreign_trade' => ['boolean'],
                 'has_vat_refund' => ['boolean'],
                 'has_special_reporting' => ['boolean'],
+                'has_currency_operations' => ['boolean'],
                 'edo_operator' => ['nullable', 'string', 'max:255'],
             ],
             'contacts_info' => [

@@ -1806,6 +1806,7 @@ function clientShow() {
             { key: 'has_foreign_trade', label: 'Внешнеторговая деятельность' },
             { key: 'has_vat_refund', label: 'Возмещение НДС' },
             { key: 'has_special_reporting', label: 'Спец. отчётность' },
+            { key: 'has_currency_operations', label: 'Валютные операции (услуги)' },
         ],
 
         showPasswords: false,
@@ -1916,6 +1917,7 @@ function clientShow() {
                 has_foreign_trade: this.client.has_foreign_trade || false,
                 has_vat_refund: this.client.has_vat_refund || false,
                 has_special_reporting: this.client.has_special_reporting || false,
+                has_currency_operations: this.client.has_currency_operations || false,
                 edo_operator: this.client.edo_operator || '',
             };
             this.form.contacts_info = {
