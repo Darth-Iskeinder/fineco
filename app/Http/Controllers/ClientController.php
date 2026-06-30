@@ -19,8 +19,7 @@ class ClientController extends Controller
         $clients = Client::with(['taxSystem', 'tariff', 'responsibleEmployee'])
             ->search($request->search)
             ->orderBy('created_at', 'desc')
-            ->paginate(15)
-            ->withQueryString();
+            ->get();
 
         return view('clients.index', [
             'clients' => $clients,
@@ -38,7 +37,6 @@ class ClientController extends Controller
         $clients = Client::with(['taxSystem', 'tariff', 'responsibleEmployee'])
             ->search($search)
             ->orderBy('created_at', 'desc')
-            ->limit(50)
             ->get()
             ->map(function ($client) {
                 return [
