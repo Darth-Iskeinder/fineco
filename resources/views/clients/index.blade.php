@@ -48,6 +48,27 @@
     loading: false,
     searchTimeout: null,
 
+    // Сортировка по ответственному: null → по умолчанию, 'asc' → А-Я, 'desc' → Я-А.
+    sortDir: null,
+
+    // Клиенты без ответственного («—») всегда в конце, независимо от направления.
+    get sortedClients() {
+        if (!this.sortDir) return this.clients;
+        const dir = this.sortDir === 'asc' ? 1 : -1;
+        const val = c => (c.responsible_name && c.responsible_name !== '—') ? c.responsible_name : '';
+        return [...this.clients].sort((a, b) => {
+            const av = val(a), bv = val(b);
+            if (!av && !bv) return 0;
+            if (!av) return 1;
+            if (!bv) return -1;
+            return av.localeCompare(bv, 'ru') * dir;
+        });
+    },
+
+    toggleResponsibleSort() {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : (this.sortDir === 'desc' ? null : 'asc');
+    },
+
     async searchClients() {
         this.loading = true;
         try {
@@ -158,7 +179,18 @@
                             Тарифный план
                         </th>
                         <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                            Ответственный
+                            <button type="button" @click="toggleResponsibleSort()"
+                                    class="group inline-flex items-center gap-1 uppercase tracking-wider hover:text-slate-700 transition-colors select-none">
+                                Ответственный
+                                <span class="flex flex-col -space-y-1">
+                                    <svg class="w-2.5 h-2.5" :class="sortDir === 'asc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" fill="currentColor" viewBox="0 0 20 20">
+                                        <path d="M10 5l4 5H6l4-5z" />
+                                    </svg>
+                                    <svg class="w-2.5 h-2.5" :class="sortDir === 'desc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" fill="currentColor" viewBox="0 0 20 20">
+                                        <path d="M10 15l-4-5h8l-4 5z" />
+                                    </svg>
+                                </span>
+                            </button>
                         </th>
                         <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                             Статус
@@ -169,7 +201,7 @@
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
-                    <template x-for="(client, index) in clients" :key="client.id">
+                    <template x-for="(client, index) in sortedClients" :key="client.id">
                         <tr class="hover:bg-slate-50/50 transition-colors duration-150">
                             <td class="px-6 py-4 whitespace-nowrap">
                                 <div class="text-sm text-slate-500" x-text="index + 1"></div>
