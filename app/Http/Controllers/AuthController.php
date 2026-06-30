@@ -13,7 +13,12 @@ class AuthController extends Controller
             return redirect('/');
         }
 
-        return view('auth.login');
+        // Запрещаем кэширование страницы логина, чтобы браузер (в т.ч. при переходе
+        // «Назад») не подставлял форму со старым CSRF-токеном.
+        return response()
+            ->view('auth.login')
+            ->header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+            ->header('Pragma', 'no-cache');
     }
 
     public function login(Request $request)

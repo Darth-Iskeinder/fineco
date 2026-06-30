@@ -20,5 +20,12 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        // Истёкший CSRF-токен (419 Page Expired): не показываем страницу ошибки,
+        // а возвращаем пользователя на форму логина со свежим токеном.
+        $exceptions->render(function (\Illuminate\Session\TokenMismatchException $e, $request) {
+            return redirect()
+                ->route('login')
+                ->withInput($request->except('_token', 'password'))
+                ->withErrors(['email' => 'Сессия устарела. Пожалуйста, войдите снова.']);
+        });
     })->create();
