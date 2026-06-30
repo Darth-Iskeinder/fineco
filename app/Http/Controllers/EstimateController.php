@@ -130,15 +130,25 @@ class EstimateController extends Controller
         // Клиент-нулёвка: обязательные БП ему не подтягиваются (см. фильтр ниже).
         $clientIsZero = (bool) $client->is_zero_movement;
 
-        // Обязательные БП подтягиваются из всего активного каталога, если клиент
-        // НЕ нулёвка. Нулёвке обязательные не тянем. Единственное условие
-        // подтягивания категории «Обязательная» — отсутствие нулёвки:
-        // РН и особые условия здесь не учитываются.
+        // БП совпадает с клиентом по РН, если РН клиента указан в списке РН у БП.
+        $clientTaxSystemId = $client->tax_system_id;
+        $matchesTaxSystem  = fn($s) => $clientTaxSystemId
+            && $s->taxSystems->contains('id', $clientTaxSystemId);
+
+        // Первый проход. БП подтягивается, если:
+        //  - совпал РН клиента с РН у БП (категория роли не играет — напр. «Условная по профилю»), ИЛИ
+        //  - это категория «Обязательная» (тянется и без совпадения РН).
+        // При этом клиенту-нулёвке БП категории «Обязательная» не тянем вообще,
+        // даже если РН совпал. Особые условия — отдельным проходом ниже.
         $includedServiceIds = [];
         $rootServices = Service::with(['taxSystems', 'children.rate', 'rate'])
             ->roots()->active()->ordered()->get()
-            ->filter(fn($s) => Service::isMandatoryCategory($s->category)
-                && !$clientIsZero)
+            ->filter(function ($s) use ($matchesTaxSystem, $clientIsZero) {
+                if ($clientIsZero && Service::isMandatoryCategory($s->category)) {
+                    return false;
+                }
+                return $matchesTaxSystem($s) || Service::isMandatoryCategory($s->category);
+            })
             ->values();
 
         foreach ($rootServices as $bp) {
