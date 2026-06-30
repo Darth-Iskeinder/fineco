@@ -49,14 +49,6 @@ class EstimateController extends Controller
                 ]))
             ->values();
 
-        $clientTaxSystemId = $client->tax_system_id;
-
-        // БП применим к клиенту, только если РН клиента явно указан у БП.
-        // Без РН у клиента или без РН у БП обычные БП не подтягиваются —
-        // в смету попадают лишь необходимые (особые БП идут отдельной веткой по флагам).
-        $matchesTaxSystem = fn($s) => $clientTaxSystemId
-            && $s->taxSystems->contains('id', $clientTaxSystemId);
-
         $flagKeys = array_keys(Service::SPECIAL_FLAGS);
         $pricing  = new PricingCalculator();
 
@@ -135,21 +127,18 @@ class EstimateController extends Controller
             }
         };
 
-        // «Особый» БП — помеченный хотя бы одним особым условием (ПВТ, ВЭД, …).
-        // Такие тянутся только по флагу клиента (ниже), а не по РН.
-        $hasAnyFlag = fn($s) => collect($flagKeys)->contains(fn($k) => (bool) $s->$k);
-
         // Клиент-нулёвка: обязательные БП ему не подтягиваются (см. фильтр ниже).
         $clientIsZero = (bool) $client->is_zero_movement;
 
-        // Обычные БП (без особых условий), применимые по режиму налогообложения,
-        // подтягиваются из всего активного каталога — независимо от тарифа.
-        // Дополнительно: клиенту-нулёвке не подтягиваем БП категории «Обязательная».
+        // Обязательные БП подтягиваются из всего активного каталога, если клиент
+        // НЕ нулёвка. Нулёвке обязательные не тянем. Единственное условие
+        // подтягивания категории «Обязательная» — отсутствие нулёвки:
+        // РН и особые условия здесь не учитываются.
         $includedServiceIds = [];
         $rootServices = Service::with(['taxSystems', 'children.rate', 'rate'])
             ->roots()->active()->ordered()->get()
-            ->filter(fn($s) => $matchesTaxSystem($s) && !$hasAnyFlag($s)
-                && !($clientIsZero && Service::isMandatoryCategory($s->category)))
+            ->filter(fn($s) => Service::isMandatoryCategory($s->category)
+                && !$clientIsZero)
             ->values();
 
         foreach ($rootServices as $bp) {
