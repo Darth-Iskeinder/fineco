@@ -362,7 +362,10 @@
         </div>
 
         {{-- ===== РЕЖИМ ЧЕКЛИСТ (матрица: строки — компании, столбцы — задачи; только для чтения) ===== --}}
-        <div x-show="viewMode === 'checklist'">
+        {{-- x-if (не x-show): матрица чеклиста тяжёлая (компании × столбцы × 5 x-if,
+             геттер checklistData бежит по всем задачам). Строим только когда вкладка открыта. --}}
+        <template x-if="viewMode === 'checklist'">
+        <div>
             {{-- Легенда статусов --}}
             <div class="flex flex-wrap items-center gap-5 px-6 py-3 border-b border-slate-200 bg-slate-50/60 text-xs text-slate-500">
                 <span class="inline-flex items-center gap-1.5">
@@ -469,9 +472,11 @@
                 </table>
             </div>
         </div>
+        </template>
 
         {{-- ===== РЕЖИМ ВЫПОЛНЕННЫЕ (история за 90 дней, только чтение, пагинация по 20) ===== --}}
-        <div x-show="viewMode === 'completed'">
+        <template x-if="viewMode === 'completed'">
+        <div>
             <div class="px-6 py-3 border-b border-slate-100 flex items-center gap-2 text-sm text-slate-500 bg-slate-50/60">
                 <svg class="w-4 h-4 flex-shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                 <span>История выполненных задач за последние <span class="font-semibold text-slate-700">{{ $completedDays }} дней</span></span>
@@ -513,6 +518,7 @@
                 </div>
             </div>
         </div>
+        </template>
 
     </div>
 
