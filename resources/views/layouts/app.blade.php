@@ -5,7 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>@yield('title', 'ERP Fineco')</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    {{-- Скомпилированный Tailwind (Vite). НЕ возвращать Play CDN (cdn.tailwindcss.com):
+         он компилит CSS в браузере и пересканирует DOM на каждый рендер Alpine — это давало ~7с LCP. --}}
+    @vite('resources/css/app.css')
     @stack('styles')
     <style>
         /* Smooth scrollbar */
