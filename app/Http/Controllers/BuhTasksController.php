@@ -19,6 +19,13 @@ class BuhTasksController extends Controller
     /** Глубина истории вкладки «Выполненные» (дней назад) */
     private const COMPLETED_HISTORY_DAYS = 90;
 
+    /**
+     * Отсечка backlog: задачи со сроком РАНЬШЕ этой даты не показываем вообще
+     * (разовая очистка накопившейся просрочки до июля 2026). Единая с воркером
+     * напоминаний (GenerateTaskReminders::BACKLOG_CUTOFF).
+     */
+    private const BACKLOG_CUTOFF = '2026-07-01';
+
     public function index(Request $request)
     {
         $employee = auth('employee')->user();
@@ -59,6 +66,7 @@ class BuhTasksController extends Controller
         $month       = $curStart->month;
         $curMonthIdx = $year * 12 + $month; // для отсечения будущих месяцев в списке
         $historyFrom = $today->subDays(self::COMPLETED_HISTORY_DAYS)->startOfDay(); // глубина вкладки «Выполненные»
+        $backlogCutoff = CarbonImmutable::parse(self::BACKLOG_CUTOFF)->startOfDay(); // просрочку раньше июля 2026 не показываем
 
         // Логи плановых задач сотрудника (нужны статусы за прошлое для просрочки), ключ year-month-item.
         // Ограничиваем годом окна просрочки (6 мес назад) — старые логи всё равно не запрашиваются,
@@ -96,8 +104,11 @@ class BuhTasksController extends Controller
             $overrides = $client->serviceSchedules->keyBy('service_id');
 
             // Просрочку показываем только за последние 6 месяцев (единая логика с воркером напоминаний),
-            // но не раньше старта обслуживания клиента.
+            // но не раньше старта обслуживания клиента и не раньше отсечки backlog (июль 2026).
             $lookbackStart = $today->subMonths(6);
+            if ($backlogCutoff->gt($lookbackStart)) {
+                $lookbackStart = $backlogCutoff;
+            }
             if ($client->service_start_date) {
                 $serviceStart = CarbonImmutable::parse($client->service_start_date)->startOfDay();
                 if ($serviceStart->gt($lookbackStart)) {

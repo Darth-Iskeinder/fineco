@@ -31,6 +31,13 @@ class GenerateTaskReminders extends Command
 
     protected $description = 'Сгенерировать напоминания о сроках выполнения БП для ответственных сотрудников';
 
+    /**
+     * Отсечка backlog: не генерируем/не бэкфиллим напоминания со сроком РАНЬШЕ этой
+     * даты (разовая очистка накопившейся просрочки до июля 2026). Единая с живым
+     * списком (BuhTasksController::BACKLOG_CUTOFF).
+     */
+    private const BACKLOG_CUTOFF = '2026-07-01';
+
     public function handle(): int
     {
         $today = $this->option('date')
@@ -41,6 +48,11 @@ class GenerateTaskReminders extends Command
         // Окно материализации: назад на $lookback (бэкфилл просрочки) и вперёд на $horizon.
         $from = $today->subDays($lookback);
         $to   = $today->addDays($horizon);
+        // Отсечка backlog: не уходим раньше июля 2026 (разовая очистка накопившейся просрочки).
+        $cutoff = CarbonImmutable::parse(self::BACKLOG_CUTOFF)->startOfDay();
+        if ($cutoff->gt($from)) {
+            $from = $cutoff;
+        }
 
         $this->info("Генерация напоминаний: {$from->toDateString()} .. {$to->toDateString()} (назад {$lookback} дн., вперёд {$horizon} дн.)");
 
