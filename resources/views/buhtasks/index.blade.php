@@ -183,9 +183,8 @@
                         <th class="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Действия</th>
                     </tr>
                 </thead>
-                    <template x-for="(task, idx) in tasks" :key="task.uid">
+                    <template x-for="({ task, idx }) in visibleTasks" :key="task.uid">
                         <tbody class="divide-y divide-slate-100">
-                        <template x-if="visibleSet.has(task.uid)">
                         <tr :class="{
                                 'bg-emerald-50/30': task.status === 'completed',
                                 'bg-sky-50/40': task.status === 'review',
@@ -350,7 +349,6 @@
 
                             </td>
                         </tr>
-                        </template>
                         </tbody>
                     </template>
             </table>
@@ -1176,7 +1174,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
     // что ломает внутренние методы File/Blob при передаче в FormData
     const pendingFiles = new Map();
     // Кэш окна видимости вне реактивного state (чтобы геттер не пересобирал Set на каждую строку)
-    let visibleCache = { key: null, set: new Set() };
+    let visibleCache = { key: null, list: [] };
 
     return {
         tasks: initialTasks.map((t, i) => ({
@@ -1489,22 +1487,24 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             return this.tasks.filter(t => this.matchesFilter(t)).length;
         },
 
-        // Окно бесконечной прокрутки: uid-ы первых visibleLimit задач, прошедших фильтр (в порядке списка).
-        // Мемоизируем по сигнатуре зависимостей — иначе Set пересобирался бы на каждую строку (O(n²)).
-        get visibleSet() {
+        // Окно бесконечной прокрутки: первые visibleLimit задач, прошедших фильтр,
+        // как пары { task, idx } (idx — глобальный индекс в this.tasks для обработчиков).
+        // Рендерим ТОЛЬКО этот срез (x-for по нему), а не все 300 строк — иначе Alpine
+        // поднимал бы реактивность на каждую задачу и лагал при загрузке/сортировке.
+        // Мемоизируем по сигнатуре зависимостей, чтобы срез не пересобирался на каждый доступ.
+        get visibleTasks() {
             const key = this.clientFilter + '|' + this.visibleLimit + '|' + this.sortBy + '|' + this.sortDir + '|' + this.tasks.length;
             if (visibleCache.key !== key) {
-                const set = new Set();
-                let count = 0;
-                for (const t of this.tasks) {
-                    if (!this.matchesFilter(t)) continue;
-                    if (count >= this.visibleLimit) break;
-                    set.add(t.uid);
-                    count++;
+                const list = [];
+                for (let i = 0; i < this.tasks.length; i++) {
+                    const task = this.tasks[i];
+                    if (!this.matchesFilter(task)) continue;
+                    if (list.length >= this.visibleLimit) break;
+                    list.push({ task, idx: i });
                 }
-                visibleCache = { key, set };
+                visibleCache = { key, list };
             }
-            return visibleCache.set;
+            return visibleCache.list;
         },
         loadMore() {
             if (this.visibleLimit < this.visibleCount) this.visibleLimit += 20;
