@@ -1181,6 +1181,9 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
     const pendingFiles = new Map();
     // Кэш окна видимости вне реактивного state (чтобы геттер не пересобирал Set на каждую строку)
     let visibleCache = { key: null, list: [] };
+    // Кэш матрицы чеклиста: тяжёлый расчёт (проход по всем задачам) не должен повторяться
+    // на каждое из тысяч обращений из ячеек. Инвалидируется по сигнатуре ниже.
+    let checklistCache = { key: null, data: null };
 
     return {
         tasks: initialTasks.map((t, i) => ({
@@ -1209,6 +1212,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         sortBy: null, // null | 'due' (срок/периодичность) | 'period' (отчётный период)
         sortDir: null, // null = исходный порядок | 'asc' | 'desc'
         visibleLimit: 20, // бесконечная прокрутка списка: сколько строк отрисовано (по 20)
+        _taskVer: 0, // версия статусов задач: растёт при изменениях, инвалидирует кэш чеклиста
         taskModalIdx: null,
         docRequiredModal: { show: false, taskIdx: null },
         checklistRequiredModal: { show: false, taskIdx: null },
@@ -1244,6 +1248,12 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         // done = выполнено (зелёная галочка), review = на проверке (синий), progress = начато, но не закрыто (жёлтый),
         // none = задача есть, но не начата (пусто). Если у компании нет такой задачи — ячейка отсутствует.
         get checklistData() {
+            // Мемоизация: геттер читается из тысяч ячеек (5 x-if каждая) — без кэша это
+            // тысячи полных проходов по задачам. Пересчёт только при смене фильтров/состава/статусов.
+            const key = this.clientFilter + '|' + this.checklistFilter.group + '|' + this.checklistFilter.period
+                + '|' + this.tasks.length + '|' + this._taskVer;
+            if (checklistCache.key === key) return checklistCache.data;
+
             const companyMap = {};
             const colMap = {};
             const cells = {};
@@ -1268,12 +1278,14 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             // текста = длина/√2. ~6.2px на символ при 12px шрифте; ограничиваем разумным диапазоном.
             const maxLen = Object.values(colMap).reduce((m, c) => Math.max(m, c.label.length), 0);
             const headerHeight = Math.min(340, Math.max(96, Math.round(maxLen * 6.2 / 1.414) + 24));
-            return {
+            const data = {
                 companies: Object.values(companyMap).sort((a, b) => a.name.localeCompare(b.name, 'ru')),
                 cols: Object.values(colMap).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'ru')),
                 cells,
                 headerHeight,
             };
+            checklistCache = { key, data };
+            return data;
         },
 
         // Совпадает ли задача с активными фильтрами чеклиста (группа + период, совместно/AND).
@@ -1645,6 +1657,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         patch(idx, props) {
             const t = this.tasks[idx];
             for (const k in props) t[k] = props[k];
+            this._taskVer++; // статус/поля изменились → кэш чеклиста пересчитается
         },
 
         // Применяет результат (работает для обоих типов задач)
@@ -1656,6 +1669,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             task.elapsed_seconds = log.elapsed_seconds;
             task.review_comment = log.review_comment ?? null;
             task.client_resumed_at = log.status === 'running' ? this.now : null;
+            this._taskVer++; // статус изменился → кэш чеклиста пересчитается
         },
 
         // Возвращает URL для действия в зависимости от типа задачи
