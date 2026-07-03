@@ -72,7 +72,7 @@
     </template>
 </div>
 
-<div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($completed) }}, {{ json_encode($employees) }}, {{ $employee->id }}, {{ json_encode($catalog) }}, {{ $monthCompletedEarlier }})" x-cloak>
+<div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($completed) }}, {{ json_encode($employees) }}, {{ $employee->id }}, {{ json_encode($catalog) }})" x-cloak>
 
     {{-- Шапка --}}
     <div class="flex items-center justify-between mb-2">
@@ -110,7 +110,6 @@
                         class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all">
                     <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                     Выполненные
-                    <span x-show="completed.length > 0" class="text-xs text-slate-400" x-text="'(' + completed.length + ')'"></span>
                 </button>
             </div>
         </div>
@@ -497,7 +496,6 @@
             <div class="px-6 py-3 border-b border-slate-100 flex items-center gap-2 text-sm text-slate-500 bg-slate-50/60">
                 <svg class="w-4 h-4 flex-shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                 <span>История выполненных задач за последние <span class="font-semibold text-slate-700">{{ $completedDays }} дней</span></span>
-                <span x-show="completed.length > 0" class="text-slate-400" x-text="'· всего ' + completed.length"></span>
                 <span x-show="completed.length > 0" class="text-slate-400 hidden sm:inline">· двойной клик — детали</span>
             </div>
             <template x-if="completed.length === 0">
@@ -1226,7 +1224,7 @@
 </div>
 
 <script>
-function buhTasks(initialTasks, year, month, allClients, completed, employees, currentEmployeeId, catalog, monthCompletedEarlier) {
+function buhTasks(initialTasks, year, month, allClients, completed, employees, currentEmployeeId, catalog) {
     // File-объекты держим вне реактивного state — Alpine оборачивает объекты в Proxy,
     // что ломает внутренние методы File/Blob при передаче в FormData
     const pendingFiles = new Map();
@@ -1260,7 +1258,6 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         ticker: null,
         now: Math.floor(Date.now() / 1000),
         clientFilter: 'all',
-        monthCompletedEarlier: monthCompletedEarlier || 0, // закрытые ранее в этом месяце (нет в наборе) — для прогресса
         dueFilter: 'all', // воронка по сроку: 'all' | 'today' | 'd3' | 'd7' | 'd30' (только вкладка «Список»)
         sortBy: null, // null | 'due' (срок/периодичность) | 'period' (отчётный период)
         sortDir: null, // null = исходный порядок | 'asc' | 'desc'
@@ -1624,22 +1621,16 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             this.completedItem = c;
         },
 
-        // Задачи текущего месяца из активного набора (для числителя прогресса).
-        get monthTasks() {
-            return this.tasks.filter(t => t.year === this.year && t.month === this.month);
-        },
-
-        // Числитель: выполнено в этом месяце = закрытые сегодня (лежат в наборе как completed)
-        // + закрытые ранее в этом месяце (их нет в наборе — пришли счётчиком с сервера).
+        // Числитель: выполнено в текущем месяце. Контроллер держит в наборе только закрытые
+        // в этом месяце (закрытые в прошлых месяцах из набора убраны), поэтому просто считаем completed.
         get totalCompleted() {
-            return this.monthTasks.filter(t => t.status === 'completed').length + this.monthCompletedEarlier;
+            return this.tasks.filter(t => t.status === 'completed').length;
         },
 
-        // Знаменатель: вся текущая нагрузка = просрочка + задачи этого месяца (выполненные и нет).
-        // this.tasks = просрочка прошлых месяцев + задачи текущего месяца из набора;
-        // + monthCompletedEarlier — закрытые ранее в этом месяце, которых в наборе нет.
+        // Знаменатель = всё в наборе (просрочка + задачи месяца, выполненные и нет).
+        // Совпадает с «Все компании» (там тоже tasks.length).
         get totalTasks() {
-            return this.tasks.length + this.monthCompletedEarlier;
+            return this.tasks.length;
         },
 
         get totalProgressPct() {

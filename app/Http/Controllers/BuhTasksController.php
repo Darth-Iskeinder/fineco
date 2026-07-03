@@ -99,10 +99,6 @@ class BuhTasksController extends Controller
         // Квартальные/годовые всплывают сами за 30 дней до срока. Позиции без расписания
         // (ручные one_time или БП без периодичности) показываем как текущую задачу.
         $tasks = [];
-        // Прогресс месяца считаем по задачам ТЕКУЩЕГО месяца. Выполненные ранее сегодня, но в этом
-        // же месяце, в активный список не попадают (см. фильтр ниже) — их досчитываем здесь, чтобы
-        // бар «M из N» не терял уже закрытые в этом месяце. Задачи в наборе фронт посчитает сам.
-        $monthCompletedEarlier = 0;
         foreach ($clients as $client) {
             $items = $client->estimates->first()?->rootItems ?? collect();
             $overrides = $client->serviceSchedules->keyBy('service_id');
@@ -148,13 +144,12 @@ class BuhTasksController extends Controller
 
                     // Фильтр видимости в активном списке:
                     if ($status === 'completed') {
-                        // выполненные — только в день закрытия (дальше уходят во вкладку «Выполненные»)
-                        $completedToday = $log?->completed_at && $log->completed_at->toDateString() === $todayStr;
-                        if (!$completedToday) {
-                            // закрыто ранее в этом месяце — в список не кладём, но учитываем в прогрессе месяца
-                            if ($wy === $year && $wm === $month) {
-                                $monthCompletedEarlier++;
-                            }
+                        // Выполненные скрыты из списка (visibleTasks), но остаются в наборе —
+                        // чтобы считаться в прогрессе месяца и в «Все компании», если закрыты
+                        // в ТЕКУЩЕМ месяце. Закрытые в прошлых месяцах из набора уходят.
+                        $completedThisMonth = $log?->completed_at
+                            && $log->completed_at->year === $year && $log->completed_at->month === $month;
+                        if (!$completedThisMonth) {
                             continue;
                         }
                     } elseif ($wy * 12 + $wm > $curMonthIdx) {
@@ -220,12 +215,10 @@ class BuhTasksController extends Controller
         // невыполненные висят, пока не закроют; выполненные — только в день закрытия.
         foreach ($adhocs as $adhoc) {
             if ($adhoc->status === 'completed') {
-                $completedToday = $adhoc->completed_at && $adhoc->completed_at->toDateString() === $todayStr;
-                if (!$completedToday) {
-                    // закрыто ранее в этом месяце — в список не кладём, но учитываем в прогрессе месяца
-                    if ((int) $adhoc->year === $year && (int) $adhoc->month === $month) {
-                        $monthCompletedEarlier++;
-                    }
+                // как и плановые: остаётся в наборе, только если закрыта в текущем месяце
+                $completedThisMonth = $adhoc->completed_at
+                    && $adhoc->completed_at->year === $year && $adhoc->completed_at->month === $month;
+                if (!$completedThisMonth) {
                     continue;
                 }
             }
@@ -379,7 +372,7 @@ class BuhTasksController extends Controller
             ->map(fn ($s) => ['id' => $s->id, 'name' => $s->name])
             ->values()->toArray();
 
-        return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'reminders', 'reminderCounts', 'completed', 'completedDays', 'employees', 'catalog', 'monthCompletedEarlier'));
+        return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'reminders', 'reminderCounts', 'completed', 'completedDays', 'employees', 'catalog'));
     }
 
     // =============================================
