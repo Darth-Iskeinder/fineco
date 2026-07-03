@@ -72,12 +72,12 @@
     </template>
 </div>
 
-<div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($completed) }}, {{ json_encode($employees) }}, {{ $employee->id }}, {{ json_encode($catalog) }})" x-cloak>
+<div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($completed) }}, {{ json_encode($employees) }}, {{ $employee->id }}, {{ json_encode($catalog) }}, {{ $monthCompletedEarlier }})" x-cloak>
 
     {{-- Шапка --}}
     <div class="flex items-center justify-between mb-2">
         <div class="flex items-center gap-2 text-sm text-slate-500">
-            <span x-text="totalCompleted + ' из ' + tasks.length + ' выполнено'"></span>
+            <span x-text="'Выполнено за месяц: ' + totalCompleted + ' из ' + totalTasks"></span>
             <div class="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                 <div class="h-full bg-emerald-400 rounded-full transition-all"
                      :style="'width:' + totalProgressPct + '%'"></div>
@@ -1226,7 +1226,7 @@
 </div>
 
 <script>
-function buhTasks(initialTasks, year, month, allClients, completed, employees, currentEmployeeId, catalog) {
+function buhTasks(initialTasks, year, month, allClients, completed, employees, currentEmployeeId, catalog, monthCompletedEarlier) {
     // File-объекты держим вне реактивного state — Alpine оборачивает объекты в Proxy,
     // что ломает внутренние методы File/Blob при передаче в FormData
     const pendingFiles = new Map();
@@ -1260,6 +1260,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         ticker: null,
         now: Math.floor(Date.now() / 1000),
         clientFilter: 'all',
+        monthCompletedEarlier: monthCompletedEarlier || 0, // закрытые ранее в этом месяце (нет в наборе) — для прогресса
         dueFilter: 'all', // воронка по сроку: 'all' | 'today' | 'd3' | 'd7' | 'd30' (только вкладка «Список»)
         sortBy: null, // null | 'due' (срок/периодичность) | 'period' (отчётный период)
         sortDir: null, // null = исходный порядок | 'asc' | 'desc'
@@ -1623,13 +1624,27 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             this.completedItem = c;
         },
 
+        // Задачи текущего месяца из активного набора (для числителя прогресса).
+        get monthTasks() {
+            return this.tasks.filter(t => t.year === this.year && t.month === this.month);
+        },
+
+        // Числитель: выполнено в этом месяце = закрытые сегодня (лежат в наборе как completed)
+        // + закрытые ранее в этом месяце (их нет в наборе — пришли счётчиком с сервера).
         get totalCompleted() {
-            return this.tasks.filter(t => t.status === 'completed').length;
+            return this.monthTasks.filter(t => t.status === 'completed').length + this.monthCompletedEarlier;
+        },
+
+        // Знаменатель: вся текущая нагрузка = просрочка + задачи этого месяца (выполненные и нет).
+        // this.tasks = просрочка прошлых месяцев + задачи текущего месяца из набора;
+        // + monthCompletedEarlier — закрытые ранее в этом месяце, которых в наборе нет.
+        get totalTasks() {
+            return this.tasks.length + this.monthCompletedEarlier;
         },
 
         get totalProgressPct() {
-            if (!this.tasks.length) return 0;
-            return Math.round(this.totalCompleted / this.tasks.length * 100);
+            const total = this.totalTasks;
+            return total ? Math.round(this.totalCompleted / total * 100) : 0;
         },
 
         // Разница в днях между сроком задачи и сегодня (отриц. = просрочено)
