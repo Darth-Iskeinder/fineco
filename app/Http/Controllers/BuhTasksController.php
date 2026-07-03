@@ -179,6 +179,7 @@ class BuhTasksController extends Controller
                         'status'          => $log?->status ?? 'pending',
                         'elapsed_seconds' => $this->calcElapsed($log),
                         'review_comment'  => $log?->review_comment,
+                        'employee_comment' => $log?->employee_comment,
                         'quantity'         => (int) $item->quantity,
                         'allows_quantity'  => (bool) ($service?->allows_quantity),
                         'actual_quantity'  => $log?->actual_quantity,
@@ -244,6 +245,7 @@ class BuhTasksController extends Controller
                 'status'          => $adhoc->status,
                 'elapsed_seconds' => $this->calcElapsed($adhoc),
                 'review_comment'  => $adhoc->review_comment,
+                'employee_comment' => $adhoc->employee_comment,
                 'quantity'        => 1,
                 'allows_quantity' => false,
                 'actual_quantity' => null,
@@ -272,6 +274,8 @@ class BuhTasksController extends Controller
                     'branch_label' => $item?->branch_label,
                     'client_name'  => $l->client?->name ?? '—',
                     'completed_at' => $l->completed_at->toIso8601String(),
+                    'employee_comment' => $l->employee_comment,
+                    'comment_url'      => route('buhtasks.logs.comment', $l->id),
                     'elapsed_seconds'   => $this->calcElapsed($l),
                     'description'       => $service?->description,
                     'comment'          => $service?->comment,
@@ -313,6 +317,8 @@ class BuhTasksController extends Controller
                 'name'         => $a->name,
                 'client_name'  => $a->client?->name ?? '—',
                 'completed_at' => $a->completed_at->toIso8601String(),
+                'employee_comment' => $a->employee_comment,
+                'comment_url'      => route('buhtasks.adhoc.comment', $a->id),
                 'elapsed_seconds'   => $this->calcElapsed($a),
                 'description'       => $a->description,
                 'comment'          => null,
@@ -553,6 +559,20 @@ class BuhTasksController extends Controller
         return response()->json(['success' => true, 'log' => $this->formatLog($log)]);
     }
 
+    public function updateComment(Request $request, BuhTaskLog $log)
+    {
+        $this->authorizeLog($log);
+
+        $validated = $request->validate([
+            'employee_comment' => ['nullable', 'string', 'max:5000'],
+        ]);
+
+        $log->employee_comment = $validated['employee_comment'] ?: null;
+        $log->save();
+
+        return response()->json(['success' => true, 'log' => $this->formatLog($log)]);
+    }
+
     public function uploadDocument(Request $request, BuhTaskLog $log)
     {
         $this->authorizeLog($log);
@@ -662,6 +682,7 @@ class BuhTasksController extends Controller
                 'document_name'   => $adhoc->document_name,
                 'document_path'   => $adhoc->document_path,
                 'review_comment'  => null,
+                'employee_comment' => null,
                 'cost'            => 0,
                 'periodicity'     => null,
                 'reporting_period' => null,
@@ -738,6 +759,20 @@ class BuhTasksController extends Controller
         return response()->json(['success' => true, 'log' => $this->formatAdhoc($task)]);
     }
 
+    public function updateCommentAdhoc(Request $request, BuhAdhocTask $task)
+    {
+        $this->authorizeAdhoc($task);
+
+        $validated = $request->validate([
+            'employee_comment' => ['nullable', 'string', 'max:5000'],
+        ]);
+
+        $task->employee_comment = $validated['employee_comment'] ?: null;
+        $task->save();
+
+        return response()->json(['success' => true, 'log' => $this->formatAdhoc($task)]);
+    }
+
     public function uploadDocumentAdhoc(Request $request, BuhAdhocTask $task)
     {
         $this->authorizeAdhoc($task);
@@ -808,6 +843,7 @@ class BuhTasksController extends Controller
             'status'          => $log->status,
             'elapsed_seconds' => $this->calcElapsed($log),
             'review_comment'  => $log->review_comment,
+            'employee_comment' => $log->employee_comment,
             'actual_quantity' => $log->actual_quantity,
             'document_name'   => $log->document_name,
             'document_path'   => $log->document_path,
@@ -821,6 +857,7 @@ class BuhTasksController extends Controller
             'status'          => $task->status,
             'elapsed_seconds' => $this->calcElapsed($task),
             'review_comment'  => $task->review_comment,
+            'employee_comment' => $task->employee_comment,
             'document_name'   => $task->document_name,
             'document_path'   => $task->document_path,
         ];

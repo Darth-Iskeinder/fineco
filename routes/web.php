@@ -89,6 +89,7 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/logs/{log}/complete', [BuhTasksController::class, 'complete'])->name('logs.complete');
         Route::post('/logs/{log}/reset', [BuhTasksController::class, 'reset'])->name('logs.reset');
         Route::post('/logs/{log}/quantity', [BuhTasksController::class, 'updateQuantity'])->name('logs.quantity');
+        Route::post('/logs/{log}/comment', [BuhTasksController::class, 'updateComment'])->name('logs.comment');
         Route::post('/logs/{log}/document', [BuhTasksController::class, 'uploadDocument'])->name('logs.document');
         // Внеплановые задачи
         Route::post('/adhoc', [BuhTasksController::class, 'storeAdhoc'])->name('adhoc.store');
@@ -96,6 +97,7 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/adhoc/{task}/pause', [BuhTasksController::class, 'pauseAdhoc'])->name('adhoc.pause');
         Route::post('/adhoc/{task}/complete', [BuhTasksController::class, 'completeAdhoc'])->name('adhoc.complete');
         Route::post('/adhoc/{task}/reset', [BuhTasksController::class, 'resetAdhoc'])->name('adhoc.reset');
+        Route::post('/adhoc/{task}/comment', [BuhTasksController::class, 'updateCommentAdhoc'])->name('adhoc.comment');
         Route::post('/adhoc/{task}/document', [BuhTasksController::class, 'uploadDocumentAdhoc'])->name('adhoc.document');
         // Напоминания о сроках (выход воркера tasks:generate)
         Route::post('/reminders/{reminder}/complete', [BuhTasksController::class, 'completeReminder'])->name('reminders.complete');

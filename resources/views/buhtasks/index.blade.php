@@ -85,15 +85,6 @@
         </div>
 
         <div class="flex items-center gap-3 flex-wrap">
-            {{-- Фильтр по компаниям --}}
-            <select x-show="clientOptions.length > 1" x-model="clientFilter"
-                    class="px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                <option value="all" x-text="'Все компании (' + tasks.length + ')'"></option>
-                <template x-for="c in clientOptions" :key="c.id">
-                    <option :value="String(c.id)" x-text="c.name + ' (' + c.count + ')'"></option>
-                </template>
-            </select>
-
             {{-- Кнопка создания задачи --}}
             <button @click="showCreateModal = true"
                     class="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 transition-colors shadow-sm">
@@ -125,6 +116,32 @@
         </div>
     </div>
 
+    {{-- Фильтры (только на вкладке «Список») --}}
+    <div x-show="viewMode === 'list'" class="flex items-center gap-3 flex-wrap mb-4">
+        {{-- Компания --}}
+        <select x-show="clientOptions.length > 1" x-model="clientFilter"
+                class="px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+            <option value="all" x-text="'Все компании (' + tasks.length + ')'"></option>
+            <template x-for="c in clientOptions" :key="c.id">
+                <option :value="String(c.id)" x-text="c.name + ' (' + c.count + ')'"></option>
+            </template>
+        </select>
+
+        {{-- Срок: воронка по горизонту (просрочка всегда попадает внутрь). --}}
+        <select x-model="dueFilter"
+                class="px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+            <option value="all">Все сроки</option>
+            <option value="d3">Ближайшие 3 дня</option>
+            <option value="d7">Ближайшая неделя</option>
+        </select>
+
+        <button x-show="clientFilter !== 'all' || dueFilter !== 'all'"
+                @click="clientFilter = 'all'; dueFilter = 'all'"
+                class="text-xs text-slate-400 hover:text-slate-600 underline">Сбросить</button>
+
+        <span class="ml-auto text-sm text-slate-500 font-medium" x-text="visibleCount + ' задач'"></span>
+    </div>
+
     {{-- Подсказка про горизонт показа --}}
     <div class="flex items-center gap-1.5 mb-6 text-xs text-slate-400">
         <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
@@ -140,13 +157,13 @@
         <p class="text-slate-500 text-sm">Нет задач. Добавьте внеплановую задачу или убедитесь, что у клиентов заполнены сметы и вы назначены на них.</p>
     </div>
 
-    {{-- Все задачи скрыты фильтром --}}
-    <div x-show="viewMode !== 'completed' && tasks.length > 0 && visibleCount === 0"
+    {{-- Все задачи скрыты фильтром (только список — у чеклиста свои фильтры) --}}
+    <div x-show="viewMode === 'list' && tasks.length > 0 && visibleCount === 0"
          class="bg-white rounded-2xl border border-slate-200/50 shadow-sm px-6 py-10 text-center text-sm text-slate-400">
-        Нет задач по выбранной компании.
+        Нет задач по выбранным фильтрам.
     </div>
 
-    <div x-show="viewMode === 'completed' || (tasks.length > 0 && visibleCount > 0)"
+    <div x-show="viewMode === 'completed' || (viewMode === 'checklist' && tasks.length > 0) || (viewMode === 'list' && visibleCount > 0)"
          class="bg-white rounded-2xl border border-slate-200/50 shadow-sm overflow-hidden">
 
         {{-- ===== РЕЖИМ СПИСОК ===== --}}
@@ -495,6 +512,18 @@
                         <div class="flex-1 min-w-0">
                             <p class="text-sm font-medium text-slate-700 truncate" x-text="c.name"></p>
                             <p class="text-xs text-slate-400 truncate" x-text="c.client_name"></p>
+                        </div>
+                        {{-- Колонка «Комментарий»: заметка сотрудника (двойной клик — редактировать в деталях) --}}
+                        <div class="hidden sm:flex flex-1 min-w-0 items-center gap-1.5 text-slate-500">
+                            <template x-if="c.employee_comment">
+                                <span class="inline-flex items-center gap-1.5 min-w-0">
+                                    <svg class="w-3.5 h-3.5 flex-shrink-0 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8 12h8m-8-4h8m-8 8h4m-9 4V6a2 2 0 012-2h12a2 2 0 012 2v8a2 2 0 01-2 2H9l-4 4z"/></svg>
+                                    <span class="text-sm truncate" :title="c.employee_comment" x-text="c.employee_comment"></span>
+                                </span>
+                            </template>
+                            <template x-if="!c.employee_comment">
+                                <span class="text-xs text-slate-300 italic">без заметки</span>
+                            </template>
                         </div>
                         <span class="text-xs text-slate-400 whitespace-nowrap" x-text="fmtCompleted(c.completed_at)"></span>
                     </div>
@@ -922,6 +951,17 @@
                     </template>
                 </div>
 
+                {{-- Моя заметка: личный комментарий сотрудника по задаче (автосохранение по blur) --}}
+                <div class="mt-4 pt-4 border-t border-slate-100">
+                    <label class="block text-xs font-semibold text-indigo-500 uppercase tracking-wider mb-1.5">Моя заметка</label>
+                    <textarea rows="2"
+                              :value="tasks[taskModalIdx].employee_comment"
+                              @change="saveComment(taskModalIdx, $event.target.value)"
+                              placeholder="Нюансы по задаче — чтобы вспомнить позже"
+                              class="block w-full px-3 py-2 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 whitespace-pre-line"></textarea>
+                    <p class="text-xs text-slate-400 mt-1">Сохраняется автоматически</p>
+                </div>
+
                 <template x-if="tasks[taskModalIdx].allows_quantity">
                     <div class="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between gap-3">
                         <div>
@@ -1105,6 +1145,17 @@
                     </template>
                 </div>
 
+                {{-- Моя заметка: остаётся редактируемой и в выполненных (autosave по blur) --}}
+                <div class="mt-4 pt-4 border-t border-slate-100">
+                    <label class="block text-xs font-semibold text-indigo-500 uppercase tracking-wider mb-1.5">Моя заметка</label>
+                    <textarea rows="2"
+                              :value="completedItem.employee_comment"
+                              @change="saveCompletedComment(completedItem, $event.target.value)"
+                              placeholder="Нюансы по задаче — чтобы вспомнить позже"
+                              class="block w-full px-3 py-2 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 whitespace-pre-line"></textarea>
+                    <p class="text-xs text-slate-400 mt-1">Сохраняется автоматически</p>
+                </div>
+
                 {{-- Количество (план / факт) --}}
                 <template x-if="completedItem.allows_quantity">
                     <div class="mt-4 pt-4 border-t border-slate-100 flex items-center gap-8">
@@ -1209,6 +1260,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         ticker: null,
         now: Math.floor(Date.now() / 1000),
         clientFilter: 'all',
+        dueFilter: 'all', // воронка по сроку: 'all' | 'today' | 'd3' | 'd7' | 'd30' (только вкладка «Список»)
         sortBy: null, // null | 'due' (срок/периодичность) | 'period' (отчётный период)
         sortDir: null, // null = исходный порядок | 'asc' | 'desc'
         visibleLimit: 20, // бесконечная прокрутка списка: сколько строк отрисовано (по 20)
@@ -1244,13 +1296,24 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             return this.clientFilter === 'all' || String(task.client_id) === String(this.clientFilter);
         },
 
+        // Воронка по сроку (только «Список»): показываем задачи со сроком до выбранного горизонта.
+        // Просрочка всегда попадает внутрь (diff < 0). Задачи без срока — только в режиме «Все».
+        matchesDue(task) {
+            if (this.dueFilter === 'all') return true;
+            if (task.due_date == null) return false;
+            const horizon = { today: 0, d3: 3, d7: 7, d30: 30 }[this.dueFilter];
+            const diff = this.dueDiffDays(task); // дней до срока; отрицательное = просрочено
+            return diff !== null && diff <= horizon;
+        },
+
         // Матрица вкладки «Чеклист»: строки — компании, столбцы — задачи, ячейка — статус (только чтение).
         // done = выполнено (зелёная галочка), review = на проверке (синий), progress = начато, но не закрыто (жёлтый),
         // none = задача есть, но не начата (пусто). Если у компании нет такой задачи — ячейка отсутствует.
         get checklistData() {
             // Мемоизация: геттер читается из тысяч ячеек (5 x-if каждая) — без кэша это
             // тысячи полных проходов по задачам. Пересчёт только при смене фильтров/состава/статусов.
-            const key = this.clientFilter + '|' + this.checklistFilter.group + '|' + this.checklistFilter.period
+            // Чеклист не зависит от фильтра по компаниям (компании — это строки матрицы).
+            const key = this.checklistFilter.group + '|' + this.checklistFilter.period
                 + '|' + this.tasks.length + '|' + this._taskVer;
             if (checklistCache.key === key) return checklistCache.data;
 
@@ -1258,7 +1321,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             const colMap = {};
             const cells = {};
             const rank = { none: 0, done: 1, review: 2, progress: 3 };
-            this.tasks.filter(t => this.matchesFilter(t) && this.matchesChecklistFilter(t)).forEach(t => {
+            this.tasks.filter(t => this.matchesChecklistFilter(t)).forEach(t => {
                 const cid = String(t.client_id ?? t.client_name);
                 if (!companyMap[cid]) companyMap[cid] = { id: cid, name: t.client_name || '—' };
                 // Филиальные задачи — отдельный столбец на каждый НО (name + филиал).
@@ -1502,7 +1565,9 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             });
         },
         get visibleCount() {
-            return this.tasks.filter(t => this.matchesFilter(t)).length;
+            // Считаем только активные строки (без выполненных) — как их и рисует visibleTasks,
+            // иначе сентинел бесконечной прокрутки не «догрузит» до реального конца списка.
+            return this.tasks.filter(t => t.status !== 'completed' && this.matchesFilter(t) && this.matchesDue(t)).length;
         },
 
         // Окно бесконечной прокрутки: первые visibleLimit задач, прошедших фильтр,
@@ -1511,12 +1576,15 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         // поднимал бы реактивность на каждую задачу и лагал при загрузке/сортировке.
         // Мемоизируем по сигнатуре зависимостей, чтобы срез не пересобирался на каждый доступ.
         get visibleTasks() {
-            const key = this.clientFilter + '|' + this.visibleLimit + '|' + this.sortBy + '|' + this.sortDir + '|' + this.tasks.length;
+            // _taskVer в ключе: при закрытии задачи (status → completed) она сразу пропадает
+            // из активного списка и уходит во вкладку «Выполненные» — кэш пересобирается.
+            const key = this.clientFilter + '|' + this.dueFilter + '|' + this.visibleLimit + '|' + this.sortBy + '|' + this.sortDir + '|' + this.tasks.length + '|' + this._taskVer;
             if (visibleCache.key !== key) {
                 const list = [];
                 for (let i = 0; i < this.tasks.length; i++) {
                     const task = this.tasks[i];
-                    if (!this.matchesFilter(task)) continue;
+                    if (task.status === 'completed') continue; // выполненные — только во вкладке «Выполненные»
+                    if (!this.matchesFilter(task) || !this.matchesDue(task)) continue;
                     if (list.length >= this.visibleLimit) break;
                     list.push({ task, idx: i });
                 }
@@ -1607,6 +1675,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
 
             // Бесконечная прокрутка: при смене фильтра/сортировки начинаем показ заново с 20.
             this.$watch('clientFilter', () => { this.visibleLimit = 20; });
+            this.$watch('dueFilter', () => { this.visibleLimit = 20; });
             this.$watch('sortDir', () => { this.visibleLimit = 20; });
             this.$watch('sortBy', () => { this.visibleLimit = 20; });
             this.$nextTick(() => this._initInfiniteScroll());
@@ -1663,13 +1732,91 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         // Применяет результат (работает для обоих типов задач)
         applyResult(idx, log) {
             const task = this.tasks[idx];
+            const wasCompleted = task.status === 'completed';
             task.loading = false;
             if (task.type === 'planned') task.log_id = log.id;
             task.status = log.status;
             task.elapsed_seconds = log.elapsed_seconds;
             task.review_comment = log.review_comment ?? null;
             task.client_resumed_at = log.status === 'running' ? this.now : null;
-            this._taskVer++; // статус изменился → кэш чеклиста пересчитается
+            this._taskVer++; // статус изменился → кэш чеклиста/списка пересчитается
+
+            // Задача только что закрыта → строка пропадает из активного списка (visibleTasks),
+            // а её копия добавляется во вкладку «Выполненные» без перезагрузки страницы.
+            if (log.status === 'completed' && !wasCompleted) {
+                this.addToCompleted(task, log);
+            }
+        },
+
+        // Добавляет запись во вкладку «Выполненные» (форма как у контроллера при следующем заходе).
+        addToCompleted(task, log) {
+            const cid = task.type === 'planned' ? 'log_' + log.id : 'adhoc_' + task.adhoc_id;
+            if (this.completed.some(c => c.id === cid)) return; // защита от дубля при повторном закрытии
+            this.completed.unshift({
+                id: cid,
+                type: task.type,
+                name: task.name,
+                branch_label: task.branch_label ?? null,
+                client_name: task.client_name ?? '—',
+                completed_at: new Date().toISOString(),
+                employee_comment: task.employee_comment ?? null,
+                comment_url: task.type === 'planned'
+                    ? '/buhtasks/logs/' + log.id + '/comment'
+                    : '/buhtasks/adhoc/' + task.adhoc_id + '/comment',
+                elapsed_seconds: task.elapsed_seconds,
+                description: task.description ?? null,
+                comment: task.comment ?? null,
+                periodicity: task.periodicity ?? null,
+                allows_quantity: !!task.allows_quantity,
+                quantity: task.quantity ?? 0,
+                actual_quantity: task.actual_quantity ?? null,
+                requires_document: !!task.requires_document,
+                document_name: task.document_name ?? null,
+                document_path: task.document_path ?? null,
+                children: (task.children || []).map(c => ({
+                    id: c.id,
+                    name: c.name,
+                    status: c.status,
+                    allows_quantity: !!c.allows_quantity,
+                    quantity: c.quantity ?? 0,
+                    actual_quantity: c.actual_quantity ?? null,
+                    requires_document: !!c.requires_document,
+                    document_name: c.document_name ?? null,
+                    document_path: c.document_path ?? null,
+                })),
+            });
+            this.completedPage = 1;
+            if (this.taskModalIdx !== null && this.tasks[this.taskModalIdx] === task) {
+                this.taskModalIdx = null; // модал закрытой задачи больше не нужен — строки нет
+            }
+        },
+
+        // Заметка сотрудника в попапе активной задачи — автосохранение по blur.
+        // Для плановой задачи сначала лениво создаём лог (как с количеством).
+        async saveComment(idx, value) {
+            const task = this.tasks[idx];
+            const v = (value ?? '').trim();
+            if ((task.employee_comment ?? '') === v) return; // без изменений — не дёргаем сервер
+
+            task.employee_comment = v; // оптимистично: сразу подхватят и addToCompleted, и UI
+
+            if (task.type === 'planned') {
+                const logId = await this.ensureLog(idx);
+                if (!logId) return;
+            }
+            const data = await this.post(this.actionUrl(task, 'comment'), { employee_comment: v });
+            if (data.success) task.employee_comment = data.log.employee_comment;
+        },
+
+        // Заметка во вкладке «Выполненные» — редактируется и там (autosave по blur).
+        // Эндпоинт задан прямо в записи (comment_url), т.к. записи нет в this.tasks.
+        async saveCompletedComment(item, value) {
+            const v = (value ?? '').trim();
+            if ((item.employee_comment ?? '') === v) return;
+
+            item.employee_comment = v; // оптимистично — строка списка и деталь обновятся сразу
+            const data = await this.post(item.comment_url, { employee_comment: v });
+            if (data.success) item.employee_comment = data.log.employee_comment;
         },
 
         // Возвращает URL для действия в зависимости от типа задачи
