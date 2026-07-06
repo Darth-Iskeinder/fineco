@@ -64,7 +64,7 @@ class EmployeeController extends Controller
     {
         $validated = $request->validate([
             'full_name' => ['required', 'string', 'max:255'],
-            'position' => ['required', 'string', 'max:255'],
+            'position' => ['nullable', 'string', 'max:255'],
             'email' => ['required', 'email', 'unique:employees,email'],
             'phone' => ['nullable', 'string', 'max:20'],
             'password' => ['required', 'string', 'min:8', 'confirmed'],
@@ -79,7 +79,7 @@ class EmployeeController extends Controller
 
         $employee = Employee::create([
             'full_name' => $validated['full_name'],
-            'position' => $validated['position'],
+            'position' => $validated['position'] ?? '',
             'email' => $validated['email'],
             'phone' => $validated['phone'] ?? null,
             'password' => Hash::make($validated['password']),
@@ -137,12 +137,16 @@ class EmployeeController extends Controller
             case 'info':
                 $validated = $request->validate([
                     'full_name' => ['required', 'string', 'max:255'],
-                    'position' => ['required', 'string', 'max:255'],
+                    'role_id' => ['required', 'exists:roles,id'],
                     'email' => ['required', 'email', Rule::unique('employees')->ignore($employee->id)],
                     'phone' => ['nullable', 'string', 'max:20'],
                     'employee_number' => ['nullable', 'string', 'max:50'],
                 ]);
                 $employee->update($validated);
+                // Роль «Администратор» имеет доступ ко всем модулям — снимаем индивидуальные.
+                if ($employee->fresh()->isAdmin()) {
+                    $employee->modules()->detach();
+                }
                 break;
 
             case 'personal':
@@ -157,12 +161,11 @@ class EmployeeController extends Controller
 
             case 'access':
                 $validated = $request->validate([
-                    'role_id' => ['required', 'exists:roles,id'],
                     'modules' => ['array'],
                     'modules.*' => ['exists:modules,id'],
                 ]);
-                $employee->update(['role_id' => $validated['role_id']]);
-                if ($employee->fresh()->isAdmin()) {
+                // Роль теперь редактируется в разделе «info»; здесь — только модули.
+                if ($employee->isAdmin()) {
                     $employee->modules()->detach();
                 } else {
                     $employee->modules()->sync($validated['modules'] ?? []);

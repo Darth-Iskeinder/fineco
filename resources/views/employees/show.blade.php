@@ -24,7 +24,7 @@
                         <span class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-red-100 text-red-700">Уволен</span>
                     </template>
                 </div>
-                <p class="text-slate-500 mt-1" x-text="employee.position || '—'"></p>
+                <p class="text-slate-500 mt-1" x-text="employee.role_name || '—'"></p>
             </div>
         </div>
         <div class="mt-4 sm:mt-0">
@@ -85,8 +85,8 @@
                             <dd class="mt-1 text-sm text-slate-900" x-text="employee.full_name || '—'"></dd>
                         </div>
                         <div>
-                            <dt class="text-sm font-medium text-slate-500">Должность</dt>
-                            <dd class="mt-1 text-sm text-slate-900" x-text="employee.position || '—'"></dd>
+                            <dt class="text-sm font-medium text-slate-500">Роль</dt>
+                            <dd class="mt-1 text-sm text-slate-900" x-text="employee.role_name || '—'"></dd>
                         </div>
                         <div>
                             <dt class="text-sm font-medium text-slate-500">Email</dt>
@@ -111,9 +111,13 @@
                                    class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-slate-700 mb-1">Должность <span class="text-red-500">*</span></label>
-                            <input type="text" x-model="form.info.position" required
-                                   class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                            <label class="block text-sm font-medium text-slate-700 mb-1">Роль <span class="text-red-500">*</span></label>
+                            <select x-model="form.info.role_id" required
+                                    class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
+                                <template x-for="role in roles" :key="role.id">
+                                    <option :value="String(role.id)" x-text="role.display_name"></option>
+                                </template>
+                            </select>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-slate-700 mb-1">Email <span class="text-red-500">*</span></label>
@@ -256,10 +260,6 @@
                 <template x-if="!editing.access">
                     <dl class="space-y-4">
                         <div>
-                            <dt class="text-sm font-medium text-slate-500">Роль</dt>
-                            <dd class="mt-1 text-sm text-slate-900" x-text="employee.role_name || '—'"></dd>
-                        </div>
-                        <div>
                             <dt class="text-sm font-medium text-slate-500 mb-2">Модули</dt>
                             <dd>
                                 <template x-if="employee.role_id == adminRoleId">
@@ -279,17 +279,9 @@
                 </template>
                 <template x-if="editing.access">
                     <div class="space-y-5">
-                        <div>
-                            <label class="block text-sm font-medium text-slate-700 mb-1">Роль <span class="text-red-500">*</span></label>
-                            <select x-model="form.access.role_id"
-                                    class="block w-full sm:w-64 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                                <template x-for="role in roles" :key="role.id">
-                                    <option :value="String(role.id)" x-text="role.display_name"></option>
-                                </template>
-                            </select>
-                        </div>
+                        <p class="text-xs text-slate-400">Роль меняется в блоке «Основная информация».</p>
 
-                        <template x-if="form.access.role_id == adminRoleId">
+                        <template x-if="employee.role_id == adminRoleId">
                             <p class="text-sm text-slate-500 p-3 bg-indigo-50 rounded-xl border border-indigo-100">
                                 <svg class="inline w-4 h-4 mr-1 text-indigo-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -298,7 +290,7 @@
                             </p>
                         </template>
 
-                        <template x-if="form.access.role_id != adminRoleId">
+                        <template x-if="employee.role_id != adminRoleId">
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-3">Доступ к модулям</label>
                                 <div class="mb-3">
@@ -482,7 +474,7 @@ function employeeShow() {
         resetForm() {
             this.form.info = {
                 full_name: this.employee.full_name || '',
-                position: this.employee.position || '',
+                role_id: String(this.employee.role_id || ''),
                 email: this.employee.email || '',
                 phone: this.employee.phone || '',
                 employee_number: this.employee.employee_number || '',
@@ -515,7 +507,6 @@ function employeeShow() {
                 if (section === 'info') Object.assign(data, this.form.info);
                 if (section === 'personal') Object.assign(data, this.form.personal);
                 if (section === 'access') {
-                    data.role_id = this.form.access.role_id;
                     data.modules = this.form.access.module_ids;
                 }
 

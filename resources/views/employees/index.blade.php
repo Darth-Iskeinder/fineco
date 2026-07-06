@@ -130,9 +130,6 @@
                             ФИО
                         </th>
                         <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                            Должность
-                        </th>
-                        <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                             Email
                         </th>
                         <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
@@ -161,9 +158,6 @@
                                     </div>
                                     <div class="text-sm font-medium text-slate-800" x-text="employee.full_name"></div>
                                 </div>
-                            </td>
-                            <td class="px-6 py-4 whitespace-nowrap">
-                                <div class="text-sm text-slate-600" x-text="employee.position"></div>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
                                 <div class="text-sm text-slate-600" x-text="employee.email"></div>
@@ -267,11 +261,6 @@
                             <div class="sm:col-span-2">
                                 <label for="create_full_name" class="block text-sm font-medium text-slate-700 mb-2">ФИО <span class="text-red-500">*</span></label>
                                 <input type="text" name="full_name" id="create_full_name" required class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
-                            </div>
-
-                            <div>
-                                <label for="create_position" class="block text-sm font-medium text-slate-700 mb-2">Должность <span class="text-red-500">*</span></label>
-                                <input type="text" name="position" id="create_position" required class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
                             </div>
 
                             <div>

@@ -12,6 +12,7 @@ class EstimateItem extends Model
         'estimate_id',
         'parent_id',
         'service_id',
+        'assignee_id',
         'tax_office_code',
         'branch_label',
         'type',
@@ -48,5 +49,11 @@ class EstimateItem extends Model
     public function service(): BelongsTo
     {
         return $this->belongsTo(Service::class);
+    }
+
+    /** Исполнитель БП (на кого генерятся задачи по этой позиции сметы). */
+    public function assignee(): BelongsTo
+    {
+        return $this->belongsTo(Employee::class, 'assignee_id');
     }
 }
