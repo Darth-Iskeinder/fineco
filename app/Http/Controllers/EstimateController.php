@@ -296,6 +296,13 @@ class EstimateController extends Controller
             ['total' => 0]
         );
 
+        // Снимок назначенных исполнителей БП: пересоздание позиций ниже не должно их стирать.
+        // Ключ = service_id + НО (совпадает с гранулярностью строки сметы). Только корневые БП.
+        $assigneeByKey = [];
+        foreach ($estimate->items()->whereNull('parent_id')->whereNotNull('service_id')->get(['service_id', 'tax_office_code', 'assignee_id']) as $prev) {
+            $assigneeByKey[$prev->service_id . ':' . ($prev->tax_office_code ?? '')] = $prev->assignee_id;
+        }
+
         $estimate->items()->delete();
 
         $pricing   = new PricingCalculator();
@@ -312,8 +319,13 @@ class EstimateController extends Controller
             $qty       = (int) ($bpData['quantity'] ?? 1);
             $children  = collect($bpData['children'] ?? [])->filter(fn($c) => !empty($c['enabled']));
 
+            // Исполнитель: сохранённый ранее (переназначение главбуха) либо дефолт — ответственный клиента.
+            $assigneeKey = $service->id . ':' . ($bpData['tax_office_code'] ?? '');
+            $assigneeId  = $assigneeByKey[$assigneeKey] ?? $client->responsible_employee_id;
+
             $parent = $estimate->items()->create([
                 'service_id'      => $service->id,
+                'assignee_id'     => $assigneeId,
                 'tax_office_code' => $bpData['tax_office_code'] ?? null,
                 'branch_label'    => $bpData['branch_label'] ?? null,
                 'type'            => 'recurring',
