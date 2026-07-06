@@ -120,7 +120,7 @@
         {{-- Компания (показываем всегда, чтобы выбранная компания оставалась видна в фильтре) --}}
         <select x-model="clientFilter"
                 class="px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-            <option value="all" x-text="'Все компании (' + tasks.length + ')'"></option>
+            <option value="all" x-text="'Все компании (' + activeCount + ')'"></option>
             <template x-for="c in clientOptions" :key="c.id">
                 <option :value="String(c.id)" x-text="c.name + ' (' + c.count + ')'"></option>
             </template>
@@ -1280,15 +1280,23 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         creating: false,
         createError: '',
 
-        // Фильтр по компаниям (idx строк сохраняем — строки прячем через x-show)
+        // Фильтр по компаниям: перечисляем ВСЕ закреплённые за сотрудником компании
+        // (allClients), а не только те, у кого сейчас есть задачи в наборе. Счётчик в
+        // скобках — активные (невыполненные) задачи компании, как их и рисует список.
         get clientOptions() {
-            const map = {};
+            const counts = {};
             this.tasks.forEach(t => {
-                const k = t.client_id ?? t.client_name;
-                if (!map[k]) map[k] = { id: t.client_id, name: t.client_name, count: 0 };
-                map[k].count++;
+                if (t.status === 'completed' || t.client_id == null) return;
+                counts[t.client_id] = (counts[t.client_id] || 0) + 1;
             });
-            return Object.values(map).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+            return (this.allClients || [])
+                .map(c => ({ id: c.id, name: c.name, count: counts[c.id] || 0 }))
+                .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
+        },
+        // Активные (невыполненные) задачи всех компаний — для «Все компании (N)»,
+        // чтобы «Все» = сумме счётчиков по компаниям (в списке completed скрыты).
+        get activeCount() {
+            return this.tasks.filter(t => t.status !== 'completed').length;
         },
         matchesFilter(task) {
             return this.clientFilter === 'all' || String(task.client_id) === String(this.clientFilter);
