@@ -17,7 +17,9 @@
     {{ json_encode($estimate->updated_at?->format('d.m.Y H:i')) }},
     {{ json_encode($allServices) }},
     {{ json_encode($specialFlags) }},
-    {{ json_encode($periodicities) }}
+    {{ json_encode($periodicities) }},
+    {{ json_encode($canAssign) }},
+    {{ json_encode($assigneeOptions) }}
 )">
 
     <!-- Хлебные крошки -->
@@ -482,7 +484,7 @@
 </div>
 
 <script>
-function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedAt, allServices, specialFlags, periodicities) {
+function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedAt, allServices, specialFlags, periodicities, canAssign, assigneeOptions) {
     return {
         clientId,
         tariffBPs,
@@ -492,6 +494,8 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
         allServices,
         specialFlags,
         periodicities,
+        canAssign,
+        assigneeOptions,
 
         saving: false,
         toastShow: false,

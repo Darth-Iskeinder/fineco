@@ -3,8 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\Client;
+use App\Models\Employee;
 use App\Models\Estimate;
 use App\Models\EstimateItem;
+use App\Models\Role;
 use App\Models\Service;
 use App\Services\PricingCalculator;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -12,6 +14,21 @@ use Illuminate\Http\Request;
 
 class EstimateController extends Controller
 {
+    /**
+     * Может ли текущий пользователь переназначать исполнителей БП в смете клиента.
+     * Только главбух этого клиента (он же ответственный) или админ.
+     */
+    private function canAssign(Client $client): bool
+    {
+        $user = auth('employee')->user();
+        if (!$user) {
+            return false;
+        }
+
+        return $user->isAdmin()
+            || ($user->id === $client->responsible_employee_id && $user->isHeadAccountant());
+    }
+
     public function edit(Request $request, Client $client)
     {
         $client->load(['taxSystem']);
@@ -51,6 +68,7 @@ class EstimateController extends Controller
 
         $flagKeys = array_keys(Service::SPECIAL_FLAGS);
         $pricing  = new PricingCalculator();
+        $responsibleId = $client->responsible_employee_id; // дефолтный исполнитель (главбух)
 
         // Индивидуальные расписания БП этого клиента (override дефолтов), keyed by service_id
         $overrides = $client->serviceSchedules()->get()->keyBy('service_id');
@@ -60,10 +78,11 @@ class EstimateController extends Controller
         // Сборка структуры БП с состоянием тоглов.
         // $savedItem — сохранённая строка сметы для этого БП и НО (или null);
         // $taxOfficeCode/$branchLabel заданы только для филиальных копий.
-        $buildBpData = function ($bp, $savedItem, $taxOfficeCode = null, $branchLabel = null) use ($isFirstLoad, $flagKeys, $overrides, $pricing) {
+        $buildBpData = function ($bp, $savedItem, $taxOfficeCode = null, $branchLabel = null) use ($isFirstLoad, $flagKeys, $overrides, $pricing, $responsibleId) {
             $bpData = [
                 'service_id'      => $bp->id,
                 'row_key'         => $taxOfficeCode !== null ? $bp->id . ':' . $taxOfficeCode : (string) $bp->id,
+                'assignee_id'     => $savedItem?->assignee_id ?? $responsibleId,
                 'tax_office_code' => $taxOfficeCode,
                 'branch_label'    => $branchLabel,
                 'name'            => $bp->name,
@@ -241,6 +260,29 @@ class EstimateController extends Controller
                 ])->values()->toArray(),
             ])->values()->toArray();
 
+        // Переназначение исполнителей: доступно только главбуху клиента (+ админу).
+        // Кандидаты — активные бухгалтеры + сам главбух (ответственный).
+        $canAssign = $this->canAssign($client);
+        $assigneeOptions = [];
+        if ($canAssign) {
+            $assigneeOptions = Employee::query()
+                ->where('status', Employee::STATUS_ACTIVE)
+                ->with('role')
+                ->where(function ($q) use ($client) {
+                    $q->whereHas('role', fn ($r) => $r->where('name', Role::ACCOUNTANT))
+                      ->orWhere('id', $client->responsible_employee_id);
+                })
+                ->orderBy('full_name')
+                ->get()
+                ->map(fn ($e) => [
+                    'id'        => $e->id,
+                    'full_name' => $e->full_name,
+                    'role'      => $e->role?->display_name,
+                ])
+                ->values()
+                ->toArray();
+        }
+
         $specialFlags = Service::specialFlagsList();
 
         // Справочник периодичностей для редактора расписания (name + kind)
@@ -251,7 +293,7 @@ class EstimateController extends Controller
 
         return view('clients.estimate', compact(
             'client', 'estimate', 'tariffBPs', 'extras', 'allServices', 'specialFlags',
-            'estimateHasItems', 'periodicities'
+            'estimateHasItems', 'periodicities', 'canAssign', 'assigneeOptions'
         ));
     }
 
@@ -281,6 +323,7 @@ class EstimateController extends Controller
             'tariff_bps.*.branch_label'            => 'nullable|string|max:255',
             'tariff_bps.*.enabled'                 => 'boolean',
             'tariff_bps.*.quantity'                => 'nullable|integer|min:1',
+            'tariff_bps.*.assignee_id'             => 'nullable|integer|exists:employees,id',
             'tariff_bps.*.children'                => 'nullable|array',
             'tariff_bps.*.children.*.service_id'   => 'required|integer',
             'tariff_bps.*.children.*.enabled'      => 'boolean',
@@ -305,6 +348,8 @@ class EstimateController extends Controller
 
         $estimate->items()->delete();
 
+        $canAssign = $this->canAssign($client);
+
         $pricing   = new PricingCalculator();
         $total     = 0;
         $sortOrder = 0;
@@ -319,9 +364,14 @@ class EstimateController extends Controller
             $qty       = (int) ($bpData['quantity'] ?? 1);
             $children  = collect($bpData['children'] ?? [])->filter(fn($c) => !empty($c['enabled']));
 
-            // Исполнитель: сохранённый ранее (переназначение главбуха) либо дефолт — ответственный клиента.
+            // Исполнитель БП. Главбух может задать явно (payload); иначе сохраняем прежнего,
+            // по умолчанию — ответственный клиента.
             $assigneeKey = $service->id . ':' . ($bpData['tax_office_code'] ?? '');
-            $assigneeId  = $assigneeByKey[$assigneeKey] ?? $client->responsible_employee_id;
+            if ($canAssign && !empty($bpData['assignee_id'])) {
+                $assigneeId = (int) $bpData['assignee_id'];
+            } else {
+                $assigneeId = $assigneeByKey[$assigneeKey] ?? $client->responsible_employee_id;
+            }
 
             $parent = $estimate->items()->create([
                 'service_id'      => $service->id,
