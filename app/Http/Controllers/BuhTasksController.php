@@ -35,8 +35,17 @@ class BuhTasksController extends Controller
         $year  = max(2020, min(2030, $year));
         $month = max(1, min(12, $month));
 
-        // Клиенты, за которых сотрудник ответственный, с непустой сметой (одна на клиента)
-        $clients = $employee->responsibleClients()
+        // Клиент «принадлежит» сотруднику, если он исполнитель хотя бы одного БП сметы
+        // (estimate_items.assignee_id), либо — при пустом assignee — ответственный клиента.
+        $assignedToEmployee = fn ($q) => $q
+            ->where('responsible_employee_id', $employee->id)
+            ->orWhereHas('estimates.rootItems', fn ($i) => $i
+                ->whereNull('parent_id')
+                ->where('assignee_id', $employee->id));
+
+        // Клиенты с задачами этого сотрудника, с непустой сметой (одна на клиента)
+        $clients = Client::query()
+            ->where($assignedToEmployee)
             ->with([
                 'serviceSchedules',
                 'estimates' => fn($q) => $q
@@ -52,7 +61,7 @@ class BuhTasksController extends Controller
             ->get();
 
         // Все клиенты сотрудника (для создания внеплановых задач)
-        $allClients = $employee->responsibleClients()->orderBy('name')->get(['id', 'name']);
+        $allClients = Client::query()->where($assignedToEmployee)->orderBy('name')->get(['id', 'name']);
 
         // Правила активного списка:
         //  - просроченные невыполненные — показываем ВСЕ, пока не закроют;
@@ -117,6 +126,13 @@ class BuhTasksController extends Controller
             }
 
             foreach ($items as $item) {
+                // Исполнитель позиции: assignee_id, при пустом — ответственный клиента.
+                // Показываем в списке сотрудника только его БП.
+                $effectiveAssignee = $item->assignee_id ?? $client->responsible_employee_id;
+                if ((int) $effectiveAssignee !== $employee->id) {
+                    continue;
+                }
+
                 $service  = $item->service_id ? $services->get($item->service_id) : null;
                 $override = $service ? $overrides->get($item->service_id) : null;
                 $resolved = $service ? $service->resolveForClient($override) : null;

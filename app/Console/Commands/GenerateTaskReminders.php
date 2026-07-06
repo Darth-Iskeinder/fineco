@@ -59,7 +59,6 @@ class GenerateTaskReminders extends Command
         $clients = Client::query()
             ->whereNotNull('responsible_employee_id')
             ->with([
-                'responsibleEmployee',
                 'serviceSchedules',
                 'estimates.rootItems' => fn ($q) => $q->whereNull('parent_id')->whereNotNull('service_id'),
             ])
@@ -73,27 +72,32 @@ class GenerateTaskReminders extends Command
             ? Service::whereIn('id', $serviceIds)->get()->keyBy('id')
             : collect();
 
+        // Сотрудники: для резолва исполнителя позиции (assignee) и проверки активности при прунинге.
+        $employees = Employee::all()->keyBy('id');
+
         $created = 0;
         $refreshed = 0;
         $pruned = 0;
         $clientsTouched = 0;
 
         foreach ($clients as $client) {
-            $employee = $client->responsibleEmployee;
-            if (!$employee || $employee->status !== Employee::STATUS_ACTIVE) {
-                continue;
-            }
-
             $estimate = $client->estimates->first();
             if (!$estimate) {
                 continue;
             }
 
             $overrides = $client->serviceSchedules->keyBy('service_id');
-            $activeKeys = [];        // service_id|due_date, которые должны существовать
+            $activeKeys = [];        // "employee|service|office|due", которые должны существовать
             $clientHadWork = false;
 
             foreach ($estimate->rootItems as $item) {
+                // Исполнитель позиции: assignee_id, при пустом — ответственный клиента.
+                $assigneeId = $item->assignee_id ?? $client->responsible_employee_id;
+                $employee = $employees->get($assigneeId);
+                if (!$employee || $employee->status !== Employee::STATUS_ACTIVE) {
+                    continue; // нет активного исполнителя — пропускаем позицию
+                }
+
                 $service = $services->get($item->service_id);
                 if (!$service) {
                     continue;
@@ -109,7 +113,7 @@ class GenerateTaskReminders extends Command
                     $dueStr = $date->toDateString();
                     // Филиальные копии БП имеют один service_id, но разные НО — ключуем с учётом НО.
                     $office = $item->tax_office_code;
-                    $activeKeys["{$item->service_id}|{$office}|{$dueStr}"] = true;
+                    $activeKeys["{$employee->id}|{$item->service_id}|{$office}|{$dueStr}"] = true;
 
                     $reminder = TaskReminder::updateOrCreate(
                         [
@@ -131,15 +135,22 @@ class GenerateTaskReminders extends Command
                 }
             }
 
-            // Прунинг: pending-напоминания в окне [$from, $to], потерявшие активный БП
-            // (убрали из сметы / сменили расписание). Выполненные не трогаем.
+            // Прунинг: pending-напоминания клиента в окне [$from, $to], потерявшие активный БП
+            // (убрали из сметы / сменили расписание / переназначили на другого исполнителя).
+            // Напоминания неактивных сотрудников не трогаем (как раньше). Выполненные — никогда.
             $stale = TaskReminder::query()
-                ->where('employee_id', $employee->id)
                 ->where('client_id', $client->id)
                 ->where('status', TaskReminder::STATUS_PENDING)
                 ->whereBetween('due_date', [$from->toDateString(), $to->toDateString()])
                 ->get()
-                ->filter(fn ($r) => !isset($activeKeys["{$r->service_id}|{$r->tax_office_code}|{$r->due_date->toDateString()}"]));
+                ->filter(function ($r) use ($activeKeys, $employees) {
+                    $emp = $employees->get($r->employee_id);
+                    if (!$emp || $emp->status !== Employee::STATUS_ACTIVE) {
+                        return false; // сотрудник неактивен — сохраняем напоминание
+                    }
+                    $key = "{$r->employee_id}|{$r->service_id}|{$r->tax_office_code}|{$r->due_date->toDateString()}";
+                    return !isset($activeKeys[$key]);
+                });
 
             if ($stale->isNotEmpty()) {
                 TaskReminder::whereIn('id', $stale->pluck('id'))->delete();
