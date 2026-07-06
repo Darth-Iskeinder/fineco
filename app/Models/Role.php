@@ -7,6 +7,13 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Role extends Model
 {
+    // Имена ролей (roles.name)
+    const ADMIN = 'admin';
+    const EMPLOYEE = 'employee';
+    const AUDITOR = 'auditor';
+    const HEAD_ACCOUNTANT = 'head_accountant';
+    const ACCOUNTANT = 'accountant';
+
     protected $fillable = [
         'name',
         'display_name',
@@ -20,6 +27,21 @@ class Role extends Model
 
     public function isAdmin(): bool
     {
-        return $this->name === 'admin';
+        return $this->name === self::ADMIN;
+    }
+
+    public function isHeadAccountant(): bool
+    {
+        return $this->name === self::HEAD_ACCOUNTANT;
+    }
+
+    public function isAccountant(): bool
+    {
+        return $this->name === self::ACCOUNTANT;
+    }
+
+    public function isAuditor(): bool
+    {
+        return $this->name === self::AUDITOR;
     }
 }

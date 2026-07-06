@@ -142,6 +142,21 @@ class Employee extends Authenticatable
         return $this->role?->isAdmin() ?? false;
     }
 
+    public function isHeadAccountant(): bool
+    {
+        return $this->role?->isHeadAccountant() ?? false;
+    }
+
+    public function isAccountant(): bool
+    {
+        return $this->role?->isAccountant() ?? false;
+    }
+
+    public function isAuditor(): bool
+    {
+        return $this->role?->isAuditor() ?? false;
+    }
+
     public function isActive(): bool
     {
         return $this->status === self::STATUS_ACTIVE;
