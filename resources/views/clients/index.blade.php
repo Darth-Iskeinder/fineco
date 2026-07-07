@@ -9,9 +9,9 @@
     showEditModal: false,
     showDeleteModal: false,
     deleteClient: null,
-    // Не null: модалка редактирования всегда в DOM (x-show), а x-model="editClient.*" не умеет
+    // Не null: модалка редактирования всегда в DOM (x-show), а x-model на editClient.* не умеет
     // optional chaining — при null Alpine падал бы с TypeError ещё до открытия. Держим объект
-    // с полями, которые биндятся через x-model; openEdit() полностью заменяет его данными клиента.
+    // с полями под x-model; openEditModal() полностью заменяет его данными клиента.
     editClient: { tax_system_id: '', tariff_id: '', responsible_employee_id: '' },
 
     init() {
