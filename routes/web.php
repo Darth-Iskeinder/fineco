@@ -7,7 +7,6 @@ use App\Http\Controllers\ClientController;
 use App\Http\Controllers\ClientServiceScheduleController;
 use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\EstimateController;
-use App\Http\Controllers\ReviewController;
 use App\Http\Controllers\SettingsController;
 use Illuminate\Support\Facades\Route;
 
@@ -20,7 +19,7 @@ Route::get('/', function () {
     }
 
     // Модули в порядке приоритета (hasAccessToModule уже возвращает true для admin)
-    $availableModules = ['employees', 'clients', 'buhsmeta', 'buhtasks', 'review', 'settings'];
+    $availableModules = ['employees', 'clients', 'buhsmeta', 'buhtasks', 'settings'];
 
     foreach ($availableModules as $moduleName) {
         if ($employee->hasAccessToModule($moduleName)) {
@@ -107,15 +106,6 @@ Route::middleware('auth:employee')->group(function () {
         // Напоминания о сроках (выход воркера tasks:generate)
         Route::post('/reminders/{reminder}/complete', [BuhTasksController::class, 'completeReminder'])->name('reminders.complete');
         Route::post('/reminders/{reminder}/reopen', [BuhTasksController::class, 'reopenReminder'])->name('reminders.reopen');
-    });
-
-    // Модуль Проверка (задачи на проверке у БП с флагом requires_review)
-    Route::prefix('review')->name('review.')->middleware('module:review')->group(function () {
-        Route::get('/', [ReviewController::class, 'index'])->name('index');
-        Route::post('/{log}/approve', [ReviewController::class, 'approve'])->name('approve');
-        Route::post('/{log}/reject', [ReviewController::class, 'reject'])->name('reject');
-        Route::post('/adhoc/{task}/approve', [ReviewController::class, 'approveAdhoc'])->name('adhoc.approve');
-        Route::post('/adhoc/{task}/reject', [ReviewController::class, 'rejectAdhoc'])->name('adhoc.reject');
     });
 
     // Настройки (доступ по модулю settings; админ имеет доступ всегда)
