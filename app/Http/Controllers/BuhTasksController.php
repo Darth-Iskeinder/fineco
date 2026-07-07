@@ -627,7 +627,14 @@ class BuhTasksController extends Controller
             $log->paused_seconds += max(0, $now->timestamp - $log->resumed_at->timestamp);
         }
 
-        if ($log->estimateItem?->service?->requires_review) {
+        // На проверку идёт задача с requires_review, ТОЛЬКО если её выполнил не сам главбух клиента:
+        // проверяет главбух (responsible_employee_id), поэтому свою же работу он не проверяет —
+        // такая задача закрывается сразу (шаг 7.3).
+        $responsibleId = Client::whereKey($log->client_id)->value('responsible_employee_id');
+        $needsReview = ($log->estimateItem?->service?->requires_review)
+            && (int) $log->employee_id !== (int) $responsibleId;
+
+        if ($needsReview) {
             $log->status            = 'review';
             $log->review_comment    = null;
             $log->review_started_at = $now; // старт/перезапуск 3-дневного срока проверки
@@ -858,8 +865,13 @@ class BuhTasksController extends Controller
             $task->paused_seconds += max(0, $now->timestamp - $task->resumed_at->timestamp);
         }
 
-        // Задача с проверкой уходит на ревью (3-дневный срок), иначе сразу завершена.
-        if ($task->requires_review) {
+        // Задача с проверкой уходит на ревью (3-дневный срок), НО если её выполнил сам главбух
+        // клиента — проверять некому, закрываем сразу (шаг 7.3).
+        $responsibleId = Client::whereKey($task->client_id)->value('responsible_employee_id');
+        $needsReview = $task->requires_review
+            && (int) $task->employee_id !== (int) $responsibleId;
+
+        if ($needsReview) {
             $task->status            = 'review';
             $task->review_comment    = null;
             $task->review_started_at = $now;
