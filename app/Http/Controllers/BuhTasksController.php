@@ -277,6 +277,98 @@ class BuhTasksController extends Controller
             ];
         }
 
+        // === Проверка главбуха (шаг 7.1): задачи на проверке от бухгалтеров МОИХ клиентов ===
+        // Главбух (клиент, где он responsible_employee_id) видит в своём же списке задачи в статусе
+        // review, сделанные НЕ им самим, с пометкой «от бухгалтера». Свои review-задачи уже попали
+        // в $tasks выше как обычные строки исполнителя (employee_id == $employee->id), поэтому здесь
+        // их исключаем — иначе задвоятся. Действия «принять/вернуть» появятся отдельным шагом.
+        $myClientIds = Client::where('responsible_employee_id', $employee->id)->pluck('id');
+        if ($myClientIds->isNotEmpty()) {
+            $reviewPlanned = BuhTaskLog::where('status', 'review')
+                ->whereIn('client_id', $myClientIds)
+                ->where('employee_id', '!=', $employee->id)
+                ->with(['estimateItem.service', 'client:id,name', 'employee:id,full_name'])
+                ->get();
+            foreach ($reviewPlanned as $log) {
+                $item    = $log->estimateItem;
+                $service = $item?->service;
+                $tasks[] = [
+                    'uid'             => 'review_log_' . $log->id,
+                    'type'            => 'planned',
+                    'item_id'         => $item?->id,
+                    'log_id'          => $log->id,
+                    'review_for_head' => true,
+                    'doer_name'       => $log->employee?->full_name,
+                    'client_id'       => $log->client_id,
+                    'client_name'     => $log->client?->name,
+                    'year'            => $log->year,
+                    'month'           => $log->month,
+                    'name'            => $item?->name ?? '—',
+                    'branch_label'    => $item?->branch_label,
+                    'service_group'   => $service?->service_group,
+                    'cost'            => (float) ($item?->total ?? 0),
+                    'periodicity'     => $item?->periodicity,
+                    'reporting_period' => null,
+                    'due_day'         => null,
+                    'due_date'        => $log->due_date?->toDateString(),
+                    'comment'         => $service?->comment,
+                    'description'     => $service?->description,
+                    'status'          => 'review',
+                    'elapsed_seconds' => $this->calcElapsed($log),
+                    'review_comment'  => $log->review_comment,
+                    'employee_comment' => $log->employee_comment,
+                    'quantity'        => (int) ($item?->quantity ?? 0),
+                    'allows_quantity' => (bool) ($service?->allows_quantity),
+                    'actual_quantity' => $log->actual_quantity,
+                    'requires_document' => (bool) ($service?->requires_document),
+                    'document_name'   => $log->document_name,
+                    'document_path'   => $log->document_path,
+                    'children'        => [],
+                ];
+            }
+
+            $reviewAdhoc = BuhAdhocTask::where('status', 'review')
+                ->whereIn('client_id', $myClientIds)
+                ->where('employee_id', '!=', $employee->id)
+                ->with(['client:id,name', 'employee:id,full_name'])
+                ->get();
+            foreach ($reviewAdhoc as $a) {
+                $tasks[] = [
+                    'uid'             => 'review_adhoc_' . $a->id,
+                    'type'            => 'adhoc',
+                    'is_custom'       => true,
+                    'adhoc_id'        => $a->id,
+                    'review_for_head' => true,
+                    'doer_name'       => $a->employee?->full_name,
+                    'client_id'       => $a->client_id,
+                    'client_name'     => $a->client?->name,
+                    'year'            => $a->year,
+                    'month'           => $a->month,
+                    'name'            => $a->name,
+                    'service_group'   => null,
+                    'cost'            => (float) $a->cost,
+                    'periodicity'     => null,
+                    'reporting_period' => null,
+                    'due_day'         => $a->due_day,
+                    'due_date'        => null,
+                    'comment'         => null,
+                    'description'     => $a->description,
+                    'requires_review' => $a->requires_review,
+                    'status'          => 'review',
+                    'elapsed_seconds' => $this->calcElapsed($a),
+                    'review_comment'  => $a->review_comment,
+                    'employee_comment' => $a->employee_comment,
+                    'quantity'        => 1,
+                    'allows_quantity' => false,
+                    'actual_quantity' => null,
+                    'requires_document' => false,
+                    'document_name'   => $a->document_name,
+                    'document_path'   => $a->document_path,
+                    'children'        => [],
+                ];
+            }
+        }
+
         // Вкладка «Выполненные» — история за последние 90 дней (read-only): плановые + внеплановые.
         $completedPlanned = BuhTaskLog::where('employee_id', $employee->id)
             ->where('status', 'completed')

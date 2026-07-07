@@ -243,6 +243,12 @@
                                           class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-700">сегодня</span>
                                     <span x-show="task.status === 'review'"
                                           class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-sky-100 text-sky-700">на проверке</span>
+                                    {{-- Задача бухгалтера, пришедшая главбуху на проверку (шаг 7.1) --}}
+                                    <span x-show="task.review_for_head"
+                                          class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700">
+                                        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                                        <span x-text="'бухгалтер: ' + (task.doer_name || '—')"></span>
+                                    </span>
                                     <span x-show="task.status === 'rework'"
                                           class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-rose-100 text-rose-700">на доработку</span>
                                 </div>
