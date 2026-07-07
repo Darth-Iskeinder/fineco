@@ -872,6 +872,91 @@ class BuhTasksController extends Controller
         return response()->json(['success' => true, 'log' => $this->formatAdhoc($task)]);
     }
 
+    // =============================================
+    // ПРОВЕРКА ГЛАВБУХОМ (шаг 7.2): принять / вернуть задачу бухгалтера
+    // =============================================
+
+    /** Действие проверки доступно admin или главбуху этого клиента (responsible_employee_id). */
+    private function authorizeReview(int $clientId): void
+    {
+        $me = auth('employee')->user();
+        abort_unless(
+            $me->isAdmin() || Client::whereKey($clientId)->where('responsible_employee_id', $me->id)->exists(),
+            403,
+            'Нет прав на проверку этой задачи'
+        );
+    }
+
+    public function approveReview(BuhTaskLog $log)
+    {
+        abort_if($log->status !== 'review', 422, 'Задача не на проверке');
+        $this->authorizeReview((int) $log->client_id);
+
+        $log->update([
+            'status'       => 'completed',
+            'completed_at' => now(),
+            'reviewed_at'  => now(),
+            'reviewed_by'  => auth('employee')->id(),
+        ]);
+
+        return response()->json(['success' => true]);
+    }
+
+    public function rejectReview(Request $request, BuhTaskLog $log)
+    {
+        abort_if($log->status !== 'review', 422, 'Задача не на проверке');
+        $this->authorizeReview((int) $log->client_id);
+
+        $validated = $request->validate(
+            ['comment' => ['required', 'string', 'max:2000']],
+            ['comment.required' => 'Укажите, что нужно исправить']
+        );
+
+        $log->update([
+            'status'         => 'rework',
+            'review_comment' => $validated['comment'],
+            'reviewed_at'    => now(),
+            'reviewed_by'    => auth('employee')->id(),
+        ]);
+
+        return response()->json(['success' => true]);
+    }
+
+    public function approveReviewAdhoc(BuhAdhocTask $task)
+    {
+        abort_if($task->status !== 'review', 422, 'Задача не на проверке');
+        $this->authorizeReview((int) $task->client_id);
+
+        $task->update([
+            'status'       => 'completed',
+            'completed_at' => now(),
+            'reviewed_at'  => now(),
+            'reviewed_by'  => auth('employee')->id(),
+        ]);
+
+        return response()->json(['success' => true]);
+    }
+
+    public function rejectReviewAdhoc(Request $request, BuhAdhocTask $task)
+    {
+        abort_if($task->status !== 'review', 422, 'Задача не на проверке');
+        $this->authorizeReview((int) $task->client_id);
+
+        $validated = $request->validate(
+            ['comment' => ['required', 'string', 'max:2000']],
+            ['comment.required' => 'Укажите, что нужно исправить']
+        );
+
+        $task->update([
+            'status'         => 'rework',
+            'review_comment' => $validated['comment'],
+            'reviewed_at'    => now(),
+            'reviewed_by'    => auth('employee')->id(),
+        ]);
+
+        return response()->json(['success' => true]);
+    }
+
     public function updateCommentAdhoc(Request $request, BuhAdhocTask $task)
     {
         $this->authorizeAdhoc($task);

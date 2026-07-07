@@ -353,12 +353,28 @@
                                     </button>
                                 </span>
 
-                                {{-- На проверке (review) --}}
-                                <span x-show="task.status === 'review'" class="inline-flex items-center">
+                                {{-- На проверке (review) — собственная задача исполнителя: пассивная метка --}}
+                                <span x-show="task.status === 'review' && !task.review_for_head" class="inline-flex items-center">
                                     <span class="text-xs text-sky-600 font-medium flex items-center gap-1">
                                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                                         На проверке
                                     </span>
+                                </span>
+
+                                {{-- Проверка главбухом: принять / вернуть задачу бухгалтера (шаг 7.2) --}}
+                                <span x-show="task.status === 'review' && task.review_for_head" class="inline-flex items-center gap-1.5">
+                                    <button @click.prevent="approveReview(idx)"
+                                            :disabled="task.loading"
+                                            class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors">
+                                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                                        Принять
+                                    </button>
+                                    <button @click.prevent="openReviewReject(idx)"
+                                            :disabled="task.loading"
+                                            class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 text-rose-600 border border-rose-200 text-xs font-medium rounded-lg hover:bg-rose-100 disabled:opacity-50 transition-colors">
+                                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a5 5 0 015 5v2M3 10l4-4M3 10l4 4"/></svg>
+                                        Вернуть
+                                    </button>
                                 </span>
 
                                 {{-- Выполнено (completed) --}}
@@ -729,6 +745,46 @@
                 <button @click="confirmStart()"
                         class="flex-1 py-2.5 px-4 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 transition-colors">
                     Начать
+                </button>
+            </div>
+        </div>
+    </div>
+
+    {{-- ===== МОДАЛ: ВЕРНУТЬ ЗАДАЧУ НА ДОРАБОТКУ (проверка главбухом, шаг 7.2) ===== --}}
+    <div x-show="reviewReject.show"
+         x-transition:enter="ease-out duration-200"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="ease-in duration-150"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         class="fixed inset-0 z-[60] flex items-center justify-center bg-black/40"
+         @click.self="reviewReject = { show: false, idx: null, comment: '' }"
+         @keydown.escape.window="reviewReject = { show: false, idx: null, comment: '' }"
+         style="display:none">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+            <div class="flex items-start gap-4">
+                <div class="flex-shrink-0 w-11 h-11 rounded-full bg-rose-100 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-rose-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a5 5 0 015 5v2M3 10l4-4M3 10l4 4"/></svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <h3 class="text-base font-semibold text-slate-800">Вернуть на доработку</h3>
+                    <p class="mt-1 text-sm text-slate-500">Задача вернётся бухгалтеру со статусом «на доработку». Напишите, что нужно исправить.</p>
+                </div>
+            </div>
+            <textarea x-model="reviewReject.comment"
+                      rows="3"
+                      placeholder="Что исправить…"
+                      class="mt-4 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-200 focus:border-rose-300"></textarea>
+            <div class="flex gap-3 mt-5">
+                <button @click="reviewReject = { show: false, idx: null, comment: '' }"
+                        class="flex-1 py-2.5 px-4 border border-slate-200 text-slate-600 text-sm font-medium rounded-xl hover:bg-slate-50 transition-colors">
+                    Отмена
+                </button>
+                <button @click="confirmReviewReject()"
+                        :disabled="!reviewReject.comment.trim()"
+                        class="flex-1 py-2.5 px-4 bg-rose-600 text-white text-sm font-medium rounded-xl hover:bg-rose-700 disabled:opacity-50 transition-colors">
+                    Вернуть
                 </button>
             </div>
         </div>
@@ -1275,6 +1331,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
 
         showCreateModal: false,
         startConfirm: { show: false, idx: null },
+        reviewReject: { show: false, idx: null, comment: '' }, // модалка «вернуть на доработку» (проверка главбухом)
         catalog: catalog || [],
         newTask: {
             source: 'custom',       // 'custom' | 'catalog'
@@ -1845,6 +1902,38 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 return `/buhtasks/adhoc/${task.adhoc_id}/${action}`;
             }
             return `/buhtasks/logs/${task.log_id}/${action}`;
+        },
+
+        // ===== Проверка главбухом задачи бухгалтера (шаг 7.2) =====
+        // Строка review_for_head после «Принять»/«Вернуть» уходит из списка главбуха:
+        //  - принять → задача становится completed (у бухгалтера — «выполнено»);
+        //  - вернуть → задача становится rework и возвращается бухгалтеру.
+        // В обоих случаях у главбуха она больше не «на проверке», поэтому убираем строку.
+        async approveReview(idx) {
+            const task = this.tasks[idx];
+            if (task.loading) return;
+            task.loading = true;
+            const data = await this.post(this.actionUrl(task, 'review-approve'));
+            task.loading = false;
+            if (data.success) this.removeReviewRow(task);
+        },
+        openReviewReject(idx) {
+            this.reviewReject = { show: true, idx, comment: '' };
+        },
+        async confirmReviewReject() {
+            const comment = (this.reviewReject.comment || '').trim();
+            if (!comment) return;
+            const task = this.tasks[this.reviewReject.idx];
+            task.loading = true;
+            const data = await this.post(this.actionUrl(task, 'review-reject'), { comment });
+            task.loading = false;
+            this.reviewReject = { show: false, idx: null, comment: '' };
+            if (data.success) this.removeReviewRow(task);
+        },
+        removeReviewRow(task) {
+            if (this.taskModalIdx !== null && this.tasks[this.taskModalIdx] === task) this.taskModalIdx = null;
+            this.tasks = this.tasks.filter(t => t !== task);
+            this._taskVer++; // состав задач изменился → кэши списка/чеклиста пересчитаются
         },
 
         async ensureLog(idx) {

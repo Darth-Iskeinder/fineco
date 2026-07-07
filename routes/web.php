@@ -99,6 +99,11 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/adhoc/{task}/reset', [BuhTasksController::class, 'resetAdhoc'])->name('adhoc.reset');
         Route::post('/adhoc/{task}/comment', [BuhTasksController::class, 'updateCommentAdhoc'])->name('adhoc.comment');
         Route::post('/adhoc/{task}/document', [BuhTasksController::class, 'uploadDocumentAdhoc'])->name('adhoc.document');
+        // Проверка главбухом задач бухгалтеров — принять/вернуть прямо со страницы задач (шаг 7.2)
+        Route::post('/logs/{log}/review-approve', [BuhTasksController::class, 'approveReview'])->name('logs.review-approve');
+        Route::post('/logs/{log}/review-reject', [BuhTasksController::class, 'rejectReview'])->name('logs.review-reject');
+        Route::post('/adhoc/{task}/review-approve', [BuhTasksController::class, 'approveReviewAdhoc'])->name('adhoc.review-approve');
+        Route::post('/adhoc/{task}/review-reject', [BuhTasksController::class, 'rejectReviewAdhoc'])->name('adhoc.review-reject');
         // Напоминания о сроках (выход воркера tasks:generate)
         Route::post('/reminders/{reminder}/complete', [BuhTasksController::class, 'completeReminder'])->name('reminders.complete');
         Route::post('/reminders/{reminder}/reopen', [BuhTasksController::class, 'reopenReminder'])->name('reminders.reopen');
