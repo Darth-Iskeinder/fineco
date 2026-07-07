@@ -11,6 +11,7 @@ use App\Models\Service;
 use App\Services\PricingCalculator;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class EstimateController extends Controller
 {
@@ -334,152 +335,237 @@ class EstimateController extends Controller
             'extras.*.quantity'                    => 'nullable|integer|min:1',
         ]);
 
-        $estimate = Estimate::firstOrCreate(
-            ['client_id' => $client->id],
-            ['total' => 0]
-        );
+        return DB::transaction(function () use ($request, $client) {
+            $estimate = Estimate::firstOrCreate(
+                ['client_id' => $client->id],
+                ['total' => 0]
+            );
 
-        // Снимок назначенных исполнителей БП: пересоздание позиций ниже не должно их стирать.
-        // Ключ = service_id + НО (совпадает с гранулярностью строки сметы). Только корневые БП.
-        $assigneeByKey = [];
-        foreach ($estimate->items()->whereNull('parent_id')->whereNotNull('service_id')->get(['service_id', 'tax_office_code', 'assignee_id']) as $prev) {
-            $assigneeByKey[$prev->service_id . ':' . ($prev->tax_office_code ?? '')] = $prev->assignee_id;
-        }
-
-        $estimate->items()->delete();
-
-        $canAssign = $this->canAssign($client);
-
-        $pricing   = new PricingCalculator();
-        $total     = 0;
-        $sortOrder = 0;
-
-        // Tariff BPs (only enabled ones)
-        foreach ($request->input('tariff_bps', []) as $bpData) {
-            if (empty($bpData['enabled'])) continue;
-
-            $service = Service::with('rate')->find($bpData['service_id']);
-            if (!$service) continue;
-
-            $qty       = (int) ($bpData['quantity'] ?? 1);
-            $children  = collect($bpData['children'] ?? [])->filter(fn($c) => !empty($c['enabled']));
-
-            // Исполнитель БП. Главбух может задать явно (payload); иначе сохраняем прежнего,
-            // по умолчанию — ответственный клиента.
-            $assigneeKey = $service->id . ':' . ($bpData['tax_office_code'] ?? '');
-            if ($canAssign && !empty($bpData['assignee_id'])) {
-                $assigneeId = (int) $bpData['assignee_id'];
-            } else {
-                $assigneeId = $assigneeByKey[$assigneeKey] ?? $client->responsible_employee_id;
+            // РЕКОНСИЛ вместо «снести всё и создать заново»: совпавшие по стабильному ключу позиции
+            // ОБНОВЛЯЕМ на месте (id сохраняется → логи задач buh_task_logs целы, в т.ч. «на проверке»),
+            // недостающие создаём, реально исчезнувшие удаляем в конце (их логи уходят каскадом — БП убрали).
+            // Это чинит потерю истории при любом сохранении сметы, включая переназначение исполнителя.
+            $existingRoots = $estimate->items()->whereNull('parent_id')->with('children')->get();
+            $rootByKey = [];
+            foreach ($existingRoots as $r) {
+                $rootByKey[$this->itemKey($r->service_id, $r->tax_office_code, $r->branch_label, $r->name, $r->type)] = $r;
             }
 
-            $parent = $estimate->items()->create([
-                'service_id'      => $service->id,
-                'assignee_id'     => $assigneeId,
-                'tax_office_code' => $bpData['tax_office_code'] ?? null,
-                'branch_label'    => $bpData['branch_label'] ?? null,
-                'type'            => 'recurring',
-                'name'            => $service->name,
-                'periodicity'     => $service->periodicity,
-                'due_day'         => $service->due_day,
-                'cost'            => $pricing->unitPrice($service),
-                'quantity'        => $qty,
-                'total'           => 0, // filled after children
-                'sort_order'      => $sortOrder++,
-            ]);
+            $canAssign = $this->canAssign($client);
 
-            $childTotal = 0;
-            $childOrder = 0;
-            foreach ($children as $childData) {
-                $childService = Service::with('rate')->find($childData['service_id']);
-                if (!$childService) continue;
+            $pricing     = new PricingCalculator();
+            $total       = 0;
+            $sortOrder   = 0;
+            $keptRootIds = [];
 
-                $cqty  = (int) ($childData['quantity'] ?? 1);
-                $cTotal = $pricing->lineTotal($childService, $cqty);
-                $childTotal += $cTotal;
+            // Tariff BPs (only enabled ones)
+            foreach ($request->input('tariff_bps', []) as $bpData) {
+                if (empty($bpData['enabled'])) continue;
 
-                $estimate->items()->create([
-                    'parent_id'   => $parent->id,
-                    'service_id'  => $childService->id,
-                    'type'        => 'recurring',
-                    'name'        => $childService->name,
-                    'periodicity' => $childService->periodicity,
-                    'due_day'     => $childService->due_day,
-                    'cost'        => $pricing->unitPrice($childService),
-                    'quantity'    => $cqty,
-                    'total'       => $cTotal,
-                    'sort_order'  => $childOrder++,
-                ]);
+                $service = Service::with('rate')->find($bpData['service_id']);
+                if (!$service) continue;
+
+                $qty      = (int) ($bpData['quantity'] ?? 1);
+                $children = collect($bpData['children'] ?? [])->filter(fn($c) => !empty($c['enabled']));
+
+                $key      = $this->itemKey($service->id, $bpData['tax_office_code'] ?? null, $bpData['branch_label'] ?? null, $service->name, 'recurring');
+                $existing = $rootByKey[$key] ?? null;
+                unset($rootByKey[$key]); // строка «использована» — не сматчить дважды
+
+                // Исполнитель БП. Главбух может задать явно (payload); иначе сохраняем прежнего
+                // (при обновлении на месте он уже стоит), по умолчанию — ответственный клиента.
+                if ($canAssign && !empty($bpData['assignee_id'])) {
+                    $assigneeId = (int) $bpData['assignee_id'];
+                } else {
+                    $assigneeId = $existing?->assignee_id ?? $client->responsible_employee_id;
+                }
+
+                $attrs = [
+                    'service_id'      => $service->id,
+                    'assignee_id'     => $assigneeId,
+                    'tax_office_code' => $bpData['tax_office_code'] ?? null,
+                    'branch_label'    => $bpData['branch_label'] ?? null,
+                    'type'            => 'recurring',
+                    'name'            => $service->name,
+                    'periodicity'     => $service->periodicity,
+                    'due_day'         => $service->due_day,
+                    'cost'            => $pricing->unitPrice($service),
+                    'quantity'        => $qty,
+                    'sort_order'      => $sortOrder++,
+                ];
+
+                if ($existing) {
+                    $existing->update($attrs);
+                    $parent = $existing;
+                } else {
+                    $parent = $estimate->items()->create($attrs + ['total' => 0]);
+                }
+
+                $childTotal = 0;
+                $childOrder = 0;
+                $childByKey = [];
+                foreach (($existing->children ?? collect()) as $c) {
+                    $childByKey[$this->itemKey($c->service_id, null, null, $c->name, $c->type)] = $c;
+                }
+                $keptChildIds = [];
+
+                foreach ($children as $childData) {
+                    $childService = Service::with('rate')->find($childData['service_id']);
+                    if (!$childService) continue;
+
+                    $cqty   = (int) ($childData['quantity'] ?? 1);
+                    $cTotal = $pricing->lineTotal($childService, $cqty);
+                    $childTotal += $cTotal;
+
+                    $cAttrs = [
+                        'parent_id'   => $parent->id,
+                        'service_id'  => $childService->id,
+                        'type'        => 'recurring',
+                        'name'        => $childService->name,
+                        'periodicity' => $childService->periodicity,
+                        'due_day'     => $childService->due_day,
+                        'cost'        => $pricing->unitPrice($childService),
+                        'quantity'    => $cqty,
+                        'total'       => $cTotal,
+                        'sort_order'  => $childOrder++,
+                    ];
+                    $ckey  = $this->itemKey($childService->id, null, null, $childService->name, 'recurring');
+                    $child = $childByKey[$ckey] ?? null;
+                    if ($child) {
+                        $child->update($cAttrs);
+                    } else {
+                        $child = $estimate->items()->create($cAttrs);
+                    }
+                    $keptChildIds[] = $child->id;
+                }
+
+                // Убрать подпункты, которых больше нет (их логи уйдут каскадом)
+                if ($existing) {
+                    $parent->children()->whereNotIn('id', $keptChildIds ?: [0])->delete();
+                }
+
+                $parentTotal = $children->isNotEmpty()
+                    ? $childTotal
+                    : $pricing->lineTotal($service, $qty);
+
+                $parent->update(['total' => $parentTotal]);
+                $total += $parentTotal;
+                $keptRootIds[] = $parent->id;
             }
 
-            $parentTotal = $children->isNotEmpty()
-                ? $childTotal
-                : $pricing->lineTotal($service, $qty);
+            // Extra items
+            foreach ($request->input('extras', []) as $extraData) {
+                if (empty($extraData['name'])) continue;
 
-            $parent->update(['total' => $parentTotal]);
-            $total += $parentTotal;
-        }
+                $cost     = (float) ($extraData['cost'] ?? 0);
+                $qty      = (int) ($extraData['quantity'] ?? 1);
+                $rowTotal = round($cost * $qty, 2);
 
-        // Extra items
-        foreach ($request->input('extras', []) as $extraData) {
-            if (empty($extraData['name'])) continue;
+                $extraType = in_array($extraData['type'] ?? '', ['recurring', 'one_time'])
+                    ? $extraData['type'] : 'one_time';
 
-            $cost  = (float) ($extraData['cost'] ?? 0);
-            $qty   = (int) ($extraData['quantity'] ?? 1);
-            $rowTotal = round($cost * $qty, 2);
+                $key      = $this->itemKey($extraData['service_id'] ?? null, null, null, $extraData['name'], $extraType);
+                $existing = $rootByKey[$key] ?? null;
+                unset($rootByKey[$key]);
 
-            $extraType = in_array($extraData['type'] ?? '', ['recurring', 'one_time'])
-                ? $extraData['type'] : 'one_time';
-
-            $parent = $estimate->items()->create([
-                'service_id'  => $extraData['service_id'] ?? null,
-                'type'        => $extraType,
-                'name'        => $extraData['name'],
-                'periodicity' => $extraData['periodicity'] ?? null,
-                'cost'        => $cost,
-                'quantity'    => $qty,
-                'total'       => $rowTotal,
-                'sort_order'  => $sortOrder++,
-            ]);
-
-            $childTotal = 0;
-            foreach ($extraData['children'] ?? [] as $cidx => $childData) {
-                if (empty($childData['name'])) continue;
-                $cc  = (float) ($childData['cost'] ?? 0);
-                $cq  = (int) ($childData['quantity'] ?? 1);
-                $ct  = round($cc * $cq, 2);
-                $childTotal += $ct;
-                $estimate->items()->create([
-                    'parent_id'   => $parent->id,
-                    'service_id'  => $childData['service_id'] ?? null,
+                $attrs = [
+                    'service_id'  => $extraData['service_id'] ?? null,
                     'type'        => $extraType,
-                    'name'        => $childData['name'],
-                    'periodicity' => $childData['periodicity'] ?? null,
-                    'cost'        => $cc,
-                    'quantity'    => $cq,
-                    'total'       => $ct,
-                    'sort_order'  => $cidx,
-                ]);
+                    'name'        => $extraData['name'],
+                    'periodicity' => $extraData['periodicity'] ?? null,
+                    'cost'        => $cost,
+                    'quantity'    => $qty,
+                    'total'       => $rowTotal,
+                    'sort_order'  => $sortOrder++,
+                ];
+
+                if ($existing) {
+                    $existing->update($attrs);
+                    $parent = $existing;
+                } else {
+                    $parent = $estimate->items()->create($attrs);
+                }
+
+                $childTotal = 0;
+                $childByKey = [];
+                foreach (($existing->children ?? collect()) as $c) {
+                    $childByKey[$this->itemKey($c->service_id, null, null, $c->name, $c->type)] = $c;
+                }
+                $keptChildIds = [];
+                $childOrder   = 0;
+
+                foreach ($extraData['children'] ?? [] as $childData) {
+                    if (empty($childData['name'])) continue;
+                    $cc = (float) ($childData['cost'] ?? 0);
+                    $cq = (int) ($childData['quantity'] ?? 1);
+                    $ct = round($cc * $cq, 2);
+                    $childTotal += $ct;
+
+                    $cAttrs = [
+                        'parent_id'   => $parent->id,
+                        'service_id'  => $childData['service_id'] ?? null,
+                        'type'        => $extraType,
+                        'name'        => $childData['name'],
+                        'periodicity' => $childData['periodicity'] ?? null,
+                        'cost'        => $cc,
+                        'quantity'    => $cq,
+                        'total'       => $ct,
+                        'sort_order'  => $childOrder++,
+                    ];
+                    $ckey  = $this->itemKey($childData['service_id'] ?? null, null, null, $childData['name'], $extraType);
+                    $child = $childByKey[$ckey] ?? null;
+                    if ($child) {
+                        $child->update($cAttrs);
+                    } else {
+                        $child = $estimate->items()->create($cAttrs);
+                    }
+                    $keptChildIds[] = $child->id;
+                }
+
+                if ($existing) {
+                    $parent->children()->whereNotIn('id', $keptChildIds ?: [0])->delete();
+                }
+
+                if (!empty($extraData['children'])) {
+                    $parent->update(['total' => $childTotal]);
+                    $total += $childTotal;
+                } else {
+                    $total += $rowTotal;
+                }
+                $keptRootIds[] = $parent->id;
             }
 
-            if (!empty($extraData['children'])) {
-                $parent->update(['total' => $childTotal]);
-                $total += $childTotal;
-            } else {
-                $total += $rowTotal;
+            // Удаляем корневые позиции, которых больше нет в присланных, и их подпункты
+            // (buh_task_logs этих позиций уходят каскадом — БП/подпункт убрали из сметы).
+            $removedRootIds = $existingRoots->pluck('id')->diff($keptRootIds)->values();
+            if ($removedRootIds->isNotEmpty()) {
+                $estimate->items()->whereIn('parent_id', $removedRootIds)->delete();
+                $estimate->items()->whereIn('id', $removedRootIds)->delete();
             }
-        }
 
-        $estimate->notes = $request->notes;
-        $estimate->total = $total;
-        $estimate->save();
+            $estimate->notes = $request->notes;
+            $estimate->total = $total;
+            $estimate->save();
 
-        return response()->json([
-            'success'    => true,
-            'message'    => 'Смета сохранена',
-            'total'      => $estimate->total,
-            'updated_at' => $estimate->updated_at->format('d.m.Y H:i'),
-        ]);
+            return response()->json([
+                'success'    => true,
+                'message'    => 'Смета сохранена',
+                'total'      => $estimate->total,
+                'updated_at' => $estimate->updated_at->format('d.m.Y H:i'),
+            ]);
+        });
+    }
+
+    /**
+     * Стабильный ключ позиции сметы для reconcile в save():
+     * по услуге+НО+филиалу, а для строк без услуги (extras) — по имени+типу.
+     * Одинаково вычисляется и для присланной строки, и для существующей в БД.
+     */
+    private function itemKey(?int $serviceId, ?string $taxOffice, ?string $branch, ?string $name, ?string $type): string
+    {
+        return $serviceId
+            ? 'svc:' . $serviceId . ':' . ($taxOffice ?? '') . ':' . ($branch ?? '')
+            : 'name:' . mb_strtolower(trim((string) $name)) . ':' . ($type ?? '');
     }
 
     public function pdf(Request $request, Client $client)
