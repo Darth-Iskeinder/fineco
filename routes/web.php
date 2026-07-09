@@ -98,6 +98,7 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/adhoc/{task}/reset', [BuhTasksController::class, 'resetAdhoc'])->name('adhoc.reset');
         Route::post('/adhoc/{task}/comment', [BuhTasksController::class, 'updateCommentAdhoc'])->name('adhoc.comment');
         Route::post('/adhoc/{task}/document', [BuhTasksController::class, 'uploadDocumentAdhoc'])->name('adhoc.document');
+        Route::post('/adhoc/{task}/delete', [BuhTasksController::class, 'destroyAdhoc'])->name('adhoc.destroy');
         // Проверка главбухом задач бухгалтеров — принять/вернуть прямо со страницы задач (шаг 7.2)
         Route::post('/logs/{log}/review-approve', [BuhTasksController::class, 'approveReview'])->name('logs.review-approve');
         Route::post('/logs/{log}/review-reject', [BuhTasksController::class, 'rejectReview'])->name('logs.review-reject');

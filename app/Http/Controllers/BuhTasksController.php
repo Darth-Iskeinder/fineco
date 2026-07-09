@@ -1030,6 +1030,24 @@ class BuhTasksController extends Controller
         return response()->json(['success' => true, 'log' => $this->formatAdhoc($task)]);
     }
 
+    /**
+     * Удаление произвольной (внеплановой) задачи. Плановые задачи из сметы удалять
+     * нельзя — они генерируются расписанием; удаляем только BuhAdhocTask, созданную
+     * вручную. Доступно исполнителю задачи (тому, в чьём списке она висит).
+     */
+    public function destroyAdhoc(BuhAdhocTask $task)
+    {
+        $this->authorizeAdhoc($task);
+
+        if ($task->document_path) {
+            Storage::disk('public')->delete($task->document_path);
+        }
+
+        $task->delete();
+
+        return response()->json(['success' => true]);
+    }
+
     // =============================================
     // ПРИВАТНЫЕ МЕТОДЫ
     // =============================================

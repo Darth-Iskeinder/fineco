@@ -134,8 +134,18 @@
             <option value="d7">Ближайшая неделя</option>
         </select>
 
-        <button x-show="clientFilter !== 'all' || dueFilter !== 'all'"
-                @click="clientFilter = 'all'; dueFilter = 'all'"
+        {{-- Действие: фильтр по состоянию из колонки «Действия» (не начаты / на паузе и т.д.). --}}
+        <select x-model="statusFilter"
+                class="px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+            <option value="all">Все действия</option>
+            <option value="pending" x-text="'Не начаты (' + statusCounts.pending + ')'"></option>
+            <option value="paused" x-text="'На паузе (' + statusCounts.paused + ')'"></option>
+            <option value="running" x-text="'В работе (' + statusCounts.running + ')'"></option>
+            <option value="rework" x-text="'На доработку (' + statusCounts.rework + ')'"></option>
+        </select>
+
+        <button x-show="clientFilter !== 'all' || dueFilter !== 'all' || statusFilter !== 'all'"
+                @click="clientFilter = 'all'; dueFilter = 'all'; statusFilter = 'all'"
                 class="text-xs text-slate-400 hover:text-slate-600 underline">Сбросить</button>
 
         <span class="ml-auto text-sm text-slate-500 font-medium" x-text="visibleCount + ' задач'"></span>
@@ -1132,8 +1142,52 @@
                         </div>
                     </div>
                 </template>
+
+                {{-- Удаление произвольной задачи: только для внеплановых (созданных вручную),
+                     и не для строки проверки главбуха (там это чужая задача). --}}
+                <template x-if="tasks[taskModalIdx].is_custom && !tasks[taskModalIdx].review_for_head">
+                    <div class="mt-5 pt-4 border-t border-slate-100 flex justify-end">
+                        <button @click.prevent="deleteConfirm = { show: true, idx: taskModalIdx }"
+                                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-rose-600 text-xs font-medium rounded-lg hover:bg-rose-50 transition-colors">
+                            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                            Удалить задачу
+                        </button>
+                    </div>
+                </template>
             </div>
         </template>
+    </div>
+
+    {{-- ===== ПОДТВЕРЖДЕНИЕ УДАЛЕНИЯ ПРОИЗВОЛЬНОЙ ЗАДАЧИ ===== --}}
+    <div x-show="deleteConfirm.show"
+         x-transition:enter="ease-out duration-200"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="ease-in duration-150"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         class="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4"
+         @click.self="deleteConfirm = { show: false, idx: null }"
+         @keydown.escape.window="deleteConfirm = { show: false, idx: null }"
+         style="display:none">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">
+            <h3 class="text-base font-semibold text-slate-800">Удалить задачу?</h3>
+            <p class="text-sm text-slate-500 mt-1.5">
+                Задача
+                <span class="font-medium text-slate-700" x-text="deleteConfirm.idx !== null ? tasks[deleteConfirm.idx].name : ''"></span>
+                будет удалена без возможности восстановления.
+            </p>
+            <div class="mt-5 flex justify-end gap-2">
+                <button @click="deleteConfirm = { show: false, idx: null }"
+                        class="px-4 py-2 text-sm text-slate-600 font-medium rounded-lg hover:bg-slate-100 transition-colors">
+                    Отмена
+                </button>
+                <button @click="deleteTask()"
+                        class="inline-flex items-center gap-1.5 px-4 py-2 bg-rose-600 text-white text-sm font-medium rounded-lg hover:bg-rose-700 transition-colors">
+                    Удалить
+                </button>
+            </div>
+        </div>
     </div>
 
     {{-- ===== МОДАЛ ВЫПОЛНЕННОЙ ЗАДАЧИ (история, только чтение) ===== --}}
@@ -1321,6 +1375,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         now: Math.floor(Date.now() / 1000),
         clientFilter: 'all',
         dueFilter: 'all', // воронка по сроку: 'all' | 'today' | 'd3' | 'd7' | 'd30' (только вкладка «Список»)
+        statusFilter: 'all', // фильтр колонки «Действия»: 'all' | 'pending' | 'paused' | 'running' | 'rework'
         sortBy: null, // null | 'due' (срок/периодичность) | 'period' (отчётный период)
         sortDir: null, // null = исходный порядок | 'asc' | 'desc'
         visibleLimit: 20, // бесконечная прокрутка списка: сколько строк отрисовано (по 20)
@@ -1331,6 +1386,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
 
         showCreateModal: false,
         startConfirm: { show: false, idx: null },
+        deleteConfirm: { show: false, idx: null }, // модалка удаления произвольной задачи
         reviewReject: { show: false, idx: null, comment: '' }, // модалка «вернуть на доработку» (проверка главбухом)
         catalog: catalog || [],
         newTask: {
@@ -1343,9 +1399,10 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         creating: false,
         createError: '',
 
-        // Фильтр по компаниям: перечисляем ВСЕ закреплённые за сотрудником компании
-        // (allClients), а не только те, у кого сейчас есть задачи в наборе. Счётчик в
-        // скобках — активные (невыполненные) задачи компании, как их и рисует список.
+        // Фильтр по компаниям: только компании, по которым в списке реально есть задачи.
+        // allClients содержит и компании с ПУСТОЙ сметой (сотрудник — ответственный, но
+        // корневых позиций/БП нет), они дают 0 задач — в фильтре им не место, иначе выбор
+        // такой компании показывает пустой список. Счётчик — активные (невыполненные) задачи.
         get clientOptions() {
             const counts = {};
             this.tasks.forEach(t => {
@@ -1354,6 +1411,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             });
             return (this.allClients || [])
                 .map(c => ({ id: c.id, name: c.name, count: counts[c.id] || 0 }))
+                .filter(c => c.count > 0)
                 .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
         },
         // Активные (невыполненные) задачи всех компаний — для «Все компании (N)»,
@@ -1373,6 +1431,23 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             const horizon = { today: 0, d3: 3, d7: 7, d30: 30 }[this.dueFilter];
             const diff = this.dueDiffDays(task); // дней до срока; отрицательное = просрочено
             return diff !== null && diff <= horizon;
+        },
+
+        // Фильтр по состоянию из колонки «Действия»: не начаты, на паузе, в работе, на доработку.
+        matchesStatus(task) {
+            return this.statusFilter === 'all' || task.status === this.statusFilter;
+        },
+
+        // Счётчики по состоянию (для подписей в выпадающем списке фильтра). Считаем по активным
+        // строкам с учётом остальных фильтров (компания/срок) — как их рисует список.
+        get statusCounts() {
+            const c = { pending: 0, paused: 0, running: 0, rework: 0 };
+            for (const t of this.tasks) {
+                if (t.status === 'completed') continue;
+                if (!this.matchesFilter(t) || !this.matchesDue(t)) continue;
+                if (c[t.status] !== undefined) c[t.status]++;
+            }
+            return c;
         },
 
         // Матрица вкладки «Чеклист»: строки — компании, столбцы — задачи, ячейка — статус (только чтение).
@@ -1636,7 +1711,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         get visibleCount() {
             // Считаем только активные строки (без выполненных) — как их и рисует visibleTasks,
             // иначе сентинел бесконечной прокрутки не «догрузит» до реального конца списка.
-            return this.tasks.filter(t => t.status !== 'completed' && this.matchesFilter(t) && this.matchesDue(t)).length;
+            return this.tasks.filter(t => t.status !== 'completed' && this.matchesFilter(t) && this.matchesDue(t) && this.matchesStatus(t)).length;
         },
 
         // Окно бесконечной прокрутки: первые visibleLimit задач, прошедших фильтр,
@@ -1647,13 +1722,13 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         get visibleTasks() {
             // _taskVer в ключе: при закрытии задачи (status → completed) она сразу пропадает
             // из активного списка и уходит во вкладку «Выполненные» — кэш пересобирается.
-            const key = this.clientFilter + '|' + this.dueFilter + '|' + this.visibleLimit + '|' + this.sortBy + '|' + this.sortDir + '|' + this.tasks.length + '|' + this._taskVer;
+            const key = this.clientFilter + '|' + this.dueFilter + '|' + this.statusFilter + '|' + this.visibleLimit + '|' + this.sortBy + '|' + this.sortDir + '|' + this.tasks.length + '|' + this._taskVer;
             if (visibleCache.key !== key) {
                 const list = [];
                 for (let i = 0; i < this.tasks.length; i++) {
                     const task = this.tasks[i];
                     if (task.status === 'completed') continue; // выполненные — только во вкладке «Выполненные»
-                    if (!this.matchesFilter(task) || !this.matchesDue(task)) continue;
+                    if (!this.matchesFilter(task) || !this.matchesDue(task) || !this.matchesStatus(task)) continue;
                     if (list.length >= this.visibleLimit) break;
                     list.push({ task, idx: i });
                 }
@@ -1753,6 +1828,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             // Бесконечная прокрутка: при смене фильтра/сортировки начинаем показ заново с 20.
             this.$watch('clientFilter', () => { this.visibleLimit = 20; });
             this.$watch('dueFilter', () => { this.visibleLimit = 20; });
+            this.$watch('statusFilter', () => { this.visibleLimit = 20; });
             this.$watch('sortDir', () => { this.visibleLimit = 20; });
             this.$watch('sortBy', () => { this.visibleLimit = 20; });
             this.$nextTick(() => this._initInfiniteScroll());
@@ -1934,6 +2010,24 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             if (this.taskModalIdx !== null && this.tasks[this.taskModalIdx] === task) this.taskModalIdx = null;
             this.tasks = this.tasks.filter(t => t !== task);
             this._taskVer++; // состав задач изменился → кэши списка/чеклиста пересчитаются
+        },
+
+        // Удаление произвольной (внеплановой) задачи. Доступно только для is_custom —
+        // кнопка в модалке показывается лишь у таких задач.
+        async deleteTask() {
+            const idx = this.deleteConfirm.idx;
+            if (idx === null) return;
+            const task = this.tasks[idx];
+            this.deleteConfirm = { show: false, idx: null };
+            if (task.loading) return;
+            task.loading = true;
+            const data = await this.post(this.actionUrl(task, 'delete'));
+            task.loading = false;
+            if (data.success) {
+                if (this.taskModalIdx !== null && this.tasks[this.taskModalIdx] === task) this.taskModalIdx = null;
+                this.tasks = this.tasks.filter(t => t !== task);
+                this._taskVer++; // состав задач изменился → кэши списка/чеклиста пересчитаются
+            }
         },
 
         async ensureLog(idx) {
