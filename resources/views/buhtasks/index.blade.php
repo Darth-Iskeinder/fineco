@@ -562,7 +562,15 @@
                             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                         </span>
                         <div class="flex-1 min-w-0">
-                            <p class="text-sm font-medium text-slate-700 truncate" x-text="c.name"></p>
+                            <div class="flex items-center gap-2 min-w-0">
+                                <p class="text-sm font-medium text-slate-700 truncate" x-text="c.name"></p>
+                                {{-- Задача выполнена бухгалтером (этап 2): пометка исполнителя у главбуха --}}
+                                <span x-show="c.doer_name"
+                                      class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700 flex-shrink-0">
+                                    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                                    <span x-text="'бухгалтер: ' + c.doer_name"></span>
+                                </span>
+                            </div>
                             <p class="text-xs text-slate-400 truncate" x-text="c.client_name"></p>
                         </div>
                         {{-- Колонка «Комментарий»: заметка сотрудника (двойной клик — редактировать в деталях) --}}
@@ -1304,10 +1312,10 @@
                     </button>
                 </div>
 
-                {{-- Плашка «выполнено» --}}
+                {{-- Плашка «выполнено» (+ кто выполнил, если это задача бухгалтера) --}}
                 <div class="mt-4 flex items-center gap-2 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-2.5 text-sm text-emerald-700">
                     <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
-                    <span>Выполнено · <span x-text="fmtCompleted(completedItem.completed_at)"></span></span>
+                    <span>Выполнено · <span x-text="fmtCompleted(completedItem.completed_at)"></span><span x-show="completedItem.doer_name" x-text="' · бухгалтер: ' + completedItem.doer_name"></span></span>
                 </div>
 
                 {{-- Затрачено + периодичность --}}
@@ -1342,16 +1350,25 @@
                     </template>
                 </div>
 
-                {{-- Моя заметка: остаётся редактируемой и в выполненных (autosave по blur) --}}
-                <div class="mt-4 pt-4 border-t border-slate-100">
-                    <label class="block text-xs font-semibold text-indigo-500 uppercase tracking-wider mb-1.5">Моя заметка</label>
-                    <textarea rows="2"
-                              :value="completedItem.employee_comment"
-                              @change="saveCompletedComment(completedItem, $event.target.value)"
-                              placeholder="Нюансы по задаче — чтобы вспомнить позже"
-                              class="block w-full px-3 py-2 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 whitespace-pre-line"></textarea>
-                    <p class="text-xs text-slate-400 mt-1">Сохраняется автоматически</p>
-                </div>
+                {{-- Моя заметка: остаётся редактируемой и в выполненных (autosave по blur).
+                     Чужая задача (comment_url = null) — заметка бухгалтера только для чтения. --}}
+                <template x-if="completedItem.comment_url">
+                    <div class="mt-4 pt-4 border-t border-slate-100">
+                        <label class="block text-xs font-semibold text-indigo-500 uppercase tracking-wider mb-1.5">Моя заметка</label>
+                        <textarea rows="2"
+                                  :value="completedItem.employee_comment"
+                                  @change="saveCompletedComment(completedItem, $event.target.value)"
+                                  placeholder="Нюансы по задаче — чтобы вспомнить позже"
+                                  class="block w-full px-3 py-2 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 whitespace-pre-line"></textarea>
+                        <p class="text-xs text-slate-400 mt-1">Сохраняется автоматически</p>
+                    </div>
+                </template>
+                <template x-if="!completedItem.comment_url && completedItem.employee_comment">
+                    <div class="mt-4 pt-4 border-t border-slate-100">
+                        <label class="block text-xs font-semibold text-indigo-500 uppercase tracking-wider mb-1.5">Заметка бухгалтера</label>
+                        <p class="text-sm text-slate-600 whitespace-pre-line" x-text="completedItem.employee_comment"></p>
+                    </div>
+                </template>
 
                 {{-- Количество (план / факт) --}}
                 <template x-if="completedItem.allows_quantity">

@@ -539,7 +539,95 @@ class BuhTasksController extends Controller
                 'document_path'    => $a->document_path,
                 'children'         => [],
             ]);
+        // Выполненные задачи бухгалтеров по моим клиентам (этап 2): попадают в ту же вкладку
+        // «Выполненные» главбуха с пометкой исполнителя (doer_name). Заметка бухгалтера
+        // видна, но не редактируется (comment_url = null — чужая заметка).
+        $teamCompletedPlanned = collect();
+        $teamCompletedAdhoc   = collect();
+        if ($myClientIds->isNotEmpty()) {
+            $teamCompletedPlanned = BuhTaskLog::whereIn('client_id', $myClientIds)
+                ->where('employee_id', '!=', $employee->id)
+                ->where('status', 'completed')
+                ->whereNotNull('completed_at')
+                ->where('completed_at', '>=', $historyFrom)
+                ->with(['estimateItem.service', 'estimateItem.children.service', 'client:id,name'])
+                ->get()
+                ->map(function ($l) use ($teamLogs, $employeeNames) {
+                    $item    = $l->estimateItem;
+                    $service = $item?->service;
+
+                    return [
+                        'id'           => 'team_log_' . $l->id,
+                        'type'         => 'planned',
+                        'doer_name'    => $employeeNames->get($l->employee_id),
+                        'name'         => $item?->name ?? '—',
+                        'branch_label' => $item?->branch_label,
+                        'client_name'  => $l->client?->name ?? '—',
+                        'completed_at' => $l->completed_at->toIso8601String(),
+                        'employee_comment' => $l->employee_comment,
+                        'comment_url'      => null,
+                        'elapsed_seconds'   => $this->calcElapsed($l),
+                        'description'       => $service?->description,
+                        'comment'          => $service?->comment,
+                        'periodicity'      => $item?->periodicity,
+                        'allows_quantity'  => (bool) ($service?->allows_quantity),
+                        'quantity'         => (int) ($item?->quantity ?? 0),
+                        'actual_quantity'  => $l->actual_quantity,
+                        'requires_document' => (bool) ($service?->requires_document),
+                        'document_name'    => $l->document_name,
+                        'document_path'    => $l->document_path,
+                        'children'         => ($item?->children ?? collect())->map(function ($child) use ($teamLogs, $l) {
+                            $cSlotKey = $l->due_date ? '-' . $l->due_date->toDateString() : '';
+                            $childLog = $teamLogs->get($l->employee_id . '-' . $l->year . '-' . $l->month . '-' . $child->id . $cSlotKey);
+                            $cs = $child->service;
+
+                            return [
+                                'id'                => $child->id,
+                                'name'              => $child->name,
+                                'status'            => $childLog?->status ?? 'pending',
+                                'allows_quantity'   => (bool) ($cs?->allows_quantity),
+                                'quantity'          => (int) $child->quantity,
+                                'actual_quantity'   => $childLog?->actual_quantity,
+                                'requires_document' => (bool) ($cs?->requires_document),
+                                'document_name'     => $childLog?->document_name,
+                                'document_path'     => $childLog?->document_path,
+                            ];
+                        })->values()->toArray(),
+                    ];
+                });
+
+            $teamCompletedAdhoc = BuhAdhocTask::whereIn('client_id', $myClientIds)
+                ->where('employee_id', '!=', $employee->id)
+                ->where('status', 'completed')
+                ->whereNotNull('completed_at')
+                ->where('completed_at', '>=', $historyFrom)
+                ->with('client:id,name')
+                ->get()
+                ->map(fn ($a) => [
+                    'id'           => 'team_adhoc_' . $a->id,
+                    'type'         => 'adhoc',
+                    'doer_name'    => $employeeNames->get($a->employee_id),
+                    'name'         => $a->name,
+                    'client_name'  => $a->client?->name ?? '—',
+                    'completed_at' => $a->completed_at->toIso8601String(),
+                    'employee_comment' => $a->employee_comment,
+                    'comment_url'      => null,
+                    'elapsed_seconds'   => $this->calcElapsed($a),
+                    'description'       => $a->description,
+                    'comment'          => null,
+                    'periodicity'      => null,
+                    'allows_quantity'  => false,
+                    'quantity'         => 1,
+                    'actual_quantity'  => null,
+                    'requires_document' => false,
+                    'document_name'    => $a->document_name,
+                    'document_path'    => $a->document_path,
+                    'children'         => [],
+                ]);
+        }
+
         $completed = $completedPlanned->concat($completedAdhoc)
+            ->concat($teamCompletedPlanned)->concat($teamCompletedAdhoc)
             ->sortByDesc('completed_at')->values()->toArray();
 
         // «Сроки по клиентам» — уведомление (только чтение): просроченные и сегодняшние
