@@ -71,6 +71,14 @@ class EstimateController extends Controller
         $pricing  = new PricingCalculator();
         $responsibleId = $client->responsible_employee_id; // дефолтный исполнитель (главбух)
 
+        // Реальные исполнители сохранённых позиций + ответственный: имена нужны для честного
+        // отображения «на ком стоит задача» (в т.ч. read-only для тех, кто не может назначать).
+        $savedAssigneeIds = $tariffItems->pluck('assignee_id')->filter()->unique()->values();
+        $assigneeNames = Employee::whereIn(
+            'id',
+            $savedAssigneeIds->concat([$responsibleId])->filter()->unique()
+        )->pluck('full_name', 'id');
+
         // Индивидуальные расписания БП этого клиента (override дефолтов), keyed by service_id
         $overrides = $client->serviceSchedules()->get()->keyBy('service_id');
 
@@ -79,11 +87,13 @@ class EstimateController extends Controller
         // Сборка структуры БП с состоянием тоглов.
         // $savedItem — сохранённая строка сметы для этого БП и НО (или null);
         // $taxOfficeCode/$branchLabel заданы только для филиальных копий.
-        $buildBpData = function ($bp, $savedItem, $taxOfficeCode = null, $branchLabel = null) use ($isFirstLoad, $flagKeys, $overrides, $pricing, $responsibleId) {
+        $buildBpData = function ($bp, $savedItem, $taxOfficeCode = null, $branchLabel = null) use ($isFirstLoad, $flagKeys, $overrides, $pricing, $responsibleId, $assigneeNames) {
+            $assigneeId = $savedItem?->assignee_id ?? $responsibleId;
             $bpData = [
                 'service_id'      => $bp->id,
                 'row_key'         => $taxOfficeCode !== null ? $bp->id . ':' . $taxOfficeCode : (string) $bp->id,
-                'assignee_id'     => $savedItem?->assignee_id ?? $responsibleId,
+                'assignee_id'     => $assigneeId,
+                'assignee_name'   => $assigneeId ? $assigneeNames->get($assigneeId) : null,
                 'tax_office_code' => $taxOfficeCode,
                 'branch_label'    => $branchLabel,
                 'name'            => $bp->name,
@@ -266,12 +276,19 @@ class EstimateController extends Controller
         $canAssign = $this->canAssign($client);
         $assigneeOptions = [];
         if ($canAssign) {
+            // Кандидаты: активные бухгалтеры + ответственный. Плюс уже назначенные исполнители
+            // сохранённых позиций (даже если неактивны) — иначе селект не сможет показать,
+            // на ком реально стоит задача.
             $assigneeOptions = Employee::query()
-                ->where('status', Employee::STATUS_ACTIVE)
                 ->with('role')
-                ->where(function ($q) use ($client) {
-                    $q->whereHas('role', fn ($r) => $r->where('name', Role::ACCOUNTANT))
-                      ->orWhere('id', $client->responsible_employee_id);
+                ->where(function ($q) use ($client, $savedAssigneeIds) {
+                    $q->where(function ($q2) use ($client) {
+                        $q2->where('status', Employee::STATUS_ACTIVE)
+                           ->where(function ($q3) use ($client) {
+                               $q3->whereHas('role', fn ($r) => $r->where('name', Role::ACCOUNTANT))
+                                  ->orWhere('id', $client->responsible_employee_id);
+                           });
+                    })->orWhereIn('id', $savedAssigneeIds);
                 })
                 ->orderBy('full_name')
                 ->get()

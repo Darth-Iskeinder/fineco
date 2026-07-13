@@ -44,16 +44,28 @@
                     </button>
                 </div>
 
-                <!-- Исполнитель БП (виден только главбуху клиента) -->
-                <div class="flex items-center gap-1.5 mt-1.5" x-show="canAssign && bp.enabled">
+                <!-- Исполнитель БП: селектор — только главбуху клиента/админу, остальным — текст.
+                     :selected на опциях обязателен: опции рендерятся x-for ПОСЛЕ привязки x-model,
+                     без него браузер молча показывает первую опцию вместо реального значения. -->
+                <div class="flex items-center gap-1.5 mt-1.5" x-show="bp.enabled">
                     <svg class="w-3.5 h-3.5 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
                     <span class="text-xs text-slate-500">Исполнитель:</span>
-                    <select x-model.number="bp.assignee_id" @click.stop
-                            class="text-xs border border-slate-200 rounded-md pl-1.5 pr-6 py-0.5 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400">
-                        <template x-for="opt in assigneeOptions" :key="opt.id">
-                            <option :value="opt.id" x-text="opt.full_name + (opt.role ? ' · ' + opt.role : '')"></option>
-                        </template>
-                    </select>
+                    <template x-if="canAssign">
+                        <select x-model.number="bp.assignee_id" @click.stop
+                                class="text-xs border rounded-md pl-1.5 pr-6 py-0.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                :class="bp.assignee_id ? 'border-slate-200 bg-white' : 'border-amber-300 bg-amber-50 text-amber-700'">
+                            <option value="" disabled :selected="!bp.assignee_id">— не назначен —</option>
+                            <template x-for="opt in assigneeOptions" :key="opt.id">
+                                <option :value="opt.id" :selected="opt.id === bp.assignee_id"
+                                        x-text="opt.full_name + (opt.role ? ' · ' + opt.role : '')"></option>
+                            </template>
+                        </select>
+                    </template>
+                    <template x-if="!canAssign">
+                        <span class="text-xs font-medium"
+                              :class="bp.assignee_id ? 'text-slate-700' : 'text-amber-600'"
+                              x-text="bp.assignee_name || 'не назначен'"></span>
+                    </template>
                 </div>
             </div>
 
