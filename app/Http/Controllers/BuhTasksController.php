@@ -94,6 +94,25 @@ class BuhTasksController extends Controller
             ->with('client')
             ->get();
 
+        // === Задачи бухгалтеров (этап 1): клиенты, где я ответственный (главбух) ===
+        // Для позиций моих клиентов, назначенных НЕ на меня, собираем отдельный список
+        // «что сейчас у бухгалтера» (не начатые/в работе/на доработке) — вкладка главбуха.
+        $myClientIds = Client::where('responsible_employee_id', $employee->id)->pluck('id');
+
+        // Логи бухгалтеров по моим клиентам (статусы их задач), ключ с employee_id —
+        // у одной позиции-месяца могут быть логи разных исполнителей после переназначения.
+        $teamLogs = $myClientIds->isNotEmpty()
+            ? BuhTaskLog::whereIn('client_id', $myClientIds)
+                ->where('employee_id', '!=', $employee->id)
+                ->where('year', '>=', $today->subMonths(6)->year)
+                ->get()
+                ->keyBy(fn ($l) => $l->employee_id . '-' . $l->year . '-' . $l->month . '-' . $l->estimate_item_id
+                    . ($l->due_date ? '-' . $l->due_date->toDateString() : ''))
+            : collect();
+
+        $employeeNames = Employee::pluck('full_name', 'id');
+        $teamTasks = [];
+
         // Предзагрузка БП по сметным позициям (нужны их методы расписания)
         $serviceIds = $clients
             ->flatMap(fn ($c) => $c->estimates->first()?->rootItems ?? collect())
@@ -127,9 +146,13 @@ class BuhTasksController extends Controller
 
             foreach ($items as $item) {
                 // Исполнитель позиции: assignee_id, при пустом — ответственный клиента.
-                // Показываем в списке сотрудника только его БП.
-                $effectiveAssignee = $item->assignee_id ?? $client->responsible_employee_id;
-                if ((int) $effectiveAssignee !== $employee->id) {
+                // Свои БП идут в основной список; БП моих клиентов, назначенные на
+                // бухгалтеров, — во вкладку «задачи бухгалтеров» ($teamTasks).
+                $effectiveAssignee = (int) ($item->assignee_id ?? $client->responsible_employee_id);
+                $isMine = $effectiveAssignee === $employee->id;
+                $isTeam = !$isMine && (int) $client->responsible_employee_id === $employee->id
+                    && $effectiveAssignee !== 0;
+                if (!$isMine && !$isTeam) {
                     continue;
                 }
 
@@ -155,6 +178,39 @@ class BuhTasksController extends Controller
                     // Слот: для weekly различаем вхождения по дате; для остальных — помесячно (пусто).
                     $slot    = $kind === 'weekly' ? $dueDateStr : null;
                     $slotKey = $slot ? '-' . $slot : '';
+
+                    // Задача бухгалтера: во вкладку главбуха попадает только то, что сейчас
+                    // «у бухгалтера» — не начатое, в работе, на паузе или на доработке.
+                    // Выполненные — этап 2 (вкладка «Выполненные»), review уже в основном списке.
+                    if ($isTeam) {
+                        $tLog    = $teamLogs->get($effectiveAssignee . '-' . $wy . '-' . $wm . '-' . $item->id . $slotKey);
+                        $tStatus = $tLog?->status ?? 'pending';
+                        if (!in_array($tStatus, ['pending', 'running', 'paused', 'rework'], true)) {
+                            continue;
+                        }
+                        if ($wy * 12 + $wm > $curMonthIdx) {
+                            continue; // будущие месяцы скрываем, как и в основном списке
+                        }
+                        $teamTasks[] = [
+                            'uid'              => 'team_' . $item->id . '_' . $wy . '_' . $wm . ($slot ? '_' . $slot : ''),
+                            'type'             => 'planned',
+                            'client_id'        => $client->id,
+                            'client_name'      => $client->name,
+                            'year'             => $wy,
+                            'month'            => $wm,
+                            'name'             => $item->name,
+                            'branch_label'     => $item->branch_label,
+                            'periodicity'      => $item->periodicity,
+                            'reporting_period' => Service::reportingPeriodLabel($kind, $dueObj, $today->year),
+                            'due_date'         => $dueDateStr,
+                            'status'           => $tStatus,
+                            'doer_id'          => $effectiveAssignee,
+                            'doer_name'        => $employeeNames->get($effectiveAssignee),
+                            'employee_comment' => $tLog?->employee_comment,
+                        ];
+                        continue;
+                    }
+
                     $log = $logs->get($wy . '-' . $wm . '-' . $item->id . $slotKey);
                     $status = $log?->status ?? 'pending';
 
@@ -277,12 +333,51 @@ class BuhTasksController extends Controller
             ];
         }
 
+        // Внеплановые задачи бухгалтеров по моим клиентам — в ту же вкладку главбуха.
+        if ($myClientIds->isNotEmpty()) {
+            $teamAdhocs = BuhAdhocTask::whereIn('client_id', $myClientIds)
+                ->where('employee_id', '!=', $employee->id)
+                ->whereIn('status', ['pending', 'running', 'paused', 'rework'])
+                ->with('client:id,name')
+                ->get();
+            foreach ($teamAdhocs as $a) {
+                $adhocDate = $a->due_day
+                    ? CarbonImmutable::create($a->year, $a->month, min((int) $a->due_day, CarbonImmutable::create($a->year, $a->month, 1)->daysInMonth))
+                    : null;
+                $teamTasks[] = [
+                    'uid'              => 'team_adhoc_' . $a->id,
+                    'type'             => 'adhoc',
+                    'is_custom'        => true,
+                    'client_id'        => $a->client_id,
+                    'client_name'      => $a->client?->name,
+                    'year'             => $a->year,
+                    'month'            => $a->month,
+                    'name'             => $a->name,
+                    'branch_label'     => null,
+                    'periodicity'      => null,
+                    'reporting_period' => null,
+                    'due_date'         => $adhocDate?->toDateString(),
+                    'status'           => $a->status,
+                    'doer_id'          => $a->employee_id,
+                    'doer_name'        => $employeeNames->get($a->employee_id),
+                    'employee_comment' => $a->employee_comment,
+                ];
+            }
+        }
+
+        // Бухгалтеры для фильтра вкладки (только те, у кого сейчас есть задачи)
+        $teamMembers = collect($teamTasks)
+            ->map(fn ($t) => ['id' => $t['doer_id'], 'name' => $t['doer_name']])
+            ->unique('id')
+            ->sortBy('name')
+            ->values()
+            ->toArray();
+
         // === Проверка главбуха (шаг 7.1): задачи на проверке от бухгалтеров МОИХ клиентов ===
         // Главбух (клиент, где он responsible_employee_id) видит в своём же списке задачи в статусе
         // review, сделанные НЕ им самим, с пометкой «от бухгалтера». Свои review-задачи уже попали
         // в $tasks выше как обычные строки исполнителя (employee_id == $employee->id), поэтому здесь
         // их исключаем — иначе задвоятся. Действия «принять/вернуть» появятся отдельным шагом.
-        $myClientIds = Client::where('responsible_employee_id', $employee->id)->pluck('id');
         if ($myClientIds->isNotEmpty()) {
             $reviewPlanned = BuhTaskLog::where('status', 'review')
                 ->whereIn('client_id', $myClientIds)
@@ -480,7 +575,7 @@ class BuhTasksController extends Controller
             ->map(fn ($s) => ['id' => $s->id, 'name' => $s->name])
             ->values()->toArray();
 
-        return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'reminders', 'reminderCounts', 'completed', 'completedDays', 'employees', 'catalog'));
+        return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'reminders', 'reminderCounts', 'completed', 'completedDays', 'employees', 'catalog', 'teamTasks', 'teamMembers'));
     }
 
     // =============================================

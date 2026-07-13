@@ -72,7 +72,7 @@
     </template>
 </div>
 
-<div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($completed) }}, {{ json_encode($employees) }}, {{ $employee->id }}, {{ json_encode($catalog) }})" x-cloak>
+<div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($completed) }}, {{ json_encode($employees) }}, {{ $employee->id }}, {{ json_encode($catalog) }}, {{ json_encode($teamTasks) }}, {{ json_encode($teamMembers) }})" x-cloak>
 
     {{-- Шапка --}}
     <div class="flex items-center justify-between mb-2">
@@ -111,6 +111,17 @@
                     <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                     Выполненные
                 </button>
+                {{-- Вкладка главбуха: текущие задачи его бухгалтеров. Видна только когда такие задачи есть. --}}
+                <template x-if="teamTasks.length > 0">
+                    <button @click="viewMode = 'team'"
+                            :class="viewMode === 'team' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'"
+                            class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                        Задачи бухгалтеров
+                        <span class="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-600"
+                              x-text="teamTasks.length"></span>
+                    </button>
+                </template>
             </div>
         </div>
     </div>
@@ -157,8 +168,19 @@
         <span>Показаны задачи текущего месяца и все просроченные. Выполненные исчезают из списка на следующий день — их история во вкладке «Выполненные».</span>
     </div>
 
+    {{-- Фильтр вкладки «Задачи бухгалтеров»: по исполнителю --}}
+    <div x-show="viewMode === 'team'" class="flex items-center gap-3 flex-wrap mb-4">
+        <select x-model="teamFilter"
+                class="px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+            <option value="all" x-text="'Все бухгалтеры (' + teamTasks.length + ')'"></option>
+            <template x-for="m in teamMembers" :key="m.id">
+                <option :value="String(m.id)" x-text="m.name + ' (' + teamCountFor(m.id) + ')'"></option>
+            </template>
+        </select>
+    </div>
+
     {{-- Нет задач --}}
-    <div x-show="viewMode !== 'completed' && tasks.length === 0"
+    <div x-show="viewMode !== 'completed' && viewMode !== 'team' && tasks.length === 0"
          class="bg-white rounded-2xl border border-slate-200/50 shadow-sm px-6 py-16 text-center">
         <div class="w-14 h-14 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg class="w-7 h-7 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
@@ -172,7 +194,7 @@
         Нет задач по выбранным фильтрам.
     </div>
 
-    <div x-show="viewMode === 'completed' || (viewMode === 'checklist' && tasks.length > 0) || (viewMode === 'list' && visibleCount > 0)"
+    <div x-show="viewMode === 'completed' || viewMode === 'team' || (viewMode === 'checklist' && tasks.length > 0) || (viewMode === 'list' && visibleCount > 0)"
          class="bg-white rounded-2xl border border-slate-200/50 shadow-sm overflow-hidden">
 
         {{-- ===== РЕЖИМ СПИСОК ===== --}}
@@ -575,6 +597,67 @@
                         Вперёд
                     </button>
                 </div>
+            </div>
+        </div>
+        </template>
+
+        {{-- ===== РЕЖИМ «ЗАДАЧИ БУХГАЛТЕРОВ» (только главбух) ===== --}}
+        <template x-if="viewMode === 'team'">
+        <div>
+            <div class="px-6 py-3 border-b border-slate-100 flex items-center gap-2 text-sm text-slate-500 bg-slate-50/60">
+                <svg class="w-4 h-4 flex-shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <span>Текущие задачи ваших бухгалтеров по вашим клиентам — не начатые, в работе и на доработке. Выполненное бухгалтером закрывается у него, задачи «на проверке» — в вашем основном списке.</span>
+            </div>
+            <template x-if="filteredTeamTasks.length === 0">
+                <div class="px-6 py-10 text-center text-sm text-slate-400">По выбранному фильтру задач нет.</div>
+            </template>
+            <div class="divide-y divide-slate-100">
+                <template x-for="t in filteredTeamTasks" :key="t.uid">
+                    <div class="flex items-center gap-3 px-6 py-3">
+                        {{-- Статус-иконка --}}
+                        <span class="flex-shrink-0 w-8 h-8 inline-flex items-center justify-center rounded-full"
+                              :class="{
+                                  'bg-slate-100 text-slate-400':   t.status === 'pending',
+                                  'bg-emerald-50 text-emerald-500': t.status === 'running',
+                                  'bg-amber-50 text-amber-500':     t.status === 'paused',
+                                  'bg-rose-50 text-rose-500':       t.status === 'rework',
+                              }">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        </span>
+
+                        <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <p class="text-sm font-medium text-slate-700" x-text="t.name"></p>
+                                <span x-show="t.branch_label" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700" x-text="t.branch_label"></span>
+                                <span x-show="t.is_custom" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-sky-100 text-sky-700">вручную</span>
+                            </div>
+                            <p class="text-xs text-slate-400 truncate">
+                                <span x-text="t.client_name"></span><span x-show="t.reporting_period" x-text="' · ' + t.reporting_period"></span>
+                            </p>
+                        </div>
+
+                        {{-- Исполнитель --}}
+                        <span class="hidden sm:inline-flex items-center gap-1.5 text-xs text-slate-500 whitespace-nowrap">
+                            <svg class="w-3.5 h-3.5 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                            <span x-text="t.doer_name || '—'"></span>
+                        </span>
+
+                        {{-- Срок --}}
+                        <span class="text-xs whitespace-nowrap"
+                              :class="t.due_date && t.due_date < todayStr && t.status !== 'completed' ? 'text-rose-500 font-medium' : 'text-slate-400'"
+                              x-text="t.due_date ? 'до ' + fmtDue(t.due_date) : 'без срока'"></span>
+
+                        {{-- Статус --}}
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap"
+                              :class="{
+                                  'bg-slate-100 text-slate-500':    t.status === 'pending',
+                                  'bg-emerald-100 text-emerald-700': t.status === 'running',
+                                  'bg-amber-100 text-amber-700':     t.status === 'paused',
+                                  'bg-rose-100 text-rose-700':       t.status === 'rework',
+                              }"
+                              x-text="{pending: 'Не начата', running: 'В работе', paused: 'Пауза', rework: 'На доработке'}[t.status] || t.status"></span>
+                    </div>
+                </template>
             </div>
         </div>
         </template>
@@ -1340,7 +1423,7 @@
 </div>
 
 <script>
-function buhTasks(initialTasks, year, month, allClients, completed, employees, currentEmployeeId, catalog) {
+function buhTasks(initialTasks, year, month, allClients, completed, employees, currentEmployeeId, catalog, teamTasks, teamMembers) {
     // File-объекты держим вне реактивного state — Alpine оборачивает объекты в Proxy,
     // что ломает внутренние методы File/Blob при передаче в FormData
     const pendingFiles = new Map();
@@ -1374,6 +1457,11 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         ticker: null,
         now: Math.floor(Date.now() / 1000),
         clientFilter: 'all',
+        // Вкладка «Задачи бухгалтеров» (только главбух): текущие задачи его бухгалтеров
+        teamTasks: teamTasks || [],
+        teamMembers: teamMembers || [],
+        teamFilter: 'all', // фильтр по бухгалтеру: 'all' | employee_id
+        todayStr: new Date().toLocaleDateString('en-CA'), // YYYY-MM-DD в локальной зоне (подсветка просрочки)
         dueFilter: 'all', // воронка по сроку: 'all' | 'today' | 'd3' | 'd7' | 'd30' (только вкладка «Список»)
         statusFilter: 'all', // фильтр колонки «Действия»: 'all' | 'pending' | 'paused' | 'running' | 'rework'
         sortBy: null, // null | 'due' (срок/периодичность) | 'period' (отчётный период)
@@ -1807,6 +1895,17 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             if (!dateStr) return '';
             const d = new Date(dateStr + 'T00:00:00');
             return d.getDate() + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + d.getFullYear();
+        },
+
+        // Вкладка «Задачи бухгалтеров»: фильтр по исполнителю + сортировка по сроку (без срока — в конец)
+        get filteredTeamTasks() {
+            const list = this.teamFilter === 'all'
+                ? this.teamTasks
+                : this.teamTasks.filter(t => String(t.doer_id) === this.teamFilter);
+            return [...list].sort((a, b) => (a.due_date || '9999') < (b.due_date || '9999') ? -1 : 1);
+        },
+        teamCountFor(id) {
+            return this.teamTasks.filter(t => t.doer_id === id).length;
         },
 
         // Дата+время выполнения для истории: «3.06.2026, 14:30»
