@@ -43,9 +43,25 @@ class BuhTasksController extends Controller
                 ->whereNull('parent_id')
                 ->where('assignee_id', $employee->id));
 
-        // Клиенты с задачами этого сотрудника, с непустой сметой (одна на клиента)
+        // Мои клиенты (я — ответственный/главбух) и «мои бухгалтеры» — назначены хоть
+        // на один БП моих клиентов. Главбух видит ВСЕ текущие задачи своих бухгалтеров:
+        // и по чужим клиентам, и внеплановые без клиента (в т.ч. самозаведённые).
+        $myClientIds = Client::where('responsible_employee_id', $employee->id)->pluck('id');
+        $myAccountantIds = $myClientIds->isNotEmpty()
+            ? EstimateItem::whereNull('parent_id')
+                ->whereNotNull('assignee_id')
+                ->where('assignee_id', '!=', $employee->id)
+                ->whereHas('estimate', fn ($q) => $q->whereIn('client_id', $myClientIds))
+                ->pluck('assignee_id')->unique()->values()
+            : collect();
+
+        // Клиенты с задачами этого сотрудника ИЛИ его бухгалтеров, с непустой сметой (одна на клиента)
         $clients = Client::query()
-            ->where($assignedToEmployee)
+            ->where(fn ($q) => $q
+                ->where($assignedToEmployee)
+                ->orWhereHas('estimates.rootItems', fn ($i) => $i
+                    ->whereNull('parent_id')
+                    ->whereIn('assignee_id', $myAccountantIds)))
             ->with([
                 'serviceSchedules',
                 'estimates' => fn($q) => $q
@@ -94,16 +110,17 @@ class BuhTasksController extends Controller
             ->with('client')
             ->get();
 
-        // === Задачи бухгалтеров (этап 1): клиенты, где я ответственный (главбух) ===
-        // Для позиций моих клиентов, назначенных НЕ на меня, собираем отдельный список
-        // «что сейчас у бухгалтера» (не начатые/в работе/на доработке) — вкладка главбуха.
-        $myClientIds = Client::where('responsible_employee_id', $employee->id)->pluck('id');
+        // === Задачи бухгалтеров (этап 1): вкладка главбуха ===
+        // Общий охват «команды»: задачи по моим клиентам (кто бы ни делал, кроме меня)
+        // + любые задачи моих бухгалтеров. Применяется к логам и внеплановым.
+        $teamScope = fn ($q) => $q->whereIn('client_id', $myClientIds)
+            ->orWhereIn('employee_id', $myAccountantIds);
 
-        // Логи бухгалтеров по моим клиентам (статусы их задач), ключ с employee_id —
+        // Логи бухгалтеров (статусы их задач), ключ с employee_id —
         // у одной позиции-месяца могут быть логи разных исполнителей после переназначения.
         $teamLogs = $myClientIds->isNotEmpty()
-            ? BuhTaskLog::whereIn('client_id', $myClientIds)
-                ->where('employee_id', '!=', $employee->id)
+            ? BuhTaskLog::where('employee_id', '!=', $employee->id)
+                ->where($teamScope)
                 ->where('year', '>=', $today->subMonths(6)->year)
                 ->get()
                 ->keyBy(fn ($l) => $l->employee_id . '-' . $l->year . '-' . $l->month . '-' . $l->estimate_item_id
@@ -146,12 +163,13 @@ class BuhTasksController extends Controller
 
             foreach ($items as $item) {
                 // Исполнитель позиции: assignee_id, при пустом — ответственный клиента.
-                // Свои БП идут в основной список; БП моих клиентов, назначенные на
-                // бухгалтеров, — во вкладку «задачи бухгалтеров» ($teamTasks).
+                // Свои БП идут в основной список; во вкладку «задачи бухгалтеров» — БП моих
+                // клиентов (кто бы ни делал) и БП моих бухгалтеров по любым клиентам.
                 $effectiveAssignee = (int) ($item->assignee_id ?? $client->responsible_employee_id);
                 $isMine = $effectiveAssignee === $employee->id;
-                $isTeam = !$isMine && (int) $client->responsible_employee_id === $employee->id
-                    && $effectiveAssignee !== 0;
+                $isTeam = !$isMine && $effectiveAssignee !== 0
+                    && ((int) $client->responsible_employee_id === $employee->id
+                        || $myAccountantIds->contains($effectiveAssignee));
                 if (!$isMine && !$isTeam) {
                     continue;
                 }
@@ -333,10 +351,11 @@ class BuhTasksController extends Controller
             ];
         }
 
-        // Внеплановые задачи бухгалтеров по моим клиентам — в ту же вкладку главбуха.
+        // Внеплановые задачи команды — в ту же вкладку главбуха: по моим клиентам
+        // (кто бы ни делал) + любые задачи моих бухгалтеров, включая без клиента.
         if ($myClientIds->isNotEmpty()) {
-            $teamAdhocs = BuhAdhocTask::whereIn('client_id', $myClientIds)
-                ->where('employee_id', '!=', $employee->id)
+            $teamAdhocs = BuhAdhocTask::where('employee_id', '!=', $employee->id)
+                ->where($teamScope)
                 ->whereIn('status', ['pending', 'running', 'paused', 'rework'])
                 ->with('client:id,name')
                 ->get();
@@ -545,8 +564,8 @@ class BuhTasksController extends Controller
         $teamCompletedPlanned = collect();
         $teamCompletedAdhoc   = collect();
         if ($myClientIds->isNotEmpty()) {
-            $teamCompletedPlanned = BuhTaskLog::whereIn('client_id', $myClientIds)
-                ->where('employee_id', '!=', $employee->id)
+            $teamCompletedPlanned = BuhTaskLog::where('employee_id', '!=', $employee->id)
+                ->where($teamScope)
                 ->where('status', 'completed')
                 ->whereNotNull('completed_at')
                 ->where('completed_at', '>=', $historyFrom)
@@ -596,8 +615,8 @@ class BuhTasksController extends Controller
                     ];
                 });
 
-            $teamCompletedAdhoc = BuhAdhocTask::whereIn('client_id', $myClientIds)
-                ->where('employee_id', '!=', $employee->id)
+            $teamCompletedAdhoc = BuhAdhocTask::where('employee_id', '!=', $employee->id)
+                ->where($teamScope)
                 ->where('status', 'completed')
                 ->whereNotNull('completed_at')
                 ->where('completed_at', '>=', $historyFrom)
