@@ -5,6 +5,7 @@ use App\Http\Controllers\BuhSmetaController;
 use App\Http\Controllers\BuhTasksController;
 use App\Http\Controllers\ClientController;
 use App\Http\Controllers\ClientServiceScheduleController;
+use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\EstimateController;
 use App\Http\Controllers\SettingsController;
@@ -16,6 +17,11 @@ Route::get('/', function () {
 
     if (!$employee) {
         return redirect()->route('login');
+    }
+
+    // Руководитель живёт вне системы модулей — сразу на свой дашборд
+    if ($employee->isManager()) {
+        return redirect()->route('dashboard.index');
     }
 
     // Модули в порядке приоритета (hasAccessToModule уже возвращает true для admin)
@@ -42,6 +48,11 @@ Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 
 // Защищённые маршруты (требуют аутентификации)
 Route::middleware('auth:employee')->group(function () {
+    // Страница руководителя (только роль manager, вне системы модулей)
+    Route::prefix('dashboard')->name('dashboard.')->middleware('manager')->group(function () {
+        Route::get('/', [DashboardController::class, 'index'])->name('index');
+    });
+
     // Модуль сотрудников
     Route::prefix('employees')->name('employees.')->middleware('module:employees')->group(function () {
         Route::get('/', [EmployeeController::class, 'index'])->name('index');

@@ -22,7 +22,8 @@ class EmployeeController extends Controller
         return view('employees.index', [
             'employees' => $employees,
             'search' => $request->search,
-            'roles' => Role::all(),
+            // Роль «Руководитель» назначается только напрямую в базе — в списках админки её не показываем
+            'roles' => Role::where('name', '!=', Role::MANAGER)->get(),
             'modules' => Module::active()->ordered()->get(),
         ]);
     }
@@ -33,7 +34,7 @@ class EmployeeController extends Controller
 
         return view('employees.show', [
             'employee' => $employee,
-            'roles' => Role::all(),
+            'roles' => Role::where('name', '!=', Role::MANAGER)->get(),
             'modules' => Module::active()->ordered()->get(),
         ]);
     }

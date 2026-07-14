@@ -11,7 +11,7 @@ class BuhAdhocTask extends Model
         'employee_id', 'client_id', 'service_id', 'name', 'description', 'cost',
         'year', 'month', 'due_day', 'status', 'requires_review',
         'started_at', 'resumed_at', 'paused_seconds', 'completed_at',
-        'review_comment', 'employee_comment', 'review_started_at', 'reviewed_at', 'reviewed_by',
+        'review_comment', 'rework_count', 'employee_comment', 'review_started_at', 'reviewed_at', 'reviewed_by',
         'document_path', 'document_name',
     ];
 
@@ -25,6 +25,7 @@ class BuhAdhocTask extends Model
         'review_started_at' => 'datetime',
         'reviewed_at'       => 'datetime',
         'paused_seconds'    => 'integer',
+        'rework_count'      => 'integer',
     ];
 
     public function employee(): BelongsTo

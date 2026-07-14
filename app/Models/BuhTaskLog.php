@@ -9,7 +9,7 @@ class BuhTaskLog extends Model
 {
     protected $fillable = [
         'employee_id', 'client_id', 'estimate_item_id',
-        'year', 'month', 'due_date', 'status', 'review_comment', 'employee_comment',
+        'year', 'month', 'due_date', 'status', 'review_comment', 'rework_count', 'employee_comment',
         'started_at', 'resumed_at', 'paused_seconds', 'completed_at',
         'reviewed_at', 'reviewed_by', 'review_started_at', 'actual_quantity',
         'document_path', 'document_name',
@@ -24,6 +24,7 @@ class BuhTaskLog extends Model
         'review_started_at' => 'datetime',
         'paused_seconds' => 'integer',
         'actual_quantity' => 'integer',
+        'rework_count' => 'integer',
     ];
 
     public function employee(): BelongsTo

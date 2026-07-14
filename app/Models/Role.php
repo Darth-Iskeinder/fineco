@@ -13,6 +13,7 @@ class Role extends Model
     const AUDITOR = 'auditor';
     const HEAD_ACCOUNTANT = 'head_accountant';
     const ACCOUNTANT = 'accountant';
+    const MANAGER = 'manager';
 
     protected $fillable = [
         'name',
@@ -43,5 +44,10 @@ class Role extends Model
     public function isAuditor(): bool
     {
         return $this->name === self::AUDITOR;
+    }
+
+    public function isManager(): bool
+    {
+        return $this->name === self::MANAGER;
     }
 }

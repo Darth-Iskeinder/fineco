@@ -1129,6 +1129,7 @@ class BuhTasksController extends Controller
         $log->update([
             'status'         => 'rework',
             'review_comment' => $validated['comment'],
+            'rework_count'   => $log->rework_count + 1,
             'reviewed_at'    => now(),
             'reviewed_by'    => auth('employee')->id(),
         ]);
@@ -1164,6 +1165,7 @@ class BuhTasksController extends Controller
         $task->update([
             'status'         => 'rework',
             'review_comment' => $validated['comment'],
+            'rework_count'   => $task->rework_count + 1,
             'reviewed_at'    => now(),
             'reviewed_by'    => auth('employee')->id(),
         ]);

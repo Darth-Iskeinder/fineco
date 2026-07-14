@@ -127,6 +127,22 @@
                     @endif
                 @endforeach
 
+                {{-- Дашборд руководителя: вне системы модулей, виден только роли manager --}}
+                @if($currentEmployee && $currentEmployee->isManager())
+                    <a href="{{ route('dashboard.index') }}"
+                       class="flex items-center px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200
+                              @if(request()->routeIs('dashboard.*'))
+                                  bg-gradient-to-r from-violet-500 to-indigo-600 text-white shadow-lg shadow-indigo-500/25
+                              @else
+                                  text-slate-600 hover:bg-slate-100 hover:text-slate-900
+                              @endif">
+                        <svg class="w-5 h-5 mr-3 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                        </svg>
+                        Руководитель
+                    </a>
+                @endif
+
                 @if($currentEmployee && $currentEmployee->hasAccessToModule('settings'))
                     <div class="pt-4 mt-4 border-t border-slate-100">
                         <p class="px-4 mb-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">Администрирование</p>

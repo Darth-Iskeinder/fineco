@@ -157,6 +157,11 @@ class Employee extends Authenticatable
         return $this->role?->isAuditor() ?? false;
     }
 
+    public function isManager(): bool
+    {
+        return $this->role?->isManager() ?? false;
+    }
+
     public function isActive(): bool
     {
         return $this->status === self::STATUS_ACTIVE;
@@ -199,7 +204,8 @@ class Employee extends Authenticatable
 
     public function hasAccessToModule(string $moduleName): bool
     {
-        if ($this->isAdmin()) {
+        // Руководитель, как и админ, имеет полный доступ ко всем модулям
+        if ($this->isAdmin() || $this->isManager()) {
             return true;
         }
 
