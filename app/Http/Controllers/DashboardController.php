@@ -261,7 +261,8 @@ class DashboardController extends Controller
         unset($row);
         uasort($byEmployee, fn ($x, $y) => [$y['overdue'], $y['total'], $x['name']] <=> [$x['overdue'], $x['total'], $y['name']]);
 
-        // сом/час = смета месяца ÷ часы по таймерам; без времени или без сметы — null («—»)
+        // сом/час = смета месяца ÷ часы по таймерам; без времени или без сметы — null («—»).
+        // Колонки «Смета, сом» и «сом/час» пока скрыты в таблице (решение 15.07.2026), расчёт оставлен
         foreach ($byCompany as &$row) {
             $row['rate'] = ($row['estimate'] !== null && $row['elapsed'] > 0)
                 ? (int) round($row['estimate'] / ($row['elapsed'] / 3600))
@@ -269,14 +270,24 @@ class DashboardController extends Controller
             $row['time'] = $row['elapsed'] > 0 ? $this->formatDuration($row['elapsed']) : null;
         }
         unset($row);
-        // Проблемные сверху: просрочка, затем самые «дешёвые» часы (низкий сом/час), затем имя
+        // Проблемные сверху: просрочка, затем объём задач месяца, затем имя
         uasort($byCompany, fn ($x, $y) =>
-            [$y['overdue'], $x['rate'] ?? PHP_INT_MAX, $x['name']] <=> [$x['overdue'], $y['rate'] ?? PHP_INT_MAX, $y['name']]);
+            [$y['overdue'], $y['total'], $x['name']] <=> [$x['overdue'], $x['total'], $y['name']]);
 
-        // Топ компаний по затраченному времени месяца — для горизонтальных баров
-        $timeTop = array_values(array_filter($byCompany, fn ($r) => $r['elapsed'] > 0));
-        usort($timeTop, fn ($x, $y) => $y['elapsed'] <=> $x['elapsed']);
-        $timeTop = array_slice($timeTop, 0, 7);
+        // Компании по затраченному времени месяца — для горизонтальных баров:
+        // топ-7 отдельными строками, остальные одной строкой «Остальные»
+        $timeAll = array_values(array_filter($byCompany, fn ($r) => $r['elapsed'] > 0));
+        usort($timeAll, fn ($x, $y) => $y['elapsed'] <=> $x['elapsed']);
+        $timeTop  = array_slice($timeAll, 0, 7);
+        $timeRest = null;
+        if (count($timeAll) > 7) {
+            $restElapsed = array_sum(array_column(array_slice($timeAll, 7), 'elapsed'));
+            $timeRest = [
+                'count'   => count($timeAll) - 7,
+                'elapsed' => $restElapsed,
+                'time'    => $this->formatDuration($restElapsed),
+            ];
+        }
 
         $prev = $monthStart->subMonth();
         $next = $monthStart->addMonth();
@@ -297,6 +308,7 @@ class DashboardController extends Controller
             'byEmployee'   => $byEmployee,
             'byCompany'    => $byCompany,
             'timeTop'      => $timeTop,
+            'timeRest'     => $timeRest,
             'timeMax'      => $timeTop[0]['elapsed'] ?? 0,
             'discipline'   => array_values($discipline),
             'disciplineMax' => max(1, ...array_map(

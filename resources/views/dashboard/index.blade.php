@@ -161,16 +161,17 @@
                 <p class="text-xs text-slate-400 mt-1">Все задачи выполняются в срок</p>
             </div>
         @else
-            <div class="overflow-x-auto px-2 pb-2 pt-2">
+            {{-- Высота ограничена: длинный список скроллится внутри карточки и не растягивает страницу --}}
+            <div class="overflow-x-auto overflow-y-auto max-h-[420px] px-2 pb-2 pt-2">
                 <table class="w-full text-sm">
                     <thead>
                         <tr class="text-left">
-                            <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200">Задача</th>
-                            <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200">Компания</th>
-                            <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200">Исполнитель</th>
-                            <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right">Срок</th>
-                            <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right">Дней</th>
-                            <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200">Статус</th>
+                            <th class="sticky top-0 bg-white px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200">Задача</th>
+                            <th class="sticky top-0 bg-white px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200">Компания</th>
+                            <th class="sticky top-0 bg-white px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200">Исполнитель</th>
+                            <th class="sticky top-0 bg-white px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right">Срок</th>
+                            <th class="sticky top-0 bg-white px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right">Дней</th>
+                            <th class="sticky top-0 bg-white px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200">Статус</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -205,42 +206,55 @@
     <div class="xl:col-span-2 bg-white rounded-2xl border border-slate-200/80 overflow-hidden">
         <div class="flex flex-wrap items-baseline gap-3 px-6 pt-5">
             <h2 class="text-base font-semibold text-slate-800">Дисциплина по месяцам</h2>
-            <span class="text-xs text-slate-400">закрытые и просроченные</span>
+            <span class="text-xs text-slate-400">доля задач, закрытых в срок</span>
         </div>
 
         @if($judged === 0)
             <div class="px-6 py-10 text-center">
                 <p class="text-sm font-medium text-slate-600">Пока нечего показать</p>
-                <p class="text-xs text-slate-400 mt-1">Здесь появятся столбики закрытых и просроченных задач</p>
+                <p class="text-xs text-slate-400 mt-1">Здесь появится помесячная сводка: сколько задач закрыто вовремя</p>
             </div>
         @else
-            <div class="px-6 pt-6 pb-5">
-                <div class="flex items-end justify-evenly gap-3 border-b border-slate-200 pb-0" style="height: 190px">
+            <div class="px-6 pt-5 pb-5">
+                <div class="space-y-3">
                     @foreach($discipline as $m)
-                        @php $mTotal = $m['on_time'] + $m['late'] + $m['overdue']; @endphp
-                        <div class="flex flex-col items-center justify-end gap-1.5 h-full"
+                        @php
+                            $mTotal = $m['on_time'] + $m['late'] + $m['overdue'];
+                            $mPct   = $mTotal > 0 ? (int) round($m['on_time'] / $mTotal * 100) : null;
+                        @endphp
+                        <div class="flex items-center gap-3"
                              title="{{ $m['label'] }}: вовремя {{ $m['on_time'] }}, с опозданием {{ $m['late'] }}, просрочено {{ $m['overdue'] }}">
-                            <span class="text-xs {{ $mTotal > 0 ? 'text-slate-500 font-medium' : 'text-slate-300' }} tabular-nums">{{ $mTotal }}</span>
-                            <div class="flex flex-col justify-end gap-[2px] w-6">
-                                @foreach([['overdue', 'bg-red-600'], ['late', 'bg-amber-600'], ['on_time', 'bg-emerald-600']] as [$k, $cls])
-                                    @if($m[$k] > 0)
-                                        <div class="{{ $cls }} rounded-t-[3px] w-full" style="height: {{ max(4, round($m[$k] / $disciplineMax * 140)) }}px"></div>
-                                    @endif
-                                @endforeach
+                            <span class="w-14 shrink-0 text-xs text-slate-500">{{ $m['label'] }}</span>
+                            <div class="flex-1">
+                                @if($mTotal > 0)
+                                    <div class="flex h-3 gap-px" style="width: {{ round($mTotal / $disciplineMax * 100, 1) }}%">
+                                        @foreach([['on_time', 'bg-emerald-600'], ['late', 'bg-amber-600'], ['overdue', 'bg-red-600']] as [$k, $cls])
+                                            @if($m[$k] > 0)
+                                                <div class="{{ $cls }} rounded-sm min-w-[4px]" style="width: {{ round($m[$k] / $mTotal * 100, 1) }}%"></div>
+                                            @endif
+                                        @endforeach
+                                    </div>
+                                @else
+                                    <span class="text-xs text-slate-300">задач с итогом нет</span>
+                                @endif
                             </div>
+                            <span class="w-32 shrink-0 text-right text-xs tabular-nums">
+                                @if($mPct !== null)
+                                    <span class="font-semibold text-slate-700">{{ $mPct }}% вовремя</span>
+                                    <span class="text-slate-400"> · {{ $mTotal }}</span>
+                                @else
+                                    <span class="text-slate-300">—</span>
+                                @endif
+                            </span>
                         </div>
                     @endforeach
                 </div>
-                <div class="flex justify-evenly gap-3 mt-2">
-                    @foreach($discipline as $m)
-                        <span class="text-xs text-slate-400">{{ $m['label'] }}</span>
-                    @endforeach
-                </div>
                 <div class="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-xs">
-                    <span class="inline-flex items-center gap-1.5 text-slate-500"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>вовремя</span>
-                    <span class="inline-flex items-center gap-1.5 text-slate-500"><span class="w-1.5 h-1.5 rounded-full bg-amber-600"></span>с опозданием</span>
-                    <span class="inline-flex items-center gap-1.5 text-slate-500"><span class="w-1.5 h-1.5 rounded-full bg-red-600"></span>просрочено</span>
+                    <span class="inline-flex items-center gap-1.5 text-slate-500"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>закрыто вовремя</span>
+                    <span class="inline-flex items-center gap-1.5 text-slate-500"><span class="w-1.5 h-1.5 rounded-full bg-amber-600"></span>закрыто с опозданием</span>
+                    <span class="inline-flex items-center gap-1.5 text-slate-500"><span class="w-1.5 h-1.5 rounded-full bg-red-600"></span>просрочено, не сдано</span>
                 </div>
+                <p class="mt-2.5 text-xs text-slate-400">Длина полоски — число задач месяца. Задачи в работе, у которых срок ещё не наступил, не учитываются.</p>
             </div>
         @endif
     </div>
@@ -378,7 +392,7 @@
     <div class="bg-white rounded-2xl border border-slate-200/80 overflow-hidden">
         <div class="flex flex-wrap items-baseline gap-3 px-6 pt-5">
             <h2 class="text-base font-semibold text-slate-800">По компаниям</h2>
-            <span class="text-xs text-slate-400">{{ $monthLabel }} · сом/час = смета ÷ время за месяц: чем ниже, тем дороже клиент обходится</span>
+            <span class="text-xs text-slate-400">{{ $monthLabel }} · «Просрочено» — сейчас, вне периода</span>
         </div>
 
         @if(count($byCompany) === 0)
@@ -397,8 +411,6 @@
                             <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right">Вовремя</th>
                             <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right">Просрочено</th>
                             <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right">Время</th>
-                            <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right">Смета, сом</th>
-                            <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right">сом/час</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -426,12 +438,6 @@
                                     {{ $row['overdue'] > 0 ? $row['overdue'] : '—' }}
                                 </td>
                                 <td class="px-4 py-3 text-right text-slate-500 tabular-nums">{{ $row['time'] ?? '—' }}</td>
-                                <td class="px-4 py-3 text-right text-slate-500 tabular-nums">
-                                    {{ $row['estimate'] !== null ? number_format($row['estimate'], 0, ',', ' ') : '—' }}
-                                </td>
-                                <td class="px-4 py-3 text-right font-medium tabular-nums {{ $row['rate'] !== null ? 'text-slate-700' : 'text-slate-300' }}">
-                                    {{ $row['rate'] !== null ? number_format($row['rate'], 0, ',', ' ') : '—' }}
-                                </td>
                             </tr>
                         @endforeach
                     </tbody>
@@ -444,7 +450,7 @@
     <div class="bg-white rounded-2xl border border-slate-200/80 overflow-hidden">
         <div class="flex flex-wrap items-baseline gap-3 px-6 pt-5">
             <h2 class="text-base font-semibold text-slate-800">Куда уходит время</h2>
-            <span class="text-xs text-slate-400">{{ $monthLabel }} · компании по затраченному времени</span>
+            <span class="text-xs text-slate-400">{{ $monthLabel }} · рабочее время по таймерам задач, по компаниям</span>
         </div>
 
         @if(count($timeTop) === 0)
@@ -453,16 +459,31 @@
                 <p class="text-xs text-slate-400 mt-1">Бары появятся, когда сотрудники начнут отмечать время</p>
             </div>
         @else
-            <div class="px-6 pt-4 pb-5 space-y-2.5">
-                @foreach($timeTop as $r)
-                    <div class="flex items-center gap-3" title="{{ $r['name'] }}: {{ $r['time'] }}">
-                        <span class="w-44 shrink-0 truncate text-sm text-slate-600">{{ $r['name'] }}</span>
-                        <div class="flex-1">
-                            <div class="h-4 bg-indigo-600 rounded-r-[4px]" style="width: {{ max(1, round($r['elapsed'] / $timeMax * 100, 1)) }}%"></div>
+            @php $totalElapsed = max(1, $stats['elapsed']); @endphp
+            <div class="px-6 pt-4 pb-5">
+                <p class="text-xs text-slate-400 pb-3">Всего за месяц по таймерам: <span class="font-medium text-slate-600">{{ $totalTime }}</span></p>
+                <div class="space-y-2.5">
+                    @foreach($timeTop as $r)
+                        @php $share = (int) round($r['elapsed'] / $totalElapsed * 100); @endphp
+                        <div class="flex items-center gap-3" title="{{ $r['name'] }}: {{ $r['time'] }} — {{ $share }}% времени месяца">
+                            <span class="w-44 shrink-0 truncate text-sm text-slate-600">{{ $r['name'] }}</span>
+                            <div class="flex-1">
+                                <div class="h-4 bg-indigo-600 rounded-r-[4px]" style="width: {{ max(1, round($r['elapsed'] / $timeMax * 100, 1)) }}%"></div>
+                            </div>
+                            <span class="w-28 shrink-0 text-right text-xs text-slate-500 tabular-nums">{{ $r['time'] }} <span class="text-slate-400">· {{ $share }}%</span></span>
                         </div>
-                        <span class="w-16 shrink-0 text-right text-xs text-slate-500 tabular-nums">{{ $r['time'] }}</span>
-                    </div>
-                @endforeach
+                    @endforeach
+                    @if($timeRest)
+                        @php $share = (int) round($timeRest['elapsed'] / $totalElapsed * 100); @endphp
+                        <div class="flex items-center gap-3" title="Остальные {{ $timeRest['count'] }} {{ $plural($timeRest['count'], ['компания', 'компании', 'компаний']) }}: {{ $timeRest['time'] }}">
+                            <span class="w-44 shrink-0 truncate text-sm text-slate-400">Остальные · {{ $timeRest['count'] }} {{ $plural($timeRest['count'], ['компания', 'компании', 'компаний']) }}</span>
+                            <div class="flex-1">
+                                <div class="h-4 bg-slate-300 rounded-r-[4px]" style="width: {{ max(1, round($timeRest['elapsed'] / $timeMax * 100, 1)) }}%"></div>
+                            </div>
+                            <span class="w-28 shrink-0 text-right text-xs text-slate-500 tabular-nums">{{ $timeRest['time'] }} <span class="text-slate-400">· {{ $share }}%</span></span>
+                        </div>
+                    @endif
+                </div>
             </div>
         @endif
     </div>
