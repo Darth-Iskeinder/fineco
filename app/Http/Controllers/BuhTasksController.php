@@ -76,8 +76,25 @@ class BuhTasksController extends Controller
             ->orderBy('name')
             ->get();
 
-        // Все клиенты сотрудника (для создания внеплановых задач)
-        $allClients = Client::query()->where($assignedToEmployee)->orderBy('name')->get(['id', 'name']);
+        // Компании для селектора «Добавить задачу»: админ/руководитель — все активные;
+        // главбух — свои + клиенты своих бухгалтеров (ставит им задачи и по клиентам,
+        // за которых сам не ответственен); остальные — где ответственный или исполнитель БП.
+        if ($employee->isAdmin() || $employee->isManager()) {
+            $allClients = Client::active()->orderBy('name')->get(['id', 'name']);
+        } else {
+            $allClients = Client::query()
+                ->where(function ($q) use ($assignedToEmployee, $myAccountantIds) {
+                    $q->where($assignedToEmployee);
+                    if ($myAccountantIds->isNotEmpty()) {
+                        $q->orWhere(fn ($qq) => $qq
+                            ->whereIn('responsible_employee_id', $myAccountantIds)
+                            ->orWhereHas('estimates.rootItems', fn ($i) => $i
+                                ->whereNull('parent_id')
+                                ->whereIn('assignee_id', $myAccountantIds)));
+                    }
+                })
+                ->orderBy('name')->get(['id', 'name']);
+        }
 
         // Правила активного списка:
         //  - просроченные невыполненные — показываем ВСЕ, пока не закроют;
