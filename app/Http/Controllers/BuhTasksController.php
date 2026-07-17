@@ -279,6 +279,8 @@ class BuhTasksController extends Controller
                         'requires_document' => (bool) ($service?->requires_document),
                         'document_name'    => $log?->document_name,
                         'document_path'    => $log?->document_path,
+                        'force_closed'        => (bool) ($log?->force_closed),
+                        'force_close_comment' => $log?->force_close_comment,
                         'children'        => $item->children->map(function ($child) use ($logs, $wy, $wm, $slotKey, $slot) {
                             $childLog = $logs->get($wy . '-' . $wm . '-' . $child->id . $slotKey);
 
@@ -437,6 +439,8 @@ class BuhTasksController extends Controller
                     'requires_document' => (bool) ($service?->requires_document),
                     'document_name'   => $log->document_name,
                     'document_path'   => $log->document_path,
+                    'force_closed'        => (bool) $log->force_closed,
+                    'force_close_comment' => $log->force_close_comment,
                     'children'        => [],
                 ];
             }
@@ -513,6 +517,8 @@ class BuhTasksController extends Controller
                     'requires_document' => (bool) ($service?->requires_document),
                     'document_name'    => $l->document_name,
                     'document_path'    => $l->document_path,
+                    'force_closed'        => (bool) $l->force_closed,
+                    'force_close_comment' => $l->force_close_comment,
                     'children'         => ($item?->children ?? collect())->map(function ($child) use ($logs, $l) {
                         $cSlotKey = $l->due_date ? '-' . $l->due_date->toDateString() : '';
                         $childLog = $logs->get($l->year . '-' . $l->month . '-' . $child->id . $cSlotKey);
@@ -595,6 +601,8 @@ class BuhTasksController extends Controller
                         'requires_document' => (bool) ($service?->requires_document),
                         'document_name'    => $l->document_name,
                         'document_path'    => $l->document_path,
+                        'force_closed'        => (bool) $l->force_closed,
+                        'force_close_comment' => $l->force_close_comment,
                         'children'         => ($item?->children ?? collect())->map(function ($child) use ($teamLogs, $l) {
                             $cSlotKey = $l->due_date ? '-' . $l->due_date->toDateString() : '';
                             $childLog = $teamLogs->get($l->employee_id . '-' . $l->year . '-' . $l->month . '-' . $child->id . $cSlotKey);
@@ -845,6 +853,53 @@ class BuhTasksController extends Controller
             $log->completed_at = $now;
         }
 
+        // Нормальное закрытие снимает след принудительного (актуально после доработки:
+        // задача была force-closed, вернулась с проверки и теперь сдана как положено).
+        $log->force_closed        = false;
+        $log->force_close_comment = null;
+
+        $log->save();
+
+        return response()->json(['success' => true, 'log' => $this->formatLog($log)]);
+    }
+
+    /**
+     * Принудительное закрытие: в обход требования документа и чеклиста подпунктов,
+     * с обязательным комментарием-причиной. Дальше всё как в complete():
+     * requires_review → на проверку главбуху, иначе сразу completed.
+     */
+    public function forceComplete(Request $request, BuhTaskLog $log)
+    {
+        $this->authorizeLog($log);
+
+        $validated = $request->validate([
+            'comment' => 'required|string|max:2000',
+        ], [
+            'comment.required' => 'Укажите причину принудительного закрытия',
+        ]);
+
+        $now = now();
+
+        if ($log->status === 'running' && $log->resumed_at) {
+            $log->paused_seconds += max(0, $now->timestamp - $log->resumed_at->timestamp);
+        }
+
+        $log->force_closed        = true;
+        $log->force_close_comment = $validated['comment'];
+
+        $responsibleId = Client::whereKey($log->client_id)->value('responsible_employee_id');
+        $needsReview = ($log->estimateItem?->service?->requires_review)
+            && (int) $log->employee_id !== (int) $responsibleId;
+
+        if ($needsReview) {
+            $log->status            = 'review';
+            $log->review_comment    = null;
+            $log->review_started_at = $now;
+        } else {
+            $log->status       = 'completed';
+            $log->completed_at = $now;
+        }
+
         $log->save();
 
         return response()->json(['success' => true, 'log' => $this->formatLog($log)]);
@@ -862,6 +917,8 @@ class BuhTasksController extends Controller
         $log->review_comment = null;
         $log->reviewed_at    = null;
         $log->reviewed_by    = null;
+        $log->force_closed        = false;
+        $log->force_close_comment = null;
         $log->save();
 
         return response()->json(['success' => true, 'log' => $this->formatLog($log)]);
@@ -1279,6 +1336,8 @@ class BuhTasksController extends Controller
             'actual_quantity' => $log->actual_quantity,
             'document_name'   => $log->document_name,
             'document_path'   => $log->document_path,
+            'force_closed'        => (bool) $log->force_closed,
+            'force_close_comment' => $log->force_close_comment,
         ];
     }
 

@@ -275,6 +275,10 @@
                                           class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-orange-100 text-orange-700">сегодня</span>
                                     <span x-show="task.status === 'review'"
                                           class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-sky-100 text-sky-700">на проверке</span>
+                                    {{-- Закрыта в обход документа/подпунктов; причина — в title и в модалке задачи --}}
+                                    <span x-show="task.force_closed"
+                                          class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700"
+                                          :title="task.force_close_comment">принудительно</span>
                                     {{-- Задача бухгалтера, пришедшая главбуху на проверку (шаг 7.1) --}}
                                     <span x-show="task.review_for_head"
                                           class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700">
@@ -564,6 +568,9 @@
                         <div class="flex-1 min-w-0">
                             <div class="flex items-center gap-2 min-w-0">
                                 <p class="text-sm font-medium text-slate-700 truncate" x-text="c.name"></p>
+                                <span x-show="c.force_closed"
+                                      class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700 flex-shrink-0"
+                                      :title="c.force_close_comment">закрыта принудительно</span>
                                 {{-- Задача выполнена бухгалтером (этап 2): пометка исполнителя у главбуха --}}
                                 <span x-show="c.doer_name"
                                       class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700 flex-shrink-0">
@@ -961,6 +968,48 @@
         </div>
     </div>
 
+    {{-- ===== МОДАЛ: ПРИНУДИТЕЛЬНОЕ ЗАКРЫТИЕ (без документа и подпунктов, причина обязательна) ===== --}}
+    <div x-show="forceCloseModal.show"
+         x-transition:enter="ease-out duration-200"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="ease-in duration-150"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         class="fixed inset-0 z-[60] flex items-center justify-center bg-black/40"
+         @click.self="closeForceClose()"
+         @keydown.escape.window="closeForceClose()"
+         style="display:none">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">
+            <div class="flex items-start gap-4">
+                <div class="flex-shrink-0 w-11 h-11 rounded-full bg-amber-100 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <h3 class="text-base font-semibold text-slate-800">Принудительное закрытие</h3>
+                    <p class="mt-1 text-sm text-slate-500">Задача закроется без документа и без отметки подпунктов. Если по БП положена проверка — задача уйдёт на проверку как обычно. В выполненных она будет помечена как закрытая принудительно.</p>
+                </div>
+            </div>
+            <div class="mt-4">
+                <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Причина (обязательно)</label>
+                <textarea x-model="forceCloseModal.comment" rows="3"
+                          placeholder="Почему задача закрывается без документа/подпунктов?"
+                          class="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent resize-none"></textarea>
+                <p x-show="forceCloseModal.error" class="mt-1 text-xs text-rose-500" x-text="forceCloseModal.error"></p>
+            </div>
+            <div class="flex gap-3 mt-5">
+                <button @click="closeForceClose()"
+                        class="flex-1 py-2.5 px-4 border border-slate-200 text-slate-600 text-sm font-medium rounded-xl hover:bg-slate-50 transition-colors">
+                    Отмена
+                </button>
+                <button @click="submitForceClose()" :disabled="forceCloseModal.saving"
+                        class="flex-1 py-2.5 px-4 bg-amber-500 text-white text-sm font-medium rounded-xl hover:bg-amber-600 disabled:opacity-50 transition-colors">
+                    Закрыть задачу
+                </button>
+            </div>
+        </div>
+    </div>
+
     {{-- ===== МОДАЛ ЗАДАЧИ (описание + чек-лист подпунктов) ===== --}}
     <div x-show="taskModalIdx !== null"
          x-transition:enter="ease-out duration-200"
@@ -1087,6 +1136,25 @@
                         </span>
                     </div>
                 </div>
+
+                {{-- Принудительное закрытие: доступно, пока задача у сотрудника (не на проверке/не закрыта) --}}
+                <template x-if="tasks[taskModalIdx].type === 'planned' && !tasks[taskModalIdx].review_for_head
+                                && ['pending','running','paused','rework'].includes(tasks[taskModalIdx].status)">
+                    <div class="mt-1.5 text-right">
+                        <button @click="openForceClose(taskModalIdx)"
+                                class="text-xs text-slate-400 hover:text-amber-600 underline decoration-dotted underline-offset-2 transition-colors">
+                            Закрыть принудительно…
+                        </button>
+                    </div>
+                </template>
+
+                {{-- Причина принудительного закрытия (видна и главбуху на проверке) --}}
+                <template x-if="tasks[taskModalIdx].force_closed">
+                    <div class="mt-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5">
+                        <p class="text-xs font-semibold text-amber-700 mb-0.5">Закрыта принудительно — причина</p>
+                        <p class="text-sm text-amber-800 whitespace-pre-line" x-text="tasks[taskModalIdx].force_close_comment || '—'"></p>
+                    </div>
+                </template>
 
                 <div class="mt-4 space-y-3">
                     <template x-if="tasks[taskModalIdx].description">
@@ -1318,6 +1386,14 @@
                     <span>Выполнено · <span x-text="fmtCompleted(completedItem.completed_at)"></span><span x-show="completedItem.doer_name" x-text="' · бухгалтер: ' + completedItem.doer_name"></span></span>
                 </div>
 
+                {{-- Закрыта принудительно: без документа/подпунктов, с обязательной причиной --}}
+                <template x-if="completedItem.force_closed">
+                    <div class="mt-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5">
+                        <p class="text-xs font-semibold text-amber-700 mb-0.5">Закрыта принудительно — причина</p>
+                        <p class="text-sm text-amber-800 whitespace-pre-line" x-text="completedItem.force_close_comment || '—'"></p>
+                    </div>
+                </template>
+
                 {{-- Затрачено + периодичность --}}
                 <div class="mt-4 flex items-center gap-6 bg-slate-50 rounded-xl px-4 py-3">
                     <div>
@@ -1488,6 +1564,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         taskModalIdx: null,
         docRequiredModal: { show: false, taskIdx: null },
         checklistRequiredModal: { show: false, taskIdx: null },
+        forceCloseModal: { show: false, taskIdx: null, comment: '', error: '', saving: false }, // принудительное закрытие (обязательная причина)
 
         showCreateModal: false,
         startConfirm: { show: false, idx: null },
@@ -2007,6 +2084,10 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             task.status = log.status;
             task.elapsed_seconds = log.elapsed_seconds;
             task.review_comment = log.review_comment ?? null;
+            if (log.force_closed !== undefined) {
+                task.force_closed = !!log.force_closed;
+                task.force_close_comment = log.force_close_comment ?? null;
+            }
             task.client_resumed_at = log.status === 'running' ? this.now : null;
             this._taskVer++; // статус изменился → кэш чеклиста/списка пересчитается
 
@@ -2042,6 +2123,8 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 requires_document: !!task.requires_document,
                 document_name: task.document_name ?? null,
                 document_path: task.document_path ?? null,
+                force_closed: !!task.force_closed,
+                force_close_comment: task.force_close_comment ?? null,
                 children: (task.children || []).map(c => ({
                     id: c.id,
                     name: c.name,
@@ -2238,6 +2321,48 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 this.patch(idx, { loading: false });
                 if (data.requires_document) this.docRequiredModal = { show: true, taskIdx: idx };
                 if (data.requires_checklist) this.checklistRequiredModal = { show: true, taskIdx: idx };
+            }
+        },
+
+        // ===== Принудительное закрытие: в обход документа и подпунктов, причина обязательна =====
+        openForceClose(idx) {
+            this.forceCloseModal = { show: true, taskIdx: idx, comment: '', error: '', saving: false };
+        },
+
+        closeForceClose() {
+            this.forceCloseModal = { show: false, taskIdx: null, comment: '', error: '', saving: false };
+        },
+
+        async submitForceClose() {
+            const idx = this.forceCloseModal.taskIdx;
+            if (idx === null || this.forceCloseModal.saving) return;
+
+            const comment = (this.forceCloseModal.comment ?? '').trim();
+            if (!comment) {
+                this.forceCloseModal.error = 'Укажите причину принудительного закрытия';
+                return;
+            }
+
+            this.forceCloseModal.saving = true;
+            this.forceCloseModal.error = '';
+            this.patch(idx, { loading: true });
+
+            const logId = await this.ensureLog(idx);
+            if (!logId) {
+                this.patch(idx, { loading: false });
+                this.forceCloseModal.saving = false;
+                this.forceCloseModal.error = 'Не удалось закрыть задачу, попробуйте ещё раз';
+                return;
+            }
+
+            const data = await this.post(this.actionUrl(this.tasks[idx], 'force-complete'), { comment });
+            if (data.success) {
+                this.closeForceClose();
+                this.applyResult(idx, data.log);
+            } else {
+                this.patch(idx, { loading: false });
+                this.forceCloseModal.saving = false;
+                this.forceCloseModal.error = data.message || 'Не удалось закрыть задачу, попробуйте ещё раз';
             }
         },
 

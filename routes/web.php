@@ -97,6 +97,7 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/logs/{log}/start', [BuhTasksController::class, 'start'])->name('logs.start');
         Route::post('/logs/{log}/pause', [BuhTasksController::class, 'pause'])->name('logs.pause');
         Route::post('/logs/{log}/complete', [BuhTasksController::class, 'complete'])->name('logs.complete');
+        Route::post('/logs/{log}/force-complete', [BuhTasksController::class, 'forceComplete'])->name('logs.force-complete');
         Route::post('/logs/{log}/reset', [BuhTasksController::class, 'reset'])->name('logs.reset');
         Route::post('/logs/{log}/quantity', [BuhTasksController::class, 'updateQuantity'])->name('logs.quantity');
         Route::post('/logs/{log}/comment', [BuhTasksController::class, 'updateComment'])->name('logs.comment');
