@@ -580,15 +580,21 @@
                             </div>
                             <p class="text-xs text-slate-400 truncate" x-text="c.client_name"></p>
                         </div>
-                        {{-- Колонка «Комментарий»: заметка сотрудника (двойной клик — редактировать в деталях) --}}
+                        {{-- Колонка «Комментарий»: причина принудительного закрытия + заметка сотрудника --}}
                         <div class="hidden sm:flex flex-1 min-w-0 items-center gap-1.5 text-slate-500">
+                            <template x-if="c.force_close_comment">
+                                <span class="inline-flex items-center gap-1.5 min-w-0">
+                                    <svg class="w-3.5 h-3.5 flex-shrink-0 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+                                    <span class="text-sm text-amber-700 truncate" :title="c.force_close_comment" x-text="c.force_close_comment"></span>
+                                </span>
+                            </template>
                             <template x-if="c.employee_comment">
                                 <span class="inline-flex items-center gap-1.5 min-w-0">
                                     <svg class="w-3.5 h-3.5 flex-shrink-0 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8 12h8m-8-4h8m-8 8h4m-9 4V6a2 2 0 012-2h12a2 2 0 012 2v8a2 2 0 01-2 2H9l-4 4z"/></svg>
                                     <span class="text-sm truncate" :title="c.employee_comment" x-text="c.employee_comment"></span>
                                 </span>
                             </template>
-                            <template x-if="!c.employee_comment">
+                            <template x-if="!c.employee_comment && !c.force_close_comment">
                                 <span class="text-xs text-slate-300 italic">без заметки</span>
                             </template>
                         </div>
@@ -1003,7 +1009,7 @@
                     Отмена
                 </button>
                 <button @click="submitForceClose()" :disabled="forceCloseModal.saving"
-                        class="flex-1 py-2.5 px-4 bg-amber-500 text-white text-sm font-medium rounded-xl hover:bg-amber-600 disabled:opacity-50 transition-colors">
+                        class="flex-1 py-2.5 px-4 bg-amber-600 text-white text-sm font-medium rounded-xl hover:bg-amber-700 disabled:opacity-50 transition-colors">
                     Закрыть задачу
                 </button>
             </div>
