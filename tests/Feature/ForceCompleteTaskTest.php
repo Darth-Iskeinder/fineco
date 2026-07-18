@@ -195,8 +195,8 @@ class ForceCompleteTaskTest extends TestCase
         $log->update([
             'status' => 'rework',
             'force_closed' => true, 'force_close_comment' => 'первая попытка',
-            'document_path' => 'buhtasks/test.pdf', 'document_name' => 'test.pdf',
         ]);
+        $log->documents()->create(['path' => 'buh_task_documents/test.pdf', 'name' => 'test.pdf']);
 
         $this->actingAs($this->accountant, 'employee')
             ->postJson(route('buhtasks.logs.complete', $log))

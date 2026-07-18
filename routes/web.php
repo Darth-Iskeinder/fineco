@@ -102,6 +102,7 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/logs/{log}/quantity', [BuhTasksController::class, 'updateQuantity'])->name('logs.quantity');
         Route::post('/logs/{log}/comment', [BuhTasksController::class, 'updateComment'])->name('logs.comment');
         Route::post('/logs/{log}/document', [BuhTasksController::class, 'uploadDocument'])->name('logs.document');
+        Route::post('/logs/{log}/documents/{document}/delete', [BuhTasksController::class, 'deleteDocument'])->name('logs.document-delete');
         // Внеплановые задачи
         Route::post('/adhoc', [BuhTasksController::class, 'storeAdhoc'])->name('adhoc.store');
         Route::post('/adhoc/{task}/start', [BuhTasksController::class, 'startAdhoc'])->name('adhoc.start');
@@ -110,6 +111,7 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/adhoc/{task}/reset', [BuhTasksController::class, 'resetAdhoc'])->name('adhoc.reset');
         Route::post('/adhoc/{task}/comment', [BuhTasksController::class, 'updateCommentAdhoc'])->name('adhoc.comment');
         Route::post('/adhoc/{task}/document', [BuhTasksController::class, 'uploadDocumentAdhoc'])->name('adhoc.document');
+        Route::post('/adhoc/{task}/documents/{document}/delete', [BuhTasksController::class, 'deleteDocumentAdhoc'])->name('adhoc.document-delete');
         Route::post('/adhoc/{task}/delete', [BuhTasksController::class, 'destroyAdhoc'])->name('adhoc.destroy');
         // Проверка главбухом задач бухгалтеров — принять/вернуть прямо со страницы задач (шаг 7.2)
         Route::post('/logs/{log}/review-approve', [BuhTasksController::class, 'approveReview'])->name('logs.review-approve');

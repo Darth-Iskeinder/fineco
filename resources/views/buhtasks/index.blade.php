@@ -1217,23 +1217,33 @@
                 <template x-if="tasks[taskModalIdx].requires_document || tasks[taskModalIdx].type === 'adhoc'">
                     <div class="mt-4 pt-4 border-t border-slate-100">
                         <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5"
-                           x-text="tasks[taskModalIdx].requires_document ? 'Документ для закрытия' : 'Документ (необязательно)'"></p>
-                        <div class="flex items-center gap-2">
-                            <template x-if="tasks[taskModalIdx].document_name && !tasks[taskModalIdx].pending_file_name">
-                                <a :href="'/storage/' + tasks[taskModalIdx].document_path" target="_blank"
-                                   class="inline-flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 underline truncate max-w-[220px]">
-                                    <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                                    <span x-text="tasks[taskModalIdx].document_name"></span>
-                                </a>
+                           x-text="tasks[taskModalIdx].requires_document ? 'Документы для закрытия' : 'Документы (необязательно)'"></p>
+                        <div class="space-y-1">
+                            <template x-for="doc in (tasks[taskModalIdx].documents || [])" :key="doc.id">
+                                <div class="flex items-center gap-2">
+                                    <a :href="'/storage/' + doc.path" target="_blank"
+                                       class="inline-flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 underline truncate max-w-[260px]">
+                                        <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                                        <span x-text="doc.name"></span>
+                                    </a>
+                                    <button x-show="canEditDocs(tasks[taskModalIdx])"
+                                            @click="deleteRootDocument(taskModalIdx, doc.id)"
+                                            title="Удалить документ"
+                                            class="text-slate-300 hover:text-rose-500 transition-colors flex-shrink-0">
+                                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                    </button>
+                                </div>
                             </template>
-                            <template x-if="!tasks[taskModalIdx].document_name && !tasks[taskModalIdx].pending_file_name">
-                                <span class="text-sm text-slate-400 italic">Не прикреплён</span>
+                            <template x-if="(tasks[taskModalIdx].documents || []).length === 0 && !tasks[taskModalIdx].pending_file_name">
+                                <span class="text-sm text-slate-400 italic">Не прикреплены</span>
                             </template>
+                        </div>
+                        <div x-show="canEditDocs(tasks[taskModalIdx])" class="flex items-center gap-2 mt-2">
                             <template x-if="tasks[taskModalIdx].pending_file_name">
                                 <span class="text-sm text-slate-600 truncate max-w-[220px]" x-text="tasks[taskModalIdx].pending_file_name"></span>
                             </template>
                             <label class="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-600 text-xs font-medium rounded-lg hover:bg-slate-200 cursor-pointer transition-colors">
-                                <span x-text="tasks[taskModalIdx].document_name ? 'Заменить' : 'Выбрать файл'"></span>
+                                <span x-text="(tasks[taskModalIdx].documents || []).length ? 'Прикрепить ещё' : 'Выбрать файл'"></span>
                                 <input type="file" class="hidden" @change="selectRootDocument(taskModalIdx, $event)">
                             </label>
                             <template x-if="tasks[taskModalIdx].pending_file_name">
@@ -1278,28 +1288,38 @@
                                         </div>
                                     </template>
                                     <template x-if="child.requires_document">
-                                        <div class="flex items-center gap-2 mt-1 ml-6 text-xs">
-                                            <template x-if="child.document_name && !child.pending_file_name">
-                                                <a :href="'/storage/' + child.document_path" target="_blank"
-                                                   class="text-indigo-600 hover:text-indigo-800 underline truncate max-w-[140px]" x-text="child.document_name"></a>
+                                        <div class="mt-1 ml-6 text-xs">
+                                            <template x-for="doc in (child.documents || [])" :key="doc.id">
+                                                <div class="flex items-center gap-1.5 py-0.5">
+                                                    <a :href="'/storage/' + doc.path" target="_blank"
+                                                       class="text-indigo-600 hover:text-indigo-800 underline truncate max-w-[180px]" x-text="doc.name"></a>
+                                                    <button x-show="canEditDocs(tasks[taskModalIdx]) && child.status !== 'review'"
+                                                            @click="deleteChildDocument(taskModalIdx, cidx, doc.id)"
+                                                            title="Удалить документ"
+                                                            class="text-slate-300 hover:text-rose-500 transition-colors flex-shrink-0">
+                                                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                                    </button>
+                                                </div>
                                             </template>
-                                            <template x-if="!child.document_name && !child.pending_file_name">
-                                                <span class="text-slate-400 italic">Документ не прикреплён</span>
-                                            </template>
-                                            <template x-if="child.pending_file_name">
-                                                <span class="text-slate-600 truncate max-w-[140px]" x-text="child.pending_file_name"></span>
-                                            </template>
-                                            <label class="ml-auto inline-flex items-center px-2 py-1 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 cursor-pointer transition-colors">
-                                                <span x-text="child.document_name ? 'Заменить' : 'Выбрать файл'"></span>
-                                                <input type="file" class="hidden" @change="selectChildDocument(taskModalIdx, cidx, $event)">
-                                            </label>
-                                            <template x-if="child.pending_file_name">
-                                                <button @click="saveChildDocument(taskModalIdx, cidx)"
-                                                        :disabled="child.doc_uploading"
-                                                        class="inline-flex items-center px-2 py-1 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
-                                                    <span x-text="child.doc_uploading ? 'Сохранение...' : 'Сохранить'"></span>
-                                                </button>
-                                            </template>
+                                            <div class="flex items-center gap-2 mt-0.5">
+                                                <template x-if="(child.documents || []).length === 0 && !child.pending_file_name">
+                                                    <span class="text-slate-400 italic">Документ не прикреплён</span>
+                                                </template>
+                                                <template x-if="child.pending_file_name">
+                                                    <span class="text-slate-600 truncate max-w-[140px]" x-text="child.pending_file_name"></span>
+                                                </template>
+                                                <label class="ml-auto inline-flex items-center px-2 py-1 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 cursor-pointer transition-colors">
+                                                    <span x-text="(child.documents || []).length ? 'Прикрепить ещё' : 'Выбрать файл'"></span>
+                                                    <input type="file" class="hidden" @change="selectChildDocument(taskModalIdx, cidx, $event)">
+                                                </label>
+                                                <template x-if="child.pending_file_name">
+                                                    <button @click="saveChildDocument(taskModalIdx, cidx)"
+                                                            :disabled="child.doc_uploading"
+                                                            class="inline-flex items-center px-2 py-1 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                                                        <span x-text="child.doc_uploading ? 'Сохранение...' : 'Сохранить'"></span>
+                                                    </button>
+                                                </template>
+                                            </div>
                                         </div>
                                     </template>
                                 </div>
@@ -1466,20 +1486,22 @@
                     </div>
                 </template>
 
-                {{-- Документ --}}
-                <template x-if="completedItem.requires_document || completedItem.document_name">
+                {{-- Документы --}}
+                <template x-if="completedItem.requires_document || (completedItem.documents || []).length > 0">
                     <div class="mt-4 pt-4 border-t border-slate-100">
-                        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Прикреплённый документ</p>
-                        <template x-if="completedItem.document_name">
-                            <a :href="'/storage/' + completedItem.document_path" target="_blank"
-                               class="inline-flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 underline truncate max-w-[320px]">
-                                <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                                <span x-text="completedItem.document_name"></span>
-                            </a>
-                        </template>
-                        <template x-if="!completedItem.document_name">
-                            <span class="text-sm text-slate-400 italic">Документ не прикреплён</span>
-                        </template>
+                        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Прикреплённые документы</p>
+                        <div class="space-y-1">
+                            <template x-for="doc in (completedItem.documents || [])" :key="doc.id">
+                                <a :href="'/storage/' + doc.path" target="_blank"
+                                   class="flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 underline truncate max-w-[320px] w-fit">
+                                    <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                                    <span x-text="doc.name"></span>
+                                </a>
+                            </template>
+                            <template x-if="(completedItem.documents || []).length === 0">
+                                <span class="text-sm text-slate-400 italic">Документы не прикреплены</span>
+                            </template>
+                        </div>
                     </div>
                 </template>
 
@@ -1501,13 +1523,15 @@
                                         <span x-show="child.allows_quantity" class="text-xs text-slate-400 whitespace-nowrap"
                                               x-text="'факт: ' + (child.actual_quantity ?? '—') + ' / ' + child.quantity"></span>
                                     </div>
-                                    <template x-if="child.requires_document && child.document_name">
-                                        <div class="flex items-center gap-2 mt-1 text-xs" style="margin-left:1.625rem">
-                                            <a :href="'/storage/' + child.document_path" target="_blank"
-                                               class="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 underline truncate max-w-[260px]">
-                                                <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                                                <span x-text="child.document_name"></span>
-                                            </a>
+                                    <template x-if="child.requires_document && (child.documents || []).length > 0">
+                                        <div class="mt-1 text-xs space-y-0.5" style="margin-left:1.625rem">
+                                            <template x-for="doc in (child.documents || [])" :key="doc.id">
+                                                <a :href="'/storage/' + doc.path" target="_blank"
+                                                   class="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 underline truncate max-w-[260px] w-fit">
+                                                    <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                                                    <span x-text="doc.name"></span>
+                                                </a>
+                                            </template>
                                         </div>
                                     </template>
                                 </div>
@@ -1788,6 +1812,11 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             }
         },
 
+        // Документы можно менять, пока задача у сотрудника (не закрыта, не на проверке, не чужая review-строка)
+        canEditDocs(task) {
+            return !task.review_for_head && !['completed', 'review'].includes(task.status);
+        },
+
         selectRootDocument(taskIdx, event) {
             const file = event.target.files[0];
             if (!file) return;
@@ -1823,9 +1852,36 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             const data = await r.json();
             if (data.success) {
                 pendingFiles.delete('root_' + taskIdx);
-                this.patch(taskIdx, { doc_uploading: false, pending_file_name: null, document_name: data.log.document_name, document_path: data.log.document_path });
+                this.patch(taskIdx, { doc_uploading: false, pending_file_name: null, documents: data.log.documents });
             } else {
                 this.patch(taskIdx, { doc_uploading: false });
+                if (data.message) alert(data.message);
+            }
+        },
+
+        // Удаление прикреплённого документа задачи (пока не закрыта/не на проверке)
+        async deleteRootDocument(taskIdx, docId) {
+            const task = this.tasks[taskIdx];
+            const url = task.type === 'adhoc'
+                ? `/buhtasks/adhoc/${task.adhoc_id}/documents/${docId}/delete`
+                : `/buhtasks/logs/${task.log_id}/documents/${docId}/delete`;
+            const data = await this.post(url);
+            if (data.success) {
+                this.patch(taskIdx, { documents: data.log.documents });
+            } else if (data.message) {
+                alert(data.message);
+            }
+        },
+
+        async deleteChildDocument(taskIdx, cidx, docId) {
+            const task = this.tasks[taskIdx];
+            const child = task.children[cidx];
+            if (!child.log_id) return;
+            const data = await this.post(`/buhtasks/logs/${child.log_id}/documents/${docId}/delete`);
+            if (data.success) {
+                task.children[cidx] = { ...child, documents: data.log.documents };
+            } else if (data.message) {
+                alert(data.message);
             }
         },
 
@@ -1859,9 +1915,10 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             const data = await r.json();
             if (data.success) {
                 pendingFiles.delete(key);
-                task.children[cidx] = { ...task.children[cidx], doc_uploading: false, pending_file_name: null, document_name: data.log.document_name, document_path: data.log.document_path };
+                task.children[cidx] = { ...task.children[cidx], doc_uploading: false, pending_file_name: null, documents: data.log.documents };
             } else {
                 task.children[cidx] = { ...task.children[cidx], doc_uploading: false };
+                if (data.message) alert(data.message);
             }
         },
 
@@ -2094,6 +2151,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 task.force_closed = !!log.force_closed;
                 task.force_close_comment = log.force_close_comment ?? null;
             }
+            if (log.documents !== undefined) task.documents = log.documents;
             task.client_resumed_at = log.status === 'running' ? this.now : null;
             this._taskVer++; // статус изменился → кэш чеклиста/списка пересчитается
 
@@ -2127,8 +2185,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 quantity: task.quantity ?? 0,
                 actual_quantity: task.actual_quantity ?? null,
                 requires_document: !!task.requires_document,
-                document_name: task.document_name ?? null,
-                document_path: task.document_path ?? null,
+                documents: task.documents ?? [],
                 force_closed: !!task.force_closed,
                 force_close_comment: task.force_close_comment ?? null,
                 children: (task.children || []).map(c => ({
@@ -2139,8 +2196,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                     quantity: c.quantity ?? 0,
                     actual_quantity: c.actual_quantity ?? null,
                     requires_document: !!c.requires_document,
-                    document_name: c.document_name ?? null,
-                    document_path: c.document_path ?? null,
+                    documents: c.documents ?? [],
                 })),
             });
             this.completedPage = 1;

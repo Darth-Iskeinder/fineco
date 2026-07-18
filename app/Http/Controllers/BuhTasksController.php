@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\BuhAdhocTask;
+use App\Models\BuhTaskDocument;
 use App\Models\BuhTaskLog;
 use App\Models\Client;
 use App\Models\Employee;
@@ -18,6 +19,66 @@ class BuhTasksController extends Controller
 {
     /** Глубина истории вкладки «Выполненные» (дней назад) */
     private const COMPLETED_HISTORY_DAYS = 90;
+
+    /** Максимум документов на одну задачу */
+    private const MAX_DOCUMENTS = 10;
+
+    /** Расширения, которые нельзя загружать (исполняемые на сервере/клиенте) */
+    private const FORBIDDEN_EXTENSIONS = [
+        'php', 'php3', 'php4', 'php5', 'php7', 'php8', 'phtml', 'phar', 'pht',
+        'cgi', 'pl', 'sh', 'bash', 'exe', 'bat', 'cmd', 'com',
+        'htaccess', 'hta', 'js', 'mjs', 'html', 'htm', 'shtml', 'xhtml', 'svg',
+    ];
+
+    /** Правило валидации загружаемого документа (общее для всех точек загрузки). */
+    private function documentFileRules(bool $required = true): array
+    {
+        return [
+            $required ? 'required' : 'nullable',
+            'file',
+            'max:40960',
+            function ($attribute, $value, $fail) {
+                $ext = strtolower($value->getClientOriginalExtension());
+                if (in_array($ext, self::FORBIDDEN_EXTENSIONS, true)) {
+                    $fail('Файлы этого типа загружать нельзя');
+                }
+            },
+        ];
+    }
+
+    /**
+     * Можно ли менять документы задачи: нельзя на проверке; у корневой задачи /
+     * внеплановой — также после закрытия. Подпункт чеклиста (дочерний лог) остаётся
+     * редактируемым после отметки галочки, но блокируется вместе с родительской
+     * задачей — когда она закрыта или ушла на проверку.
+     */
+    private function documentsLocked(BuhTaskLog|BuhAdhocTask $task): bool
+    {
+        if ($task->status === 'review') {
+            return true;
+        }
+
+        if ($task instanceof BuhAdhocTask) {
+            return $task->status === 'completed';
+        }
+
+        $parentItemId = $task->estimateItem?->parent_id;
+        if (!$parentItemId) {
+            return $task->status === 'completed';
+        }
+
+        // Подпункт: смотрим состояние родительской задачи (тот же слот, что в complete())
+        $parentLog = BuhTaskLog::where('employee_id', $task->employee_id)
+            ->where('year', $task->year)
+            ->where('month', $task->month)
+            ->where('estimate_item_id', $parentItemId)
+            ->when($task->due_date,
+                fn ($q) => $q->whereDate('due_date', $task->due_date),
+                fn ($q) => $q->whereNull('due_date'))
+            ->first();
+
+        return $parentLog && in_array($parentLog->status, ['completed', 'review'], true);
+    }
 
     /**
      * Отсечка backlog: задачи со сроком РАНЬШЕ этой даты не показываем вообще
@@ -118,13 +179,14 @@ class BuhTasksController extends Controller
         // продолжают матчиться как раньше — без бэкфилла.
         $logs = BuhTaskLog::where('employee_id', $employee->id)
             ->where('year', '>=', $today->subMonths(6)->year)
+            ->with('documents')
             ->get()
             ->keyBy(fn ($l) => $l->year . '-' . $l->month . '-' . $l->estimate_item_id
                 . ($l->due_date ? '-' . $l->due_date->toDateString() : ''));
 
         // Все внеплановые задачи сотрудника (невыполненные висят, пока не закроют)
         $adhocs = BuhAdhocTask::where('employee_id', $employee->id)
-            ->with('client')
+            ->with('client', 'documents')
             ->get();
 
         // === Задачи бухгалтеров (этап 1): вкладка главбуха ===
@@ -139,6 +201,7 @@ class BuhTasksController extends Controller
             ? BuhTaskLog::where('employee_id', '!=', $employee->id)
                 ->where($teamScope)
                 ->where('year', '>=', $today->subMonths(6)->year)
+                ->with('documents')
                 ->get()
                 ->keyBy(fn ($l) => $l->employee_id . '-' . $l->year . '-' . $l->month . '-' . $l->estimate_item_id
                     . ($l->due_date ? '-' . $l->due_date->toDateString() : ''))
@@ -294,8 +357,7 @@ class BuhTasksController extends Controller
                         'allows_quantity'  => (bool) ($service?->allows_quantity),
                         'actual_quantity'  => $log?->actual_quantity,
                         'requires_document' => (bool) ($service?->requires_document),
-                        'document_name'    => $log?->document_name,
-                        'document_path'    => $log?->document_path,
+                        'documents'        => $log ? $this->docs($log) : [],
                         'force_closed'        => (bool) ($log?->force_closed),
                         'force_close_comment' => $log?->force_close_comment,
                         'children'        => $item->children->map(function ($child) use ($logs, $wy, $wm, $slotKey, $slot) {
@@ -311,8 +373,7 @@ class BuhTasksController extends Controller
                                 'allows_quantity'    => (bool) ($child->service?->allows_quantity),
                                 'actual_quantity'    => $childLog?->actual_quantity,
                                 'requires_document'  => (bool) ($child->service?->requires_document),
-                                'document_name'      => $childLog?->document_name,
-                                'document_path'      => $childLog?->document_path,
+                                'documents'          => $childLog ? $this->docs($childLog) : [],
                             ];
                         })->values(),
                     ];
@@ -364,8 +425,7 @@ class BuhTasksController extends Controller
                 'allows_quantity' => false,
                 'actual_quantity' => null,
                 'requires_document' => false, // документ всегда опционален для внеплановых
-                'document_name'   => $adhoc->document_name,
-                'document_path'  => $adhoc->document_path,
+                'documents'       => $this->docs($adhoc),
                 'children'        => [],
             ];
         }
@@ -420,7 +480,7 @@ class BuhTasksController extends Controller
             $reviewPlanned = BuhTaskLog::where('status', 'review')
                 ->whereIn('client_id', $myClientIds)
                 ->where('employee_id', '!=', $employee->id)
-                ->with(['estimateItem.service', 'client:id,name', 'employee:id,full_name'])
+                ->with(['estimateItem.service', 'client:id,name', 'employee:id,full_name', 'documents'])
                 ->get();
             foreach ($reviewPlanned as $log) {
                 $item    = $log->estimateItem;
@@ -454,8 +514,7 @@ class BuhTasksController extends Controller
                     'allows_quantity' => (bool) ($service?->allows_quantity),
                     'actual_quantity' => $log->actual_quantity,
                     'requires_document' => (bool) ($service?->requires_document),
-                    'document_name'   => $log->document_name,
-                    'document_path'   => $log->document_path,
+                    'documents'       => $this->docs($log),
                     'force_closed'        => (bool) $log->force_closed,
                     'force_close_comment' => $log->force_close_comment,
                     'children'        => [],
@@ -465,7 +524,7 @@ class BuhTasksController extends Controller
             $reviewAdhoc = BuhAdhocTask::where('status', 'review')
                 ->whereIn('client_id', $myClientIds)
                 ->where('employee_id', '!=', $employee->id)
-                ->with(['client:id,name', 'employee:id,full_name'])
+                ->with(['client:id,name', 'employee:id,full_name', 'documents'])
                 ->get();
             foreach ($reviewAdhoc as $a) {
                 $tasks[] = [
@@ -497,8 +556,7 @@ class BuhTasksController extends Controller
                     'allows_quantity' => false,
                     'actual_quantity' => null,
                     'requires_document' => false,
-                    'document_name'   => $a->document_name,
-                    'document_path'   => $a->document_path,
+                    'documents'       => $this->docs($a),
                     'children'        => [],
                 ];
             }
@@ -509,7 +567,7 @@ class BuhTasksController extends Controller
             ->where('status', 'completed')
             ->whereNotNull('completed_at')
             ->where('completed_at', '>=', $historyFrom)
-            ->with(['estimateItem.service', 'estimateItem.children.service', 'client:id,name'])
+            ->with(['estimateItem.service', 'estimateItem.children.service', 'client:id,name', 'documents'])
             ->get()
             ->map(function ($l) use ($logs) {
                 $item    = $l->estimateItem;
@@ -532,8 +590,7 @@ class BuhTasksController extends Controller
                     'quantity'         => (int) ($item?->quantity ?? 0),
                     'actual_quantity'  => $l->actual_quantity,
                     'requires_document' => (bool) ($service?->requires_document),
-                    'document_name'    => $l->document_name,
-                    'document_path'    => $l->document_path,
+                    'documents'        => $this->docs($l),
                     'force_closed'        => (bool) $l->force_closed,
                     'force_close_comment' => $l->force_close_comment,
                     'children'         => ($item?->children ?? collect())->map(function ($child) use ($logs, $l) {
@@ -549,8 +606,7 @@ class BuhTasksController extends Controller
                             'quantity'          => (int) $child->quantity,
                             'actual_quantity'   => $childLog?->actual_quantity,
                             'requires_document' => (bool) ($cs?->requires_document),
-                            'document_name'     => $childLog?->document_name,
-                            'document_path'     => $childLog?->document_path,
+                            'documents'         => $childLog ? $this->docs($childLog) : [],
                         ];
                     })->values()->toArray(),
                 ];
@@ -559,7 +615,7 @@ class BuhTasksController extends Controller
             ->where('status', 'completed')
             ->whereNotNull('completed_at')
             ->where('completed_at', '>=', $historyFrom)
-            ->with('client:id,name')
+            ->with('client:id,name', 'documents')
             ->get()
             ->map(fn ($a) => [
                 'id'           => 'adhoc_' . $a->id,
@@ -577,8 +633,7 @@ class BuhTasksController extends Controller
                 'quantity'         => 1,
                 'actual_quantity'  => null,
                 'requires_document' => false,
-                'document_name'    => $a->document_name,
-                'document_path'    => $a->document_path,
+                'documents'        => $this->docs($a),
                 'children'         => [],
             ]);
         // Выполненные задачи бухгалтеров по моим клиентам (этап 2): попадают в ту же вкладку
@@ -592,7 +647,7 @@ class BuhTasksController extends Controller
                 ->where('status', 'completed')
                 ->whereNotNull('completed_at')
                 ->where('completed_at', '>=', $historyFrom)
-                ->with(['estimateItem.service', 'estimateItem.children.service', 'client:id,name'])
+                ->with(['estimateItem.service', 'estimateItem.children.service', 'client:id,name', 'documents'])
                 ->get()
                 ->map(function ($l) use ($teamLogs, $employeeNames) {
                     $item    = $l->estimateItem;
@@ -616,8 +671,7 @@ class BuhTasksController extends Controller
                         'quantity'         => (int) ($item?->quantity ?? 0),
                         'actual_quantity'  => $l->actual_quantity,
                         'requires_document' => (bool) ($service?->requires_document),
-                        'document_name'    => $l->document_name,
-                        'document_path'    => $l->document_path,
+                        'documents'        => $this->docs($l),
                         'force_closed'        => (bool) $l->force_closed,
                         'force_close_comment' => $l->force_close_comment,
                         'children'         => ($item?->children ?? collect())->map(function ($child) use ($teamLogs, $l) {
@@ -633,8 +687,7 @@ class BuhTasksController extends Controller
                                 'quantity'          => (int) $child->quantity,
                                 'actual_quantity'   => $childLog?->actual_quantity,
                                 'requires_document' => (bool) ($cs?->requires_document),
-                                'document_name'     => $childLog?->document_name,
-                                'document_path'     => $childLog?->document_path,
+                                'documents'         => $childLog ? $this->docs($childLog) : [],
                             ];
                         })->values()->toArray(),
                     ];
@@ -645,7 +698,7 @@ class BuhTasksController extends Controller
                 ->where('status', 'completed')
                 ->whereNotNull('completed_at')
                 ->where('completed_at', '>=', $historyFrom)
-                ->with('client:id,name')
+                ->with('client:id,name', 'documents')
                 ->get()
                 ->map(fn ($a) => [
                     'id'           => 'team_adhoc_' . $a->id,
@@ -664,8 +717,7 @@ class BuhTasksController extends Controller
                     'quantity'         => 1,
                     'actual_quantity'  => null,
                     'requires_document' => false,
-                    'document_name'    => $a->document_name,
-                    'document_path'    => $a->document_path,
+                    'documents'        => $this->docs($a),
                     'children'         => [],
                 ]);
         }
@@ -819,7 +871,7 @@ class BuhTasksController extends Controller
     {
         $this->authorizeLog($log);
 
-        if ($log->estimateItem?->service?->requires_document && !$log->document_path) {
+        if ($log->estimateItem?->service?->requires_document && !$log->documents()->exists()) {
             return response()->json([
                 'success'            => false,
                 'requires_document'  => true,
@@ -974,15 +1026,25 @@ class BuhTasksController extends Controller
         $this->authorizeLog($log);
 
         $request->validate([
-            'file' => ['required', 'file', 'max:40960'],
+            'file' => $this->documentFileRules(),
         ], [
             'file.required' => 'Выберите файл',
             'file.file'     => 'Не удалось прочитать файл — возможно, он превышает лимит сервера',
             'file.max'      => 'Файл не должен превышать 40 МБ',
         ]);
 
-        if ($log->document_path) {
-            Storage::disk('public')->delete($log->document_path);
+        if ($this->documentsLocked($log)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Нельзя менять документы у закрытой задачи или задачи на проверке',
+            ], 422);
+        }
+
+        if ($log->documents()->count() >= self::MAX_DOCUMENTS) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Не больше ' . self::MAX_DOCUMENTS . ' документов на задачу',
+            ], 422);
         }
 
         $file         = $request->file('file');
@@ -991,9 +1053,27 @@ class BuhTasksController extends Controller
         $safeName     = pathinfo($originalName, PATHINFO_FILENAME) . '_' . time() . '.' . $extension;
         $path         = $file->storeAs('buh_task_documents/' . $log->id, $safeName, 'public');
 
-        $log->document_path = $path;
-        $log->document_name = $originalName;
-        $log->save();
+        $log->documents()->create(['path' => $path, 'name' => $originalName]);
+
+        return response()->json(['success' => true, 'log' => $this->formatLog($log)]);
+    }
+
+    /** Удаление прикреплённого документа — пока задача не закрыта и не на проверке. */
+    public function deleteDocument(BuhTaskLog $log, BuhTaskDocument $document)
+    {
+        $this->authorizeLog($log);
+        abort_unless($document->documentable_type === BuhTaskLog::class
+            && (int) $document->documentable_id === (int) $log->id, 404);
+
+        if ($this->documentsLocked($log)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Нельзя удалить документ у закрытой задачи или задачи на проверке',
+            ], 422);
+        }
+
+        Storage::disk('public')->delete($document->path);
+        $document->delete();
 
         return response()->json(['success' => true, 'log' => $this->formatLog($log)]);
     }
@@ -1014,7 +1094,7 @@ class BuhTasksController extends Controller
             'description'     => 'nullable|string|max:2000',
             'requires_review' => 'boolean',
             'due_date'        => 'required|date',
-            'file'            => 'nullable|file|max:40960', // необязательный документ
+            'file'            => $this->documentFileRules(required: false), // необязательный документ
         ], [
             'employee_id.required' => 'Выберите сотрудника',
             'name.required'        => 'Введите название задачи',
@@ -1054,7 +1134,7 @@ class BuhTasksController extends Controller
             $originalName = $file->getClientOriginalName();
             $safeName     = pathinfo($originalName, PATHINFO_FILENAME) . '_' . time() . '.' . $file->getClientOriginalExtension();
             $path         = $file->storeAs('buh_adhoc_documents/' . $adhoc->id, $safeName, 'public');
-            $adhoc->update(['document_path' => $path, 'document_name' => $originalName]);
+            $adhoc->documents()->create(['path' => $path, 'name' => $originalName]);
         }
 
         return response()->json([
@@ -1075,8 +1155,7 @@ class BuhTasksController extends Controller
                 'description'     => $adhoc->description,
                 'requires_review' => $adhoc->requires_review,
                 'requires_document' => false, // документ всегда опционален для внеплановых
-                'document_name'   => $adhoc->document_name,
-                'document_path'   => $adhoc->document_path,
+                'documents'       => $this->docs($adhoc->load('documents')),
                 'review_comment'  => null,
                 'employee_comment' => null,
                 'cost'            => 0,
@@ -1266,15 +1345,25 @@ class BuhTasksController extends Controller
         $this->authorizeAdhoc($task);
 
         $request->validate([
-            'file' => ['required', 'file', 'max:40960'],
+            'file' => $this->documentFileRules(),
         ], [
             'file.required' => 'Выберите файл',
             'file.file'     => 'Не удалось прочитать файл — возможно, он превышает лимит сервера',
             'file.max'      => 'Файл не должен превышать 40 МБ',
         ]);
 
-        if ($task->document_path) {
-            Storage::disk('public')->delete($task->document_path);
+        if ($this->documentsLocked($task)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Нельзя менять документы у закрытой задачи или задачи на проверке',
+            ], 422);
+        }
+
+        if ($task->documents()->count() >= self::MAX_DOCUMENTS) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Не больше ' . self::MAX_DOCUMENTS . ' документов на задачу',
+            ], 422);
         }
 
         $file         = $request->file('file');
@@ -1283,9 +1372,27 @@ class BuhTasksController extends Controller
         $safeName     = pathinfo($originalName, PATHINFO_FILENAME) . '_' . time() . '.' . $extension;
         $path         = $file->storeAs('buh_adhoc_documents/' . $task->id, $safeName, 'public');
 
-        $task->document_path = $path;
-        $task->document_name = $originalName;
-        $task->save();
+        $task->documents()->create(['path' => $path, 'name' => $originalName]);
+
+        return response()->json(['success' => true, 'log' => $this->formatAdhoc($task)]);
+    }
+
+    /** Удаление документа внеплановой задачи — пока не закрыта и не на проверке. */
+    public function deleteDocumentAdhoc(BuhAdhocTask $task, BuhTaskDocument $document)
+    {
+        $this->authorizeAdhoc($task);
+        abort_unless($document->documentable_type === BuhAdhocTask::class
+            && (int) $document->documentable_id === (int) $task->id, 404);
+
+        if ($this->documentsLocked($task)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Нельзя удалить документ у закрытой задачи или задачи на проверке',
+            ], 422);
+        }
+
+        Storage::disk('public')->delete($document->path);
+        $document->delete();
 
         return response()->json(['success' => true, 'log' => $this->formatAdhoc($task)]);
     }
@@ -1317,6 +1424,11 @@ class BuhTasksController extends Controller
     {
         $this->authorizeAdhoc($task);
 
+        // Файлы: и новые (documents), и оставшийся от старой схемы одиночный
+        foreach ($task->documents as $doc) {
+            Storage::disk('public')->delete($doc->path);
+        }
+        $task->documents()->delete();
         if ($task->document_path) {
             Storage::disk('public')->delete($task->document_path);
         }
@@ -1342,6 +1454,15 @@ class BuhTasksController extends Controller
         abort_if($task->employee_id !== $employee->id, 403);
     }
 
+    /** Документы задачи для фронта: [{id, name, path}], по порядку добавления. */
+    private function docs($model): array
+    {
+        return $model->documents
+            ->map(fn ($d) => ['id' => $d->id, 'name' => $d->name, 'path' => $d->path])
+            ->values()
+            ->all();
+    }
+
     private function formatLog(BuhTaskLog $log): array
     {
         return [
@@ -1351,8 +1472,7 @@ class BuhTasksController extends Controller
             'review_comment'  => $log->review_comment,
             'employee_comment' => $log->employee_comment,
             'actual_quantity' => $log->actual_quantity,
-            'document_name'   => $log->document_name,
-            'document_path'   => $log->document_path,
+            'documents'       => $this->docs($log->load('documents')),
             'force_closed'        => (bool) $log->force_closed,
             'force_close_comment' => $log->force_close_comment,
         ];
@@ -1366,8 +1486,7 @@ class BuhTasksController extends Controller
             'elapsed_seconds' => $this->calcElapsed($task),
             'review_comment'  => $task->review_comment,
             'employee_comment' => $task->employee_comment,
-            'document_name'   => $task->document_name,
-            'document_path'   => $task->document_path,
+            'documents'       => $this->docs($task->load('documents')),
         ];
     }
 

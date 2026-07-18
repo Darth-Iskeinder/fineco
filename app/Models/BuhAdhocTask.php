@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 class BuhAdhocTask extends Model
 {
@@ -46,5 +47,10 @@ class BuhAdhocTask extends Model
     public function reviewer(): BelongsTo
     {
         return $this->belongsTo(Employee::class, 'reviewed_by');
+    }
+
+    public function documents(): MorphMany
+    {
+        return $this->morphMany(BuhTaskDocument::class, 'documentable');
     }
 }
