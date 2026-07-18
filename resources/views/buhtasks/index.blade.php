@@ -1234,25 +1234,17 @@
                                     </button>
                                 </div>
                             </template>
-                            <template x-if="(tasks[taskModalIdx].documents || []).length === 0 && !tasks[taskModalIdx].pending_file_name">
+                            <template x-if="(tasks[taskModalIdx].documents || []).length === 0 && !tasks[taskModalIdx].doc_uploading">
                                 <span class="text-sm text-slate-400 italic">Не прикреплены</span>
                             </template>
                         </div>
                         <div x-show="canEditDocs(tasks[taskModalIdx])" class="flex items-center gap-2 mt-2">
-                            <template x-if="tasks[taskModalIdx].pending_file_name">
-                                <span class="text-sm text-slate-600 truncate max-w-[220px]" x-text="tasks[taskModalIdx].pending_file_name"></span>
-                            </template>
-                            <label class="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-600 text-xs font-medium rounded-lg hover:bg-slate-200 cursor-pointer transition-colors">
-                                <span x-text="(tasks[taskModalIdx].documents || []).length ? 'Прикрепить ещё' : 'Выбрать файл'"></span>
-                                <input type="file" class="hidden" @change="selectRootDocument(taskModalIdx, $event)">
+                            <span x-show="tasks[taskModalIdx].doc_uploading" class="text-sm text-slate-500">Загрузка...</span>
+                            <label class="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-600 text-xs font-medium rounded-lg hover:bg-slate-200 cursor-pointer transition-colors"
+                                   :class="tasks[taskModalIdx].doc_uploading ? 'opacity-50 pointer-events-none' : ''">
+                                <span x-text="(tasks[taskModalIdx].documents || []).length ? 'Прикрепить ещё' : 'Выбрать файлы'"></span>
+                                <input type="file" multiple class="hidden" @change="selectRootDocument(taskModalIdx, $event)">
                             </label>
-                            <template x-if="tasks[taskModalIdx].pending_file_name">
-                                <button @click="saveRootDocument(taskModalIdx)"
-                                        :disabled="tasks[taskModalIdx].doc_uploading"
-                                        class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
-                                    <span x-text="tasks[taskModalIdx].doc_uploading ? 'Сохранение...' : 'Сохранить'"></span>
-                                </button>
-                            </template>
                         </div>
                     </div>
                 </template>
@@ -1302,23 +1294,15 @@
                                                 </div>
                                             </template>
                                             <div class="flex items-center gap-2 mt-0.5">
-                                                <template x-if="(child.documents || []).length === 0 && !child.pending_file_name">
+                                                <template x-if="(child.documents || []).length === 0 && !child.doc_uploading">
                                                     <span class="text-slate-400 italic">Документ не прикреплён</span>
                                                 </template>
-                                                <template x-if="child.pending_file_name">
-                                                    <span class="text-slate-600 truncate max-w-[140px]" x-text="child.pending_file_name"></span>
-                                                </template>
-                                                <label class="ml-auto inline-flex items-center px-2 py-1 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 cursor-pointer transition-colors">
-                                                    <span x-text="(child.documents || []).length ? 'Прикрепить ещё' : 'Выбрать файл'"></span>
-                                                    <input type="file" class="hidden" @change="selectChildDocument(taskModalIdx, cidx, $event)">
+                                                <span x-show="child.doc_uploading" class="text-slate-500">Загрузка...</span>
+                                                <label class="ml-auto inline-flex items-center px-2 py-1 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 cursor-pointer transition-colors"
+                                                       :class="child.doc_uploading ? 'opacity-50 pointer-events-none' : ''">
+                                                    <span x-text="(child.documents || []).length ? 'Прикрепить ещё' : 'Выбрать файлы'"></span>
+                                                    <input type="file" multiple class="hidden" @change="selectChildDocument(taskModalIdx, cidx, $event)">
                                                 </label>
-                                                <template x-if="child.pending_file_name">
-                                                    <button @click="saveChildDocument(taskModalIdx, cidx)"
-                                                            :disabled="child.doc_uploading"
-                                                            class="inline-flex items-center px-2 py-1 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
-                                                        <span x-text="child.doc_uploading ? 'Сохранение...' : 'Сохранить'"></span>
-                                                    </button>
-                                                </template>
                                             </div>
                                         </div>
                                     </template>
@@ -1563,8 +1547,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             client_resumed_at: null,
             _seq: i,
             doc_uploading: false,
-            pending_file_name: null,
-            children: (t.children || []).map(c => ({ ...c, doc_uploading: false, pending_file_name: null })),
+            children: (t.children || []).map(c => ({ ...c, doc_uploading: false })),
         })),
         completed: completed || [],
         completedPage: 1,
@@ -1817,20 +1800,17 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             return !task.review_for_head && !['completed', 'review'].includes(task.status);
         },
 
-        selectRootDocument(taskIdx, event) {
-            const file = event.target.files[0];
-            if (!file) return;
-            pendingFiles.set('root_' + taskIdx, file);
-            this.patch(taskIdx, { pending_file_name: file.name });
+        // Выбранные файлы (можно несколько сразу) загружаются немедленно, по одному —
+        // каждый успешный сразу появляется в списке документов задачи.
+        async selectRootDocument(taskIdx, event) {
+            const files = Array.from(event.target.files || []);
             event.target.value = '';
-        },
-
-        async saveRootDocument(taskIdx) {
-            const file = pendingFiles.get('root_' + taskIdx);
-            if (!file) return;
+            if (!files.length) return;
             const task = this.tasks[taskIdx];
-
-            this.patch(taskIdx, { doc_uploading: true });
+            if ((task.documents || []).length + files.length > 10) {
+                alert('Не больше 10 документов на задачу');
+                return;
+            }
 
             // Внеплановая задача грузит документ прямо в себя; плановая — через лог.
             let docUrl;
@@ -1838,25 +1818,28 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 docUrl = `/buhtasks/adhoc/${task.adhoc_id}/document`;
             } else {
                 const logId = await this.ensureLog(taskIdx);
-                if (!logId) { this.patch(taskIdx, { doc_uploading: false }); return; }
+                if (!logId) return;
                 docUrl = `/buhtasks/logs/${logId}/document`;
             }
 
-            const fd = new FormData();
-            fd.append('file', file);
-            const r = await fetch(docUrl, {
-                method: 'POST',
-                headers: { 'X-CSRF-TOKEN': this.csrf(), 'Accept': 'application/json' },
-                body: fd,
-            });
-            const data = await r.json();
-            if (data.success) {
-                pendingFiles.delete('root_' + taskIdx);
-                this.patch(taskIdx, { doc_uploading: false, pending_file_name: null, documents: data.log.documents });
-            } else {
-                this.patch(taskIdx, { doc_uploading: false });
-                if (data.message) alert(data.message);
+            this.patch(taskIdx, { doc_uploading: true });
+            for (const file of files) {
+                const fd = new FormData();
+                fd.append('file', file);
+                const r = await fetch(docUrl, {
+                    method: 'POST',
+                    headers: { 'X-CSRF-TOKEN': this.csrf(), 'Accept': 'application/json' },
+                    body: fd,
+                });
+                const data = await r.json();
+                if (data.success) {
+                    this.patch(taskIdx, { documents: data.log.documents });
+                } else {
+                    if (data.message) alert(data.message);
+                    break;
+                }
             }
+            this.patch(taskIdx, { doc_uploading: false });
         },
 
         // Удаление прикреплённого документа задачи (пока не закрыта/не на проверке)
@@ -1885,41 +1868,37 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             }
         },
 
-        selectChildDocument(taskIdx, cidx, event) {
-            const file = event.target.files[0];
-            if (!file) return;
-            const task = this.tasks[taskIdx];
-            pendingFiles.set('child_' + taskIdx + '_' + cidx, file);
-            task.children[cidx] = { ...task.children[cidx], pending_file_name: file.name };
+        async selectChildDocument(taskIdx, cidx, event) {
+            const files = Array.from(event.target.files || []);
             event.target.value = '';
-        },
-
-        async saveChildDocument(taskIdx, cidx) {
-            const key = 'child_' + taskIdx + '_' + cidx;
-            const file = pendingFiles.get(key);
-            if (!file) return;
+            if (!files.length) return;
             const task = this.tasks[taskIdx];
-
-            task.children[cidx] = { ...task.children[cidx], doc_uploading: true };
+            if ((task.children[cidx].documents || []).length + files.length > 10) {
+                alert('Не больше 10 документов на задачу');
+                return;
+            }
 
             const logId = await this.ensureChildLog(taskIdx, cidx);
-            if (!logId) { task.children[cidx] = { ...task.children[cidx], doc_uploading: false }; return; }
+            if (!logId) return;
 
-            const fd = new FormData();
-            fd.append('file', file);
-            const r = await fetch(`/buhtasks/logs/${logId}/document`, {
-                method: 'POST',
-                headers: { 'X-CSRF-TOKEN': this.csrf(), 'Accept': 'application/json' },
-                body: fd,
-            });
-            const data = await r.json();
-            if (data.success) {
-                pendingFiles.delete(key);
-                task.children[cidx] = { ...task.children[cidx], doc_uploading: false, pending_file_name: null, documents: data.log.documents };
-            } else {
-                task.children[cidx] = { ...task.children[cidx], doc_uploading: false };
-                if (data.message) alert(data.message);
+            task.children[cidx] = { ...task.children[cidx], doc_uploading: true };
+            for (const file of files) {
+                const fd = new FormData();
+                fd.append('file', file);
+                const r = await fetch(`/buhtasks/logs/${logId}/document`, {
+                    method: 'POST',
+                    headers: { 'X-CSRF-TOKEN': this.csrf(), 'Accept': 'application/json' },
+                    body: fd,
+                });
+                const data = await r.json();
+                if (data.success) {
+                    task.children[cidx] = { ...task.children[cidx], documents: data.log.documents };
+                } else {
+                    if (data.message) alert(data.message);
+                    break;
+                }
             }
+            task.children[cidx] = { ...task.children[cidx], doc_uploading: false };
         },
 
         // Сортировка колонок: клик переключает asc → desc → исходный порядок.
