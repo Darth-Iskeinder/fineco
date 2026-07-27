@@ -5,7 +5,7 @@
 
 @section('content')
 <div x-data="{
-    showCreateModal: false,
+    showCreateModal: {{ $errors->any() ? 'true' : 'false' }},
     showDeleteModal: false,
     deleteEmployee: null,
     selectedRowId: null,
@@ -260,17 +260,17 @@
                         <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
                             <div class="sm:col-span-2">
                                 <label for="create_full_name" class="block text-sm font-medium text-slate-700 mb-2">ФИО <span class="text-red-500">*</span></label>
-                                <input type="text" name="full_name" id="create_full_name" required class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
+                                <input type="text" name="full_name" id="create_full_name" value="{{ old('full_name') }}" required class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
                             </div>
 
                             <div>
                                 <label for="create_email" class="block text-sm font-medium text-slate-700 mb-2">Email (логин) <span class="text-red-500">*</span></label>
-                                <input type="email" name="email" id="create_email" required class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
+                                <input type="email" name="email" id="create_email" value="{{ old('email') }}" required class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
                             </div>
 
                             <div>
                                 <label for="create_phone" class="block text-sm font-medium text-slate-700 mb-2">Телефон</label>
-                                <input type="tel" name="phone" id="create_phone" placeholder="+996 (___) ___-___" class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
+                                <input type="tel" name="phone" id="create_phone" value="{{ old('phone') }}" placeholder="+996 (___) ___-___" class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
                             </div>
 
                             <div x-data="{ show: false }">
@@ -293,7 +293,9 @@
                             <div x-data="{ show: false }">
                                 <label for="create_password_confirmation" class="block text-sm font-medium text-slate-700 mb-2">Подтверждение пароля <span class="text-red-500">*</span></label>
                                 <div class="relative">
-                                    <input :type="show ? 'text' : 'password'" name="password_confirmation" id="create_password_confirmation" required class="block w-full px-4 py-2.5 pr-11 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
+                                    <input :type="show ? 'text' : 'password'" name="password_confirmation" id="create_password_confirmation" required
+                                           @input="$el.setCustomValidity($el.value === document.getElementById('create_password').value ? '' : 'Пароли не совпадают')"
+                                           class="block w-full px-4 py-2.5 pr-11 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
                                     <button type="button" @click="show = !show" class="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600 transition-colors duration-150" :aria-label="show ? 'Скрыть пароль' : 'Показать пароль'">
                                         <svg x-show="!show" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -311,7 +313,7 @@
                                 <select name="role_id" id="create_role_id" x-model="createRoleId" required class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
                                     <option value="">Выберите роль</option>
                                     @foreach($roles as $role)
-                                        <option value="{{ $role->id }}">{{ $role->display_name }}</option>
+                                        <option value="{{ $role->id }}" @selected(old('role_id') == $role->id)>{{ $role->display_name }}</option>
                                     @endforeach
                                 </select>
                             </div>

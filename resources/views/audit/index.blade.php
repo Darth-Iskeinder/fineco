@@ -90,9 +90,7 @@
                     </p>
                 </div>
 
-                @if($errors->any())
-                    <p class="mt-3 text-sm text-red-600">{{ $errors->first() }}</p>
-                @endif
+                {{-- Ошибки валидации выводит общий блок в макете --}}
             </form>
         </div>
 
