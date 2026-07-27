@@ -346,8 +346,8 @@
                 <template x-if="employee.clients && employee.clients.length > 0">
                     <div class="divide-y divide-slate-100">
                         <template x-for="client in employee.clients" :key="client.id">
-                            <div class="py-3 flex items-center justify-between">
-                                <div>
+                            <div class="py-3 flex items-center justify-between gap-3">
+                                <div class="min-w-0">
                                     <div class="text-sm font-medium text-slate-800" x-text="client.name"></div>
                                     <div class="text-xs text-slate-500 mt-0.5" x-text="'ИНН: ' + (client.inn || '—')"></div>
                                 </div>
@@ -369,7 +369,8 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                             </svg>
                         </div>
-                        <p class="text-sm text-slate-500">Нет привязанных компаний</p>
+                        <p class="text-sm text-slate-500">Нет компаний</p>
+                        <p class="text-xs text-slate-400 mt-1">Сотрудник не назначен ответственным, не входит в команду клиента и не ведёт задачи</p>
                     </div>
                 </template>
             </div>
@@ -466,7 +467,7 @@ function employeeShow() {
                 'role_name' => $employee->role?->display_name,
                 'module_ids' => $employee->modules->pluck('id')->toArray(),
                 'module_names' => $employee->modules->pluck('display_name')->toArray(),
-                'clients' => $employee->clients->map(fn($c) => ['id' => $c->id, 'name' => $c->name, 'inn' => $c->inn])->values()->toArray(),
+                'clients' => $clients->toArray(),
             ]);
             this.resetForm();
         },

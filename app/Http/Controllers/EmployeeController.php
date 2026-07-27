@@ -2,7 +2,11 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\BuhAdhocTask;
+use App\Models\BuhTaskLog;
+use App\Models\Client;
 use App\Models\Employee;
+use App\Models\EstimateItem;
 use App\Models\Module;
 use App\Models\Role;
 use Illuminate\Http\Request;
@@ -34,9 +38,53 @@ class EmployeeController extends Controller
 
         return view('employees.show', [
             'employee' => $employee,
+            'clients' => $this->clientsOfEmployee($employee),
             'roles' => Role::where('name', '!=', Role::MANAGER)->get(),
             'modules' => Module::active()->ordered()->get(),
         ]);
+    }
+
+    /**
+     * Компании, к которым сотрудник прикреплён.
+     *
+     * Прикрепление в системе оформляется тремя способами, и раньше профиль знал
+     * только про один (команду клиента), из-за чего список был неполным:
+     *   - ответственное лицо клиента (clients.responsible_employee_id);
+     *   - исполнитель БП в смете (estimate_items.assignee_id);
+     *   - сотрудник в команде клиента (client_employee).
+     *
+     * Фактически закрытые задачи источником не считаем: задачу может взять кто угодно
+     * (в живом списке исполнителем становится тот, кто её открыл), и такой клиент
+     * попадал бы в профиль случайного человека.
+     *
+     * @return \Illuminate\Support\Collection<int, \App\Models\Client>
+     */
+    private function clientsOfEmployee(Employee $employee)
+    {
+        $assigneeClientIds = EstimateItem::query()
+            ->where('assignee_id', $employee->id)
+            ->join('estimates', 'estimates.id', '=', 'estimate_items.estimate_id')
+            ->distinct()
+            ->pluck('estimates.client_id');
+
+        $ids = Client::where('responsible_employee_id', $employee->id)->pluck('id')
+            ->merge($assigneeClientIds)
+            ->merge($employee->clients->pluck('id'))
+            ->unique();
+
+        if ($ids->isEmpty()) {
+            return collect();
+        }
+
+        return Client::whereIn('id', $ids)
+            ->orderBy('name')
+            ->get(['id', 'name', 'inn'])
+            ->map(fn (Client $client) => [
+                'id'   => $client->id,
+                'name' => $client->name,
+                'inn'  => $client->inn,
+            ])
+            ->values();
     }
 
     public function search(Request $request)
