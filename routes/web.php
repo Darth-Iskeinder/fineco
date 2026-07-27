@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AuditController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BuhSmetaController;
 use App\Http\Controllers\BuhTasksController;
@@ -121,6 +122,35 @@ Route::middleware('auth:employee')->group(function () {
         // Напоминания о сроках (выход воркера tasks:generate)
         Route::post('/reminders/{reminder}/complete', [BuhTasksController::class, 'completeReminder'])->name('reminders.complete');
         Route::post('/reminders/{reminder}/reopen', [BuhTasksController::class, 'reopenReminder'])->name('reminders.reopen');
+    });
+
+    // Модуль Аудит — независимая проверка качества закрытой работы
+    Route::prefix('audit')->name('audit.')->middleware('audit-access')->group(function () {
+        Route::get('/', [AuditController::class, 'index'])->name('index');
+        Route::post('/', [AuditController::class, 'store'])->name('store');
+
+        // Реестр замечаний (объявлен до /{audit}, иначе «findings» примут за id аудита)
+        Route::get('/findings', [AuditController::class, 'findings'])->name('findings');
+        Route::post('/findings/{review}/send', [AuditController::class, 'sendFinding'])->name('findings.send');
+        Route::post('/findings/{review}/resolve', [AuditController::class, 'resolveFinding'])->name('findings.resolve');
+        Route::post('/findings/{review}/return', [AuditController::class, 'returnFinding'])->name('findings.return');
+        Route::post('/findings/{review}/reassign', [AuditController::class, 'reassignFinding'])->name('findings.reassign');
+
+        Route::get('/{audit}', [AuditController::class, 'show'])->name('show');
+        Route::delete('/{audit}', [AuditController::class, 'destroy'])->name('destroy');
+        Route::post('/{audit}/complete', [AuditController::class, 'complete'])->name('complete');
+        Route::post('/{audit}/reopen', [AuditController::class, 'reopen'])->name('reopen');
+
+        // Вердикты по закрытым БП
+        Route::post('/{audit}/verdict', [AuditController::class, 'saveVerdict'])->name('verdict.save');
+        Route::post('/{audit}/verdict/delete', [AuditController::class, 'deleteVerdict'])->name('verdict.delete');
+
+        // Чек-лист
+        Route::post('/{audit}/checklist', [AuditController::class, 'storeChecklistItem'])->name('checklist.store');
+        Route::put('/{audit}/checklist/{item}', [AuditController::class, 'updateChecklistItem'])->name('checklist.update');
+        Route::delete('/{audit}/checklist/{item}', [AuditController::class, 'destroyChecklistItem'])->name('checklist.destroy');
+        Route::post('/{audit}/checklist/section/rename', [AuditController::class, 'renameSection'])->name('checklist.section.rename');
+        Route::post('/{audit}/checklist/section/delete', [AuditController::class, 'destroySection'])->name('checklist.section.destroy');
     });
 
     // Настройки (доступ по модулю settings; админ имеет доступ всегда)

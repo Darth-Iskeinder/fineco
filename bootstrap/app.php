@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\AdminMiddleware;
+use App\Http\Middleware\AuditAccessMiddleware;
 use App\Http\Middleware\CheckModuleAccess;
 use App\Http\Middleware\ManagerMiddleware;
 use Illuminate\Foundation\Application;
@@ -19,6 +20,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'module' => CheckModuleAccess::class,
             'admin' => AdminMiddleware::class,
             'manager' => ManagerMiddleware::class,
+            'audit-access' => AuditAccessMiddleware::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
