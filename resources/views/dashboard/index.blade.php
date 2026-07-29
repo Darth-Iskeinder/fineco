@@ -281,8 +281,8 @@
                             <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200">Сотрудник</th>
                             <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right">Задач</th>
                             <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200" title="Состав задач месяца: выполнено / на проверке / в работе / не начато">Состав</th>
-                            <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right">Выполнено</th>
-                            <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right">Вовремя</th>
+                            <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right" title="Доля закрытых задач месяца: выполнено из всех">Выполнено</th>
+                            <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right" title="Доля выполненных задач, закрытых в срок">Вовремя</th>
                             <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right">Просрочено</th>
                             <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right">На проверке</th>
                             <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right" title="Сколько раз главбух возвращал задачи этого месяца на доработку">Возвраты</th>
@@ -291,7 +291,11 @@
                     </thead>
                     <tbody>
                         @foreach($byEmployee as $empId => $row)
-                            @php $pct = $row['completed'] > 0 ? (int) round($row['on_time'] / $row['completed'] * 100) : null; @endphp
+                            @php
+                                $pct = $row['completed'] > 0 ? (int) round($row['on_time'] / $row['completed'] * 100) : null;
+                                // Доля закрытых задач месяца — по ней решают вопрос о полной выплате ЗП
+                                $donePct = $row['total'] > 0 ? (int) round($row['completed'] / $row['total'] * 100) : null;
+                            @endphp
                             <tr class="border-b border-slate-100 cursor-pointer hover:bg-slate-50 transition-colors"
                                 @click="open = open === {{ $empId }} ? null : {{ $empId }}">
                                 <td class="px-4 py-3 font-medium text-slate-700">
@@ -315,7 +319,19 @@
                                         <span class="text-slate-300">—</span>
                                     @endif
                                 </td>
-                                <td class="px-4 py-3 text-right text-slate-500 tabular-nums">{{ $row['completed'] }}</td>
+                                <td class="px-4 py-3 text-right">
+                                    @if($donePct === null)
+                                        <span class="text-slate-300">—</span>
+                                    @else
+                                        <div class="flex items-center justify-end gap-2">
+                                            <span class="w-10 h-1 rounded-full bg-slate-100 overflow-hidden">
+                                                <span class="block h-full rounded-full {{ $meterColor($donePct) }}" style="width: {{ $donePct }}%"></span>
+                                            </span>
+                                            <span class="text-base font-semibold text-slate-800 tabular-nums w-11">{{ $donePct }}%</span>
+                                        </div>
+                                        <div class="mt-0.5 text-xs text-slate-400 tabular-nums">{{ $row['completed'] }} из {{ $row['total'] }}</div>
+                                    @endif
+                                </td>
                                 <td class="px-4 py-3 text-right">
                                     @if($pct === null)
                                         <span class="text-slate-300">—</span>
