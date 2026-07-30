@@ -47,18 +47,24 @@
         'is_active' => $c->is_active,
         'responsible_employee_id' => $c->responsible_employee_id,
         'responsible_name' => $c->responsibleEmployee?->full_name ?? '—',
+        'estimate_items_count' => $c->estimate_root_items_count,
     ])),
     loading: false,
     searchTimeout: null,
 
-    // Сортировка по ответственному: null → по умолчанию, 'asc' → А-Я, 'desc' → Я-А.
+    // Сортировка: колонка ('name' | 'responsible') + направление ('asc' → А-Я, 'desc' → Я-А).
+    // Обе null → порядок с сервера (последний созданный клиент сверху). Сортировка одна на таблицу:
+    // клик по другой колонке перехватывает её на себя.
+    sortBy: null,
     sortDir: null,
 
-    // Клиенты без ответственного («—») всегда в конце, независимо от направления.
+    // Пустые значения («—» у ответственного) всегда в конце, независимо от направления.
     get sortedClients() {
-        if (!this.sortDir) return this.clients;
+        if (!this.sortBy || !this.sortDir) return this.clients;
         const dir = this.sortDir === 'asc' ? 1 : -1;
-        const val = c => (c.responsible_name && c.responsible_name !== '—') ? c.responsible_name : '';
+        const val = this.sortBy === 'name'
+            ? (c => c.name || '')
+            : (c => (c.responsible_name && c.responsible_name !== '—') ? c.responsible_name : '');
         return [...this.clients].sort((a, b) => {
             const av = val(a), bv = val(b);
             if (!av && !bv) return 0;
@@ -68,8 +74,15 @@
         });
     },
 
-    toggleResponsibleSort() {
-        this.sortDir = this.sortDir === 'asc' ? 'desc' : (this.sortDir === 'desc' ? null : 'asc');
+    // Три состояния по кругу: А-Я → Я-А → сброс к порядку по умолчанию.
+    toggleSort(column) {
+        if (this.sortBy !== column) {
+            this.sortBy = column;
+            this.sortDir = 'asc';
+            return;
+        }
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : null;
+        if (!this.sortDir) this.sortBy = null;
     },
 
     async searchClients() {
@@ -167,10 +180,21 @@
                 <thead>
                     <tr class="bg-slate-50/80 border-b border-slate-200/50">
                         <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                            №
+                            ID
                         </th>
                         <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                            Название
+                            <button type="button" @click="toggleSort('name')"
+                                    class="group inline-flex items-center gap-1 uppercase tracking-wider hover:text-slate-700 transition-colors select-none">
+                                Название
+                                <span class="flex flex-col -space-y-1">
+                                    <svg class="w-2.5 h-2.5" :class="sortBy === 'name' && sortDir === 'asc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" fill="currentColor" viewBox="0 0 20 20">
+                                        <path d="M10 5l4 5H6l4-5z" />
+                                    </svg>
+                                    <svg class="w-2.5 h-2.5" :class="sortBy === 'name' && sortDir === 'desc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" fill="currentColor" viewBox="0 0 20 20">
+                                        <path d="M10 15l-4-5h8l-4 5z" />
+                                    </svg>
+                                </span>
+                            </button>
                         </th>
                         <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                             ИНН
@@ -182,14 +206,14 @@
                             Тарифный план
                         </th>
                         <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                            <button type="button" @click="toggleResponsibleSort()"
+                            <button type="button" @click="toggleSort('responsible')"
                                     class="group inline-flex items-center gap-1 uppercase tracking-wider hover:text-slate-700 transition-colors select-none">
                                 Ответственный
                                 <span class="flex flex-col -space-y-1">
-                                    <svg class="w-2.5 h-2.5" :class="sortDir === 'asc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" fill="currentColor" viewBox="0 0 20 20">
+                                    <svg class="w-2.5 h-2.5" :class="sortBy === 'responsible' && sortDir === 'asc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" fill="currentColor" viewBox="0 0 20 20">
                                         <path d="M10 5l4 5H6l4-5z" />
                                     </svg>
-                                    <svg class="w-2.5 h-2.5" :class="sortDir === 'desc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" fill="currentColor" viewBox="0 0 20 20">
+                                    <svg class="w-2.5 h-2.5" :class="sortBy === 'responsible' && sortDir === 'desc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" fill="currentColor" viewBox="0 0 20 20">
                                         <path d="M10 15l-4-5h8l-4 5z" />
                                     </svg>
                                 </span>
@@ -204,18 +228,30 @@
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
-                    <template x-for="(client, index) in sortedClients" :key="client.id">
+                    <template x-for="client in sortedClients" :key="client.id">
                         <tr class="hover:bg-slate-50/50 transition-colors duration-150">
                             <td class="px-6 py-4 whitespace-nowrap">
-                                <div class="text-sm text-slate-500" x-text="index + 1"></div>
+                                <div class="text-sm text-slate-500 font-mono" x-text="client.id"></div>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
-                                <a :href="'/clients/' + client.id" class="flex items-center group">
-                                    <div class="w-9 h-9 bg-gradient-to-br from-emerald-100 to-teal-100 rounded-xl flex items-center justify-center mr-3">
-                                        <span class="text-sm font-semibold text-teal-600" x-text="client.name.charAt(0)"></span>
-                                    </div>
-                                    <div class="text-sm font-medium text-slate-800 group-hover:text-indigo-600 transition-colors" x-text="client.name"></div>
-                                </a>
+                                <div class="flex items-center gap-2">
+                                    <a :href="'/clients/' + client.id" class="flex items-center group">
+                                        <div class="w-9 h-9 bg-gradient-to-br from-emerald-100 to-teal-100 rounded-xl flex items-center justify-center mr-3">
+                                            <span class="text-sm font-semibold text-teal-600" x-text="client.name.charAt(0)"></span>
+                                        </div>
+                                        <div class="text-sm font-medium text-slate-800 group-hover:text-indigo-600 transition-colors" x-text="client.name"></div>
+                                    </a>
+                                    <!-- Смета собрана — ведёт сразу в смету. Нет позиций → бейджа нет вовсе. -->
+                                    <a x-show="client.estimate_items_count > 0"
+                                       :href="'/clients/' + client.id + '/estimate/edit'"
+                                       :title="'Открыть смету — позиций: ' + client.estimate_items_count"
+                                       class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-medium bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800 transition-colors">
+                                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                        </svg>
+                                        Смета
+                                    </a>
+                                </div>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
                                 <div class="text-sm text-slate-600 font-mono" x-text="client.inn"></div>

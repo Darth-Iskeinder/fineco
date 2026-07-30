@@ -16,9 +16,13 @@ class ClientController extends Controller
 {
     public function index(Request $request)
     {
+        // Вторичная сортировка по id: у импортированных клиентов created_at совпадает
+        // с точностью до секунды, и без неё порядок «последний созданный сверху» плавает.
         $clients = Client::with(['taxSystem', 'tariff', 'responsibleEmployee'])
+            ->withCount('estimateRootItems')
             ->search($request->search)
             ->orderBy('created_at', 'desc')
+            ->orderBy('id', 'desc')
             ->get();
 
         return view('clients.index', [
@@ -35,8 +39,10 @@ class ClientController extends Controller
         $search = $request->get('q', '');
 
         $clients = Client::with(['taxSystem', 'tariff', 'responsibleEmployee'])
+            ->withCount('estimateRootItems')
             ->search($search)
             ->orderBy('created_at', 'desc')
+            ->orderBy('id', 'desc')
             ->get()
             ->map(function ($client) {
                 return [
@@ -50,6 +56,7 @@ class ClientController extends Controller
                     'is_active' => $client->is_active,
                     'responsible_employee_id' => $client->responsible_employee_id,
                     'responsible_name' => $client->responsibleEmployee?->full_name ?? '—',
+                    'estimate_items_count' => $client->estimate_root_items_count,
                 ];
             });
 

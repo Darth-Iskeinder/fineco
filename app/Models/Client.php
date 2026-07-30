@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use App\Models\OrganizationForm;
@@ -285,6 +286,17 @@ class Client extends Model
     public function estimates(): HasMany
     {
         return $this->hasMany(Estimate::class);
+    }
+
+    /**
+     * Позиции сметы верхнего уровня. Нужны для индикатора «смета собрана» в списке клиентов:
+     * сама запись estimates создаётся уже при открытии страницы сметы (firstOrCreate),
+     * поэтому признаком заполненности служит наличие позиций, а не наличие сметы.
+     */
+    public function estimateRootItems(): HasManyThrough
+    {
+        return $this->hasManyThrough(EstimateItem::class, Estimate::class)
+            ->whereNull('estimate_items.parent_id');
     }
 
     /** Индивидуальные расписания БП для этого клиента (override дефолтов БП). */
