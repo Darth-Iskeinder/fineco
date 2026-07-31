@@ -170,6 +170,53 @@ class TenantTemplateTest extends TestCase
         $this->copier->copyTo($target);
     }
 
+    /**
+     * Одинаковые коды в разных аккаунтах — норма: у каждой фирмы свой набор.
+     * Раньше уникальность была на всю базу, и копия справочников падала на
+     * «Duplicate entry». Заодно проверяем главный случай — ИНН клиента: две
+     * фирмы обязаны иметь возможность вести одного и того же клиента.
+     */
+    public function test_same_codes_and_inn_allowed_in_different_accounts(): void
+    {
+        $first  = $this->newTenant();
+        $second = $this->newTenant();
+        $code   = 'dup_' . uniqid();
+        $inn    = strtoupper(substr(md5(uniqid()), 0, 12));
+
+        foreach ([$first, $second] as $tenant) {
+            DB::table('activity_types')->insert([
+                'tenant_id' => $tenant->id, 'name' => 'Торговля', 'code' => $code,
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+            DB::table('clients')->insert([
+                'tenant_id' => $tenant->id, 'name' => 'ОсОО Одинаковый ИНН', 'inn' => $inn,
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+        }
+
+        $this->assertSame(2, DB::table('activity_types')->where('code', $code)->count());
+        $this->assertSame(2, DB::table('clients')->where('inn', $inn)->count());
+    }
+
+    /** А внутри одного аккаунта ИНН по-прежнему уникален. */
+    public function test_duplicate_inn_inside_one_account_is_still_refused(): void
+    {
+        $tenant = $this->newTenant();
+        $inn    = strtoupper(substr(md5(uniqid()), 0, 12));
+
+        DB::table('clients')->insert([
+            'tenant_id' => $tenant->id, 'name' => 'Первый', 'inn' => $inn,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $this->expectException(\Illuminate\Database\UniqueConstraintViolationException::class);
+
+        DB::table('clients')->insert([
+            'tenant_id' => $tenant->id, 'name' => 'Второй', 'inn' => $inn,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+    }
+
     public function test_template_cannot_copy_into_itself(): void
     {
         $this->expectException(\RuntimeException::class);

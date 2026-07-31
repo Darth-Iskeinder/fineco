@@ -64,8 +64,44 @@ class TenantTemplate
             throw new RuntimeException('Копировать образец сам в себя нельзя');
         }
 
-        $source = $this->template();
+        return $this->copy($this->template(), $target);
+    }
 
+    /**
+     * Наполнить образец каталогом действующей фирмы. Нужно один раз, чтобы
+     * образцу было что отдавать новым аккаунтам; дальше набор правится руками.
+     */
+    public function fillFrom(Tenant $source): array
+    {
+        if ($source->isTemplate()) {
+            throw new RuntimeException('Образец нельзя наполнить из самого себя');
+        }
+
+        return $this->copy($source, $this->template());
+    }
+
+    /** Очистить образец: только справочники, рабочих данных в нём нет. */
+    public function clearTemplate(): void
+    {
+        $template = $this->template();
+
+        DB::transaction(function () use ($template) {
+            $serviceIds = DB::table('services')->where('tenant_id', $template->id)->pluck('id');
+
+            DB::table('service_tax_system')->whereIn('service_id', $serviceIds)->delete();
+
+            // Сперва подпункты: у родителя на них ссылка.
+            DB::table('services')->where('tenant_id', $template->id)->whereNotNull('parent_id')->delete();
+            DB::table('services')->where('tenant_id', $template->id)->delete();
+
+            foreach (self::SIMPLE_TABLES as $table) {
+                DB::table($table)->where('tenant_id', $template->id)->delete();
+            }
+        });
+    }
+
+    private function copy(Tenant $source, Tenant $target): array
+    {
         if ($this->alreadyFilled($target)) {
             throw new RuntimeException(
                 "В аккаунте «{$target->name}» уже есть справочники — повторное копирование удвоило бы их"
