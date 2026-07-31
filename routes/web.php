@@ -197,17 +197,12 @@ Route::middleware('auth:employee')->group(function () {
         Route::put('/services/{service}', [SettingsController::class, 'updateService'])->name('services.update');
         Route::delete('/services/{service}', [SettingsController::class, 'destroyService'])->name('services.destroy');
 
-        // Форма/тип организации
-        Route::get('/organization-forms', [SettingsController::class, 'organizationFormsPage'])->name('organization-forms');
-        Route::post('/organization-forms', [SettingsController::class, 'storeOrganizationForm'])->name('organization-forms.store');
-        Route::put('/organization-forms/{organizationForm}', [SettingsController::class, 'updateOrganizationForm'])->name('organization-forms.update');
-        Route::delete('/organization-forms/{organizationForm}', [SettingsController::class, 'destroyOrganizationForm'])->name('organization-forms.destroy');
-
-        // Статус клиента
-        Route::get('/client-statuses', [SettingsController::class, 'clientStatusesPage'])->name('client-statuses');
-        Route::post('/client-statuses', [SettingsController::class, 'storeClientStatus'])->name('client-statuses.store');
-        Route::put('/client-statuses/{clientStatus}', [SettingsController::class, 'updateClientStatus'])->name('client-statuses.update');
-        Route::delete('/client-statuses/{clientStatus}', [SettingsController::class, 'destroyClientStatus'])->name('client-statuses.destroy');
+        // Форма/тип организации и статус клиента настройками не являются — разделов
+        // нет намеренно. Форма организации задаётся государством. Статус клиента —
+        // не список, а механика: на флаге closes_service висит закрытие обслуживания,
+        // а выставить этот флаг из настроек было нельзя, только название. Свой статус
+        // выглядел рабочим, но обслуживание не закрывал. Оба выбираются селектором
+        // в карточке клиента.
 
         // Категория налогоплательщика
         Route::get('/taxpayer-categories', [SettingsController::class, 'taxpayerCategoriesPage'])->name('taxpayer-categories');

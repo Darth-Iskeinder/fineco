@@ -7,8 +7,6 @@ use App\Models\ActivityType;
 use App\Models\Billing;
 use App\Models\Category;
 use App\Models\CheckType;
-use App\Models\ClientStatus;
-use App\Models\OrganizationForm;
 use App\Models\Periodicity;
 use App\Models\Rate;
 use App\Models\ServiceGroup;
@@ -62,8 +60,6 @@ class SettingsController extends Controller
         return response()->json(['success' => true]);
     }
 
-    public function organizationFormsPage()   { return $this->lookupView('Форма/тип организации',      '/settings/organization-forms',    OrganizationForm::orderBy('name')->get()); }
-    public function clientStatusesPage()      { return $this->lookupView('Статус клиента',              '/settings/client-statuses',       ClientStatus::orderBy('name')->get()); }
     public function taxpayerCategoriesPage()  { return $this->lookupView('Категория налогоплательщика', '/settings/taxpayer-categories',   TaxpayerCategory::orderBy('name')->get()); }
     public function accountingMethodsPage()   { return $this->lookupView('Метод учёта',                 '/settings/accounting-methods',    AccountingMethod::orderBy('name')->get()); }
     public function serviceTypesPage()        { return $this->lookupView('Тип обслуживания',            '/settings/service-types',         ServiceType::orderBy('name')->get()); }
@@ -78,14 +74,6 @@ class SettingsController extends Controller
     public function taxAuthoritiesPage()      { return $this->lookupView('Коды налоговых органов',      '/settings/tax-authorities',       TaxAuthority::orderBy('code')->get(), 'Справочник кодов районных ГНС. Используется при добавлении филиалов в карточке клиента.', [
         ['key' => 'code', 'label' => 'Код районной ГНС', 'type' => 'text', 'required' => true],
     ], 'Наименование УГНС'); }
-
-    public function storeOrganizationForm(Request $r)                { return $this->lookupStore($r, OrganizationForm::class); }
-    public function updateOrganizationForm(Request $r, OrganizationForm $organizationForm) { return $this->lookupUpdate($r, $organizationForm); }
-    public function destroyOrganizationForm(OrganizationForm $organizationForm)            { return $this->lookupDestroy($organizationForm); }
-
-    public function storeClientStatus(Request $r)                    { return $this->lookupStore($r, ClientStatus::class); }
-    public function updateClientStatus(Request $r, ClientStatus $clientStatus)             { return $this->lookupUpdate($r, $clientStatus); }
-    public function destroyClientStatus(ClientStatus $clientStatus)                        { return $this->lookupDestroy($clientStatus); }
 
     public function storeTaxpayerCategory(Request $r)                { return $this->lookupStore($r, TaxpayerCategory::class); }
     public function updateTaxpayerCategory(Request $r, TaxpayerCategory $taxpayerCategory){ return $this->lookupUpdate($r, $taxpayerCategory); }

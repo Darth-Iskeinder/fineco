@@ -34,16 +34,6 @@
                       {{ request()->routeIs('settings.services') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
                 Бизнес процессы
             </a>
-            <a href="{{ route('settings.organization-forms') }}"
-               class="block px-3 py-2 rounded-lg text-sm transition-colors
-                      {{ request()->routeIs('settings.organization-forms') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
-                Форма/тип организации
-            </a>
-            <a href="{{ route('settings.client-statuses') }}"
-               class="block px-3 py-2 rounded-lg text-sm transition-colors
-                      {{ request()->routeIs('settings.client-statuses') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
-                Статус клиента
-            </a>
             <a href="{{ route('settings.taxpayer-categories') }}"
                class="block px-3 py-2 rounded-lg text-sm transition-colors
                       {{ request()->routeIs('settings.taxpayer-categories') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
