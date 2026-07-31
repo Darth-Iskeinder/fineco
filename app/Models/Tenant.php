@@ -21,9 +21,15 @@ class Tenant extends Model
     public const STATUS_ACTIVE    = 'active';
     public const STATUS_SUSPENDED = 'suspended';
 
-    protected $fillable = ['name', 'slug', 'status', 'plan', 'settings'];
+    /** Служебный аккаунт-образец: в него не входят, из него копируют. */
+    public const STATUS_TEMPLATE = 'template';
 
-    protected $casts = ['settings' => 'array'];
+    protected $fillable = ['name', 'slug', 'status', 'plan', 'settings', 'is_template'];
+
+    protected $casts = [
+        'settings'    => 'array',
+        'is_template' => 'boolean',
+    ];
 
     public function employees(): HasMany
     {
@@ -38,6 +44,24 @@ class Tenant extends Model
     public function isActive(): bool
     {
         return $this->status === self::STATUS_ACTIVE;
+    }
+
+    /** Образец, из которого новые аккаунты получают стартовый набор. */
+    public function isTemplate(): bool
+    {
+        return (bool) $this->is_template;
+    }
+
+    /** Аккаунт-образец. Он один; если их окажется больше — это ошибка данных. */
+    public function scopeTemplate($query)
+    {
+        return $query->where('is_template', true);
+    }
+
+    /** Живые аккаунты фирм — всё, кроме образца. */
+    public function scopeReal($query)
+    {
+        return $query->where('is_template', false);
     }
 
     /** Доступ закрыт: не заплатили или нарушение. Данные при этом остаются на месте. */
