@@ -130,13 +130,12 @@ class SettingsController extends Controller
     /**
      * Справочная страница, только просмотр. Список режимов задаёт государство,
      * бухфирма его не настраивает — добавление, правка и удаление убраны
-     * вместе с роутами. Показываем действующие режимы и сколько клиентов на
-     * каждом: это единственное, что тут полезно знать.
+     * вместе с роутами.
      */
     public function taxSystemsPage()
     {
         return view('settings.tax-systems', [
-            'taxSystems' => TaxSystem::active()->ordered()->withCount('clients')->get(),
+            'taxSystems' => TaxSystem::active()->ordered()->get(),
         ]);
     }
 

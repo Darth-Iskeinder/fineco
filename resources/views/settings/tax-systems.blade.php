@@ -41,7 +41,6 @@
                         <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Название</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Код</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Описание</th>
-                        <th class="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Клиентов</th>
                     </tr>
                 </thead>
                 <tbody class="bg-white divide-y divide-slate-200">
@@ -50,12 +49,9 @@
                             <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">{{ $item->name }}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-slate-500 font-mono">{{ $item->code }}</td>
                             <td class="px-6 py-4 text-sm text-slate-500">{{ $item->description ?: '—' }}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-right {{ $item->clients_count ? 'text-slate-700 font-medium' : 'text-slate-300' }}">
-                                {{ $item->clients_count }}
-                            </td>
                         </tr>
                     @empty
-                        <tr><td colspan="4" class="px-6 py-10 text-center text-slate-400">Нет данных</td></tr>
+                        <tr><td colspan="3" class="px-6 py-10 text-center text-slate-400">Нет данных</td></tr>
                     @endforelse
                 </tbody>
             </table>
