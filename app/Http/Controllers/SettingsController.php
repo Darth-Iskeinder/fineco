@@ -127,10 +127,16 @@ class SettingsController extends Controller
     public function updateTaxAuthority(Request $r, TaxAuthority $taxAuthority)             { return $this->lookupUpdate($r, $taxAuthority, ['code' => ['required', 'string', 'max:10', Rule::unique('tax_authorities', 'code')->ignore($taxAuthority->id)]]); }
     public function destroyTaxAuthority(TaxAuthority $taxAuthority)                         { return $this->lookupDestroy($taxAuthority); }
 
+    /**
+     * Справочная страница, только просмотр. Список режимов задаёт государство,
+     * бухфирма его не настраивает — добавление, правка и удаление убраны
+     * вместе с роутами. Показываем действующие режимы и сколько клиентов на
+     * каждом: это единственное, что тут полезно знать.
+     */
     public function taxSystemsPage()
     {
         return view('settings.tax-systems', [
-            'taxSystems' => TaxSystem::ordered()->get(),
+            'taxSystems' => TaxSystem::active()->ordered()->withCount('clients')->get(),
         ]);
     }
 
@@ -182,66 +188,6 @@ class SettingsController extends Controller
     // =============================================
     // TAX SYSTEMS
     // =============================================
-
-    public function storeTaxSystem(Request $request)
-    {
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'code' => 'required|string|max:50|unique:tax_systems,code',
-            'description' => 'nullable|string|max:500',
-            'is_active' => 'boolean',
-            'sort_order' => 'integer|min:0',
-        ]);
-
-        $validated['is_active'] = $request->boolean('is_active', true);
-        $validated['sort_order'] = $validated['sort_order'] ?? 0;
-
-        $taxSystem = TaxSystem::create($validated);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Система налогообложения создана',
-            'item' => $taxSystem,
-        ]);
-    }
-
-    public function updateTaxSystem(Request $request, TaxSystem $taxSystem)
-    {
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'code' => ['required', 'string', 'max:50', Rule::unique('tax_systems', 'code')->ignore($taxSystem->id)],
-            'description' => 'nullable|string|max:500',
-            'is_active' => 'boolean',
-            'sort_order' => 'integer|min:0',
-        ]);
-
-        $validated['is_active'] = $request->boolean('is_active', true);
-
-        $taxSystem->update($validated);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Система налогообложения обновлена',
-            'item' => $taxSystem->fresh(),
-        ]);
-    }
-
-    public function destroyTaxSystem(TaxSystem $taxSystem)
-    {
-        if ($taxSystem->clients()->exists()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Невозможно удалить: есть связанные клиенты',
-            ], 422);
-        }
-
-        $taxSystem->delete();
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Система налогообложения удалена',
-        ]);
-    }
 
     // =============================================
     // ACTIVITY TYPES

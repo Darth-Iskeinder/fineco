@@ -170,10 +170,9 @@ Route::middleware('auth:employee')->group(function () {
         Route::get('/rates', [SettingsController::class, 'ratesPage'])->name('rates');
         Route::get('/services', [SettingsController::class, 'servicesPage'])->name('services');
 
-        // CRUD: Системы налогообложения
-        Route::post('/tax-systems', [SettingsController::class, 'storeTaxSystem'])->name('tax-systems.store');
-        Route::put('/tax-systems/{taxSystem}', [SettingsController::class, 'updateTaxSystem'])->name('tax-systems.update');
-        Route::delete('/tax-systems/{taxSystem}', [SettingsController::class, 'destroyTaxSystem'])->name('tax-systems.destroy');
+        // Системы налогообложения — только просмотр, роутов на запись нет намеренно:
+        // список задаёт государство, он одинаков для всех аккаунтов и меняется
+        // централизованно. Удаление к тому же стирало привязки режима у всех БП.
 
         // CRUD: Виды деятельности
         Route::post('/activity-types', [SettingsController::class, 'storeActivityType'])->name('activity-types.store');
