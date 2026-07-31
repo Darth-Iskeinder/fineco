@@ -204,11 +204,8 @@ Route::middleware('auth:employee')->group(function () {
         // выглядел рабочим, но обслуживание не закрывал. Оба выбираются селектором
         // в карточке клиента.
 
-        // Категория налогоплательщика
-        Route::get('/taxpayer-categories', [SettingsController::class, 'taxpayerCategoriesPage'])->name('taxpayer-categories');
-        Route::post('/taxpayer-categories', [SettingsController::class, 'storeTaxpayerCategory'])->name('taxpayer-categories.store');
-        Route::put('/taxpayer-categories/{taxpayerCategory}', [SettingsController::class, 'updateTaxpayerCategory'])->name('taxpayer-categories.update');
-        Route::delete('/taxpayer-categories/{taxpayerCategory}', [SettingsController::class, 'destroyTaxpayerCategory'])->name('taxpayer-categories.destroy');
+        // Категория налогоплательщика — классификация ГНС, три значения на всех.
+        // Раздела нет намеренно, выбирается селектором в карточке клиента.
 
         // Метод учёта
         Route::get('/accounting-methods', [SettingsController::class, 'accountingMethodsPage'])->name('accounting-methods');

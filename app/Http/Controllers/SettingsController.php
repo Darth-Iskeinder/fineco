@@ -12,7 +12,6 @@ use App\Models\Rate;
 use App\Models\ServiceGroup;
 use App\Models\ServiceType;
 use App\Models\Sphere;
-use App\Models\TaxpayerCategory;
 use App\Models\TaxAuthority;
 use App\Models\Service;
 use App\Models\Tariff;
@@ -60,7 +59,6 @@ class SettingsController extends Controller
         return response()->json(['success' => true]);
     }
 
-    public function taxpayerCategoriesPage()  { return $this->lookupView('Категория налогоплательщика', '/settings/taxpayer-categories',   TaxpayerCategory::orderBy('name')->get()); }
     public function accountingMethodsPage()   { return $this->lookupView('Метод учёта',                 '/settings/accounting-methods',    AccountingMethod::orderBy('name')->get()); }
     public function serviceTypesPage()        { return $this->lookupView('Тип обслуживания',            '/settings/service-types',         ServiceType::orderBy('name')->get()); }
     public function categoriesPage()          { return $this->lookupView('Категория',                   '/settings/categories',            Category::orderBy('name')->get()); }
@@ -74,10 +72,6 @@ class SettingsController extends Controller
     public function taxAuthoritiesPage()      { return $this->lookupView('Коды налоговых органов',      '/settings/tax-authorities',       TaxAuthority::orderBy('code')->get(), 'Справочник кодов районных ГНС. Используется при добавлении филиалов в карточке клиента.', [
         ['key' => 'code', 'label' => 'Код районной ГНС', 'type' => 'text', 'required' => true],
     ], 'Наименование УГНС'); }
-
-    public function storeTaxpayerCategory(Request $r)                { return $this->lookupStore($r, TaxpayerCategory::class); }
-    public function updateTaxpayerCategory(Request $r, TaxpayerCategory $taxpayerCategory){ return $this->lookupUpdate($r, $taxpayerCategory); }
-    public function destroyTaxpayerCategory(TaxpayerCategory $taxpayerCategory)           { return $this->lookupDestroy($taxpayerCategory); }
 
     public function storeAccountingMethod(Request $r)                { return $this->lookupStore($r, AccountingMethod::class); }
     public function updateAccountingMethod(Request $r, AccountingMethod $accountingMethod) { return $this->lookupUpdate($r, $accountingMethod); }

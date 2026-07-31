@@ -7,6 +7,7 @@ use App\Models\ClientStatus;
 use App\Models\Employee;
 use App\Models\OrganizationForm;
 use App\Models\Role;
+use App\Models\TaxpayerCategory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -60,7 +61,7 @@ class HiddenSettingsSectionsTest extends TestCase
     /** Страниц нет — ни на чтение, ни на запись. */
     public function test_sections_are_gone(): void
     {
-        foreach (['/settings/organization-forms', '/settings/client-statuses'] as $url) {
+        foreach (['/settings/organization-forms', '/settings/client-statuses', '/settings/taxpayer-categories'] as $url) {
             $this->actingAs($this->admin, 'employee')->get($url)->assertNotFound();
             $this->actingAs($this->admin, 'employee')->postJson($url, ['name' => 'Новое'])->assertNotFound();
         }
@@ -76,6 +77,30 @@ class HiddenSettingsSectionsTest extends TestCase
 
         $this->assertStringNotContainsString('Форма/тип организации', $html);
         $this->assertStringNotContainsString('Статус клиента', $html);
+        $this->assertStringNotContainsString('Категория налогоплательщика', $html);
+    }
+
+    /**
+     * Категория налогоплательщика была наполовину переведена со старого
+     * зашитого списка на справочник: показывалась из одного места, а выбиралась
+     * из другого, пустого. Теперь справочник заполнен, и выбрать можно.
+     */
+    public function test_taxpayer_categories_are_filled(): void
+    {
+        $names = TaxpayerCategory::orderBy('id')->pluck('name')->all();
+
+        $this->assertSame(['Малый', 'Средний', 'Крупный'], $names);
+    }
+
+    /** Клиенты со старым текстовым значением переехали на справочник. */
+    public function test_legacy_taxpayer_values_were_moved(): void
+    {
+        $stranded = Client::whereNotNull('taxpayer_category')
+            ->where('taxpayer_category', '!=', '')
+            ->whereNull('taxpayer_category_id')
+            ->count();
+
+        $this->assertSame(0, $stranded, 'Есть клиенты, оставшиеся на старом поле');
     }
 
     /** Данные на месте: карточка клиента выбирает их селектором. */
