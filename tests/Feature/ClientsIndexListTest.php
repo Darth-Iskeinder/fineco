@@ -124,6 +124,49 @@ class ClientsIndexListTest extends TestCase
         $this->assertSame(0, $counts[$none->id]->estimate_root_items_count);
     }
 
+    public function test_child_positions_still_count_as_a_filled_estimate(): void
+    {
+        $viewer = $this->viewer();
+
+        // Позиция с потомком: в смете 2 строки, корневая одна — плашка обязана быть
+        $client   = $this->client('Смета с подпозицией');
+        $estimate = $this->fillEstimate($client, 1);
+        $root     = $estimate->items()->first();
+        $estimate->items()->create([
+            'parent_id' => $root->id, 'service_id' => $root->service_id, 'type' => 'recurring',
+            'name' => 'Филиал', 'periodicity' => 'Ежемесячно', 'cost' => 0, 'quantity' => 1, 'total' => 0, 'sort_order' => 1,
+        ]);
+
+        $clients = $this->actingAs($viewer, 'employee')->get('/clients')->assertOk()->viewData('clients');
+
+        $this->assertSame(1, $clients->keyBy('id')[$client->id]->estimate_root_items_count);
+    }
+
+    public function test_indicator_reaches_the_rendered_page(): void
+    {
+        $viewer = $this->viewer();
+
+        $filled = $this->client('Отрисовка со сметой');
+        $this->fillEstimate($filled, 3);
+        $empty = $this->client('Отрисовка без сметы');
+
+        $html = $this->actingAs($viewer, 'employee')->get('/clients')->assertOk()->getContent();
+
+        // Данные строк уходят в Alpine через @js, а он экранирует кавычки как " — разэкранируем
+        $html = str_replace(chr(92) . 'u0022', chr(34), $html);
+
+        $q = chr(34);
+        $row = fn (int $id, int $count) => '/'
+            . preg_quote("{$q}id{$q}:{$id},", '/') . '.*?'
+            . preg_quote("{$q}estimate_items_count{$q}:{$count}", '/') . '/';
+
+        $this->assertStringContainsString("{$q}id{$q}:{$filled->id},", $html);
+        $this->assertMatchesRegularExpression($row($filled->id, 3), $html);
+        $this->assertMatchesRegularExpression($row($empty->id, 0), $html);
+        $this->assertStringContainsString("client.estimate_items_count > 0", $html);
+        $this->assertStringContainsString("'/clients/' + client.id + '/estimate/edit'", $html);
+    }
+
     public function test_search_returns_estimate_indicator_too(): void
     {
         $viewer = $this->viewer();
