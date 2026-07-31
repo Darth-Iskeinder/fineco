@@ -232,17 +232,13 @@ Route::middleware('auth:employee')->group(function () {
         Route::put('/groups/{serviceGroup}', [SettingsController::class, 'updateGroup'])->name('groups.update');
         Route::delete('/groups/{serviceGroup}', [SettingsController::class, 'destroyGroup'])->name('groups.destroy');
 
-        // Периодичность
-        Route::get('/periodicities', [SettingsController::class, 'periodicitiesPage'])->name('periodicities');
-        Route::post('/periodicities', [SettingsController::class, 'storePeriodicity'])->name('periodicities.store');
-        Route::put('/periodicities/{periodicity}', [SettingsController::class, 'updatePeriodicity'])->name('periodicities.update');
-        Route::delete('/periodicities/{periodicity}', [SettingsController::class, 'destroyPeriodicity'])->name('periodicities.destroy');
+        // Периодичность — не настройка, а механика: по kind (weekly/monthly/
+        // quarterly/yearly) считаются сроки сдачи (Service.php). Правка молча
+        // ломала расчёт дедлайнов, то есть пропущенный отчёт у клиента.
+        // Раздела нет; список по-прежнему кормит форму бизнес-процессов.
 
-        // Проверка
-        Route::get('/check-types', [SettingsController::class, 'checkTypesPage'])->name('check-types');
-        Route::post('/check-types', [SettingsController::class, 'storeCheckType'])->name('check-types.store');
-        Route::put('/check-types/{checkType}', [SettingsController::class, 'updateCheckType'])->name('check-types.update');
-        Route::delete('/check-types/{checkType}', [SettingsController::class, 'destroyCheckType'])->name('check-types.destroy');
+        // Проверка — раздела нет: таблица check_types пустая и ни к чему не
+        // подключена, поля для неё нет даже в форме бизнес-процессов.
 
         // Биллинг
         Route::get('/billings', [SettingsController::class, 'billingsPage'])->name('billings');

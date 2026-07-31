@@ -7,6 +7,7 @@ use App\Models\Client;
 use App\Models\ClientStatus;
 use App\Models\Employee;
 use App\Models\OrganizationForm;
+use App\Models\Periodicity;
 use App\Models\Role;
 use App\Models\TaxpayerCategory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -82,6 +83,8 @@ class HiddenSettingsSectionsTest extends TestCase
             '/settings/accounting-methods',
             '/settings/service-types',
             '/settings/categories',
+            '/settings/periodicities',
+            '/settings/check-types',
         ];
 
         foreach ($urls as $url) {
@@ -103,6 +106,26 @@ class HiddenSettingsSectionsTest extends TestCase
         $this->assertStringNotContainsString('Категория налогоплательщика', $html);
         $this->assertStringNotContainsString('Метод учёта', $html);
         $this->assertStringNotContainsString('Тип обслуживания', $html);
+        $this->assertStringNotContainsString('Периодичность', $html);
+    }
+
+    /**
+     * Периодичность — механика: по её типу считаются сроки сдачи отчётов.
+     * Раздел убран, но список обязан по-прежнему кормить форму бизнес-процессов,
+     * иначе у нового БП нельзя будет задать периодичность.
+     */
+    public function test_periodicities_still_feed_the_services_form(): void
+    {
+        $html = $this->decodeUnicode(
+            $this->actingAs($this->admin, 'employee')
+                ->get('/settings/services')
+                ->assertOk()
+                ->getContent()
+        );
+
+        foreach (Periodicity::orderBy('name')->pluck('name') as $name) {
+            $this->assertStringContainsString($name, $html, "Периодичность «{$name}» не доехала до формы БП");
+        }
     }
 
     /**

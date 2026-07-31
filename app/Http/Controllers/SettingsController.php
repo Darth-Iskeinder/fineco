@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Models\ActivityType;
 use App\Models\Billing;
 use App\Models\Category;
-use App\Models\CheckType;
 use App\Models\Periodicity;
 use App\Models\Rate;
 use App\Models\ServiceGroup;
@@ -59,10 +58,6 @@ class SettingsController extends Controller
 
     public function spheresPage()             { return $this->lookupView('Сфера',                       '/settings/spheres',               Sphere::orderBy('name')->get()); }
     public function groupsPage()              { return $this->lookupView('Группа',                      '/settings/groups',                ServiceGroup::orderBy('name')->get()); }
-    public function periodicitiesPage()       { return $this->lookupView('Периодичность',               '/settings/periodicities',         Periodicity::orderBy('name')->get(), 'Тип определяет поведение полей «Месяц» и «День» при создании БП', [
-        ['key' => 'kind', 'label' => 'Тип', 'type' => 'select', 'options' => Periodicity::KINDS],
-    ]); }
-    public function checkTypesPage()          { return $this->lookupView('Проверка',                    '/settings/check-types',           CheckType::orderBy('name')->get()); }
     public function billingsPage()            { return $this->lookupView('Биллинг',                     '/settings/billings',              Billing::orderBy('id')->get()); }
     public function taxAuthoritiesPage()      { return $this->lookupView('Коды налоговых органов',      '/settings/tax-authorities',       TaxAuthority::orderBy('code')->get(), 'Справочник кодов районных ГНС. Используется при добавлении филиалов в карточке клиента.', [
         ['key' => 'code', 'label' => 'Код районной ГНС', 'type' => 'text', 'required' => true],
@@ -75,14 +70,6 @@ class SettingsController extends Controller
     public function storeGroup(Request $r)                           { return $this->lookupStore($r, ServiceGroup::class); }
     public function updateGroup(Request $r, ServiceGroup $serviceGroup)                    { return $this->lookupUpdate($r, $serviceGroup); }
     public function destroyGroup(ServiceGroup $serviceGroup)                               { return $this->lookupDestroy($serviceGroup); }
-
-    public function storePeriodicity(Request $r)                     { return $this->lookupStore($r, Periodicity::class, ['kind' => 'nullable|string|in:weekly,monthly,quarterly,yearly']); }
-    public function updatePeriodicity(Request $r, Periodicity $periodicity)                { return $this->lookupUpdate($r, $periodicity, ['kind' => 'nullable|string|in:weekly,monthly,quarterly,yearly']); }
-    public function destroyPeriodicity(Periodicity $periodicity)                           { return $this->lookupDestroy($periodicity); }
-
-    public function storeCheckType(Request $r)                       { return $this->lookupStore($r, CheckType::class); }
-    public function updateCheckType(Request $r, CheckType $checkType)                      { return $this->lookupUpdate($r, $checkType); }
-    public function destroyCheckType(CheckType $checkType)                                 { return $this->lookupDestroy($checkType); }
 
     public function storeBilling(Request $r)                         { return $this->lookupStore($r, Billing::class); }
     public function updateBilling(Request $r, Billing $billing)                            { return $this->lookupUpdate($r, $billing); }

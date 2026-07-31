@@ -44,16 +44,6 @@
                       {{ request()->routeIs('settings.groups') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
                 Группа
             </a>
-            <a href="{{ route('settings.periodicities') }}"
-               class="block px-3 py-2 rounded-lg text-sm transition-colors
-                      {{ request()->routeIs('settings.periodicities') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
-                Периодичность
-            </a>
-            <a href="{{ route('settings.check-types') }}"
-               class="block px-3 py-2 rounded-lg text-sm transition-colors
-                      {{ request()->routeIs('settings.check-types') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
-                Проверка
-            </a>
             <a href="{{ route('settings.billings') }}"
                class="block px-3 py-2 rounded-lg text-sm transition-colors
                       {{ request()->routeIs('settings.billings') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
