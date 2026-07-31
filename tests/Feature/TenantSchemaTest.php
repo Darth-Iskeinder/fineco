@@ -45,6 +45,9 @@ class TenantSchemaTest extends TestCase
      */
     private const TENANT_DICTIONARIES = [
         'activity_types',
+        'tariffs',
+        'rates',
+        'services',
     ];
 
     /** Все таблицы, которым положена пометка «чей это ряд». */
