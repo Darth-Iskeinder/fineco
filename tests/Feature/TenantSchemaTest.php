@@ -51,6 +51,8 @@ class TenantSchemaTest extends TestCase
         'spheres',
         'service_groups',
         'billings',
+        'audit_checklist_templates',
+        'audit_checklist_template_items',
     ];
 
     /** Все таблицы, которым положена пометка «чей это ряд». */
