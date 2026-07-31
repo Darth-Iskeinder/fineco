@@ -2,12 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToTenant;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /** Пункт чек-листа внутри аудита (копия пункта стандарта, дальше живёт отдельно). */
 class AuditChecklistItem extends Model
 {
+    use BelongsToTenant;
+
     const STATUS_OK    = 'ok';    // проверено
     const STATUS_ERROR = 'err';   // ошибка
     const STATUS_ASK   = 'ask';   // нужны пояснения

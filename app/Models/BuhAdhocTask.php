@@ -2,12 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToTenant;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 class BuhAdhocTask extends Model
 {
+    use BelongsToTenant;
+
     protected $fillable = [
         'employee_id', 'client_id', 'service_id', 'name', 'description', 'cost',
         'year', 'month', 'due_day', 'status', 'requires_review',

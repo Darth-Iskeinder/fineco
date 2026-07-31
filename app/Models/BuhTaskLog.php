@@ -2,12 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToTenant;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 class BuhTaskLog extends Model
 {
+    use BelongsToTenant;
+
     protected $fillable = [
         'employee_id', 'client_id', 'estimate_item_id',
         'year', 'month', 'due_date', 'status', 'review_comment', 'rework_count', 'employee_comment',

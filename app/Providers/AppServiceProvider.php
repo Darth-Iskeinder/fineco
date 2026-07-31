@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Support\TenantContext;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
@@ -22,11 +23,19 @@ class AppServiceProvider extends ServiceProvider
                 $month    = now()->month;
                 $warnDay  = $today + 3;
 
+                // Единственное место в приложении, где запросы идут мимо моделей,
+                // а значит и мимо автоматического фильтра по фирме. Здесь его
+                // приходится дописывать руками — иначе счётчик считал бы по всем
+                // аккаунтам сразу и молча показывал бы неверное число.
+                $tenantId = TenantContext::id() ?? $employee->tenant_id;
+
                 $clientIds = DB::table('clients')
+                    ->where('tenant_id', $tenantId)
                     ->where('responsible_employee_id', $employee->id)
                     ->pluck('id');
 
                 $completedIds = DB::table('buh_task_logs')
+                    ->where('tenant_id', $tenantId)
                     ->where('employee_id', $employee->id)
                     ->where('year', $year)
                     ->where('month', $month)
@@ -35,6 +44,7 @@ class AppServiceProvider extends ServiceProvider
 
                 $plannedUrgent = DB::table('estimate_items')
                     ->join('estimates', 'estimate_items.estimate_id', '=', 'estimates.id')
+                    ->where('estimate_items.tenant_id', $tenantId)
                     ->whereIn('estimates.client_id', $clientIds)
                     ->whereNull('estimate_items.parent_id')
                     ->whereNotNull('estimate_items.due_day')
@@ -43,6 +53,7 @@ class AppServiceProvider extends ServiceProvider
                     ->count();
 
                 $adhocUrgent = DB::table('buh_adhoc_tasks')
+                    ->where('tenant_id', $tenantId)
                     ->where('employee_id', $employee->id)
                     ->where('year', $year)
                     ->where('month', $month)

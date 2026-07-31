@@ -2,12 +2,15 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToTenant;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /** Стандарт чек-листа: набор контрольных точек, который копируется в новый аудит. */
 class AuditChecklistTemplate extends Model
 {
+    use BelongsToTenant;
+
     protected $fillable = ['name', 'description', 'is_active'];
 
     protected $casts = ['is_active' => 'boolean'];

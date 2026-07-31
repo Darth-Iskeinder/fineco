@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToTenant;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -12,6 +13,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class AuditTaskReview extends Model
 {
+    use BelongsToTenant;
+
     const VERDICT_OK      = 'ok';
     const VERDICT_FINDING = 'finding';
 

@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToTenant;
 use Illuminate\Database\Eloquent\Model;
 
 class Rate extends Model
 {
+    use BelongsToTenant;
+
     /**
      * Канонические единицы измерения (подсказки в форме).
      * Метка для отображения — на расчёт «цена × кол-во» не влияет.

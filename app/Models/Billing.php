@@ -1,8 +1,11 @@
 <?php
 namespace App\Models;
-use Illuminate\Database\Eloquent\Model;
+
+use App\Models\Concerns\BelongsToTenant;use Illuminate\Database\Eloquent\Model;
 class Billing extends Model
 {
+    use BelongsToTenant;
+
     protected $fillable = ['name', 'code'];
 
     /** Коды режимов тарификации (переключатель логики цены). */

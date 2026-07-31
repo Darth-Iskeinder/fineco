@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToTenant;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 
 class BuhTaskDocument extends Model
 {
+    use BelongsToTenant;
+
     protected $fillable = ['path', 'name'];
 
     /** Фронту нужна только ссылка; внутренний путь на диске наружу не отдаём. */

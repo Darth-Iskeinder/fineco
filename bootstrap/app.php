@@ -4,6 +4,7 @@ use App\Http\Middleware\AdminMiddleware;
 use App\Http\Middleware\AuditAccessMiddleware;
 use App\Http\Middleware\CheckModuleAccess;
 use App\Http\Middleware\ManagerMiddleware;
+use App\Http\Middleware\SetTenantContext;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -16,6 +17,22 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->redirectGuestsTo('/login');
+
+        // Текущая фирма ставится на каждый веб-запрос. Порядок здесь важнее,
+        // чем кажется, и обойтись обычным append нельзя:
+        //   - раньше сессии — сотрудник ещё неизвестен, ставить нечего;
+        //   - позже SubstituteBindings — модель по ссылке /clients/{id} уже
+        //     достанут из базы без фильтра, и чужой клиент откроется.
+        // Поэтому вынимаем SubstituteBindings из группы и возвращаем следом
+        // за собой: сессия → текущая фирма → разбор ссылок.
+        $middleware->web(remove: [
+            \Illuminate\Routing\Middleware\SubstituteBindings::class,
+        ]);
+        $middleware->web(append: [
+            SetTenantContext::class,
+            \Illuminate\Routing\Middleware\SubstituteBindings::class,
+        ]);
+
         $middleware->alias([
             'module' => CheckModuleAccess::class,
             'admin' => AdminMiddleware::class,
