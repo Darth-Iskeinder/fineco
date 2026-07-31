@@ -211,17 +211,14 @@ Route::middleware('auth:employee')->group(function () {
         // (Client::$accountingMethods). Раздела нет: справочник accounting_methods
         // ни к чему не подключён, правка в нём ни на что не влияла.
 
-        // Тип обслуживания
-        Route::get('/service-types', [SettingsController::class, 'serviceTypesPage'])->name('service-types');
-        Route::post('/service-types', [SettingsController::class, 'storeServiceType'])->name('service-types.store');
-        Route::put('/service-types/{serviceType}', [SettingsController::class, 'updateServiceType'])->name('service-types.update');
-        Route::delete('/service-types/{serviceType}', [SettingsController::class, 'destroyServiceType'])->name('service-types.destroy');
+        // Тип обслуживания — список зашит в коде (Client::$serviceTypes).
+        // Раздела нет: таблица service_types ни к чему не подключена,
+        // правка в ней на карточку клиента не влияла.
 
-        // Категория
-        Route::get('/categories', [SettingsController::class, 'categoriesPage'])->name('categories');
-        Route::post('/categories', [SettingsController::class, 'storeCategory'])->name('categories.store');
-        Route::put('/categories/{category}', [SettingsController::class, 'updateCategory'])->name('categories.update');
-        Route::delete('/categories/{category}', [SettingsController::class, 'destroyCategory'])->name('categories.destroy');
+        // Категория БП — не настройка, а механика: код ищет категории по точному
+        // названию (Service::MANDATORY_CATEGORIES / RECOMMENDED_CATEGORIES) и по
+        // ним решает, что подтягивать в смету. Переименование ломало подтягивание
+        // молча. Раздела нет; список по-прежнему кормит форму бизнес-процессов.
 
         // Сфера
         Route::get('/spheres', [SettingsController::class, 'spheresPage'])->name('spheres');

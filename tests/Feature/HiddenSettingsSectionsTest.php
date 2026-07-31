@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Category;
 use App\Models\Client;
 use App\Models\ClientStatus;
 use App\Models\Employee;
@@ -58,6 +59,19 @@ class HiddenSettingsSectionsTest extends TestCase
         ]);
     }
 
+    /**
+     * Списки уходят в Alpine через @json, а он экранирует кириллицу как \uXXXX —
+     * без разэкранирования искать в разметке бесполезно.
+     */
+    private function decodeUnicode(string $html): string
+    {
+        return preg_replace_callback(
+            '/\\\\u([0-9a-fA-F]{4})/',
+            fn ($m) => mb_convert_encoding(pack('H*', $m[1]), 'UTF-8', 'UTF-16BE'),
+            $html,
+        );
+    }
+
     /** Страниц нет — ни на чтение, ни на запись. */
     public function test_sections_are_gone(): void
     {
@@ -66,6 +80,8 @@ class HiddenSettingsSectionsTest extends TestCase
             '/settings/client-statuses',
             '/settings/taxpayer-categories',
             '/settings/accounting-methods',
+            '/settings/service-types',
+            '/settings/categories',
         ];
 
         foreach ($urls as $url) {
@@ -86,6 +102,26 @@ class HiddenSettingsSectionsTest extends TestCase
         $this->assertStringNotContainsString('Статус клиента', $html);
         $this->assertStringNotContainsString('Категория налогоплательщика', $html);
         $this->assertStringNotContainsString('Метод учёта', $html);
+        $this->assertStringNotContainsString('Тип обслуживания', $html);
+    }
+
+    /**
+     * Категории БП — не настройка, а механика: код ищет их по точному названию
+     * и решает, что подтягивать в смету. Раздел убран, но список по-прежнему
+     * кормит форму бизнес-процессов, иначе категорию нельзя было бы выбрать.
+     */
+    public function test_categories_still_feed_the_services_form(): void
+    {
+        $html = $this->actingAs($this->admin, 'employee')
+            ->get('/settings/services')
+            ->assertOk()
+            ->getContent();
+
+        $html = $this->decodeUnicode($html);
+
+        foreach (Category::orderBy('name')->pluck('name') as $name) {
+            $this->assertStringContainsString($name, $html, "Категория «{$name}» не доехала до формы БП");
+        }
     }
 
     /**
@@ -105,13 +141,7 @@ class HiddenSettingsSectionsTest extends TestCase
             ->assertOk()
             ->getContent();
 
-        // Список уходит в Alpine через @json, а он экранирует кириллицу
-        // как \uXXXX — разэкранируем, иначе искать бесполезно.
-        $html = preg_replace_callback(
-            '/\\\\u([0-9a-fA-F]{4})/',
-            fn ($m) => mb_convert_encoding(pack('H*', $m[1]), 'UTF-8', 'UTF-16BE'),
-            $html,
-        );
+        $html = $this->decodeUnicode($html);
 
         $this->assertStringContainsString('Кассовый метод', $html);
         $this->assertStringContainsString('Метод начисления', $html);

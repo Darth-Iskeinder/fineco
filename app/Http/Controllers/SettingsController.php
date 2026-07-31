@@ -9,7 +9,6 @@ use App\Models\CheckType;
 use App\Models\Periodicity;
 use App\Models\Rate;
 use App\Models\ServiceGroup;
-use App\Models\ServiceType;
 use App\Models\Sphere;
 use App\Models\TaxAuthority;
 use App\Models\Service;
@@ -58,8 +57,6 @@ class SettingsController extends Controller
         return response()->json(['success' => true]);
     }
 
-    public function serviceTypesPage()        { return $this->lookupView('Тип обслуживания',            '/settings/service-types',         ServiceType::orderBy('name')->get()); }
-    public function categoriesPage()          { return $this->lookupView('Категория',                   '/settings/categories',            Category::orderBy('name')->get()); }
     public function spheresPage()             { return $this->lookupView('Сфера',                       '/settings/spheres',               Sphere::orderBy('name')->get()); }
     public function groupsPage()              { return $this->lookupView('Группа',                      '/settings/groups',                ServiceGroup::orderBy('name')->get()); }
     public function periodicitiesPage()       { return $this->lookupView('Периодичность',               '/settings/periodicities',         Periodicity::orderBy('name')->get(), 'Тип определяет поведение полей «Месяц» и «День» при создании БП', [
@@ -70,14 +67,6 @@ class SettingsController extends Controller
     public function taxAuthoritiesPage()      { return $this->lookupView('Коды налоговых органов',      '/settings/tax-authorities',       TaxAuthority::orderBy('code')->get(), 'Справочник кодов районных ГНС. Используется при добавлении филиалов в карточке клиента.', [
         ['key' => 'code', 'label' => 'Код районной ГНС', 'type' => 'text', 'required' => true],
     ], 'Наименование УГНС'); }
-
-    public function storeServiceType(Request $r)                     { return $this->lookupStore($r, ServiceType::class); }
-    public function updateServiceType(Request $r, ServiceType $serviceType)                { return $this->lookupUpdate($r, $serviceType); }
-    public function destroyServiceType(ServiceType $serviceType)                           { return $this->lookupDestroy($serviceType); }
-
-    public function storeCategory(Request $r)                        { return $this->lookupStore($r, Category::class); }
-    public function updateCategory(Request $r, Category $category)                         { return $this->lookupUpdate($r, $category); }
-    public function destroyCategory(Category $category)                                    { return $this->lookupDestroy($category); }
 
     public function storeSphere(Request $r)                          { return $this->lookupStore($r, Sphere::class); }
     public function updateSphere(Request $r, Sphere $sphere)                               { return $this->lookupUpdate($r, $sphere); }
