@@ -12,7 +12,6 @@ use App\Models\Employee;
 use App\Services\AuditRemediation;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 /**
@@ -122,7 +121,7 @@ class AuditController extends Controller
                             'comment'   => $log->employee_comment,
                             'docs'      => $log->documents->map(fn ($d) => [
                                 'name' => $d->name,
-                                'url'  => Storage::disk('public')->url($d->path),
+                                'url'  => $d->url,
                             ])->values(),
                             'verdict'   => $review?->verdict,
                             'severity'  => $review?->severity,

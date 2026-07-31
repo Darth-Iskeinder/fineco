@@ -357,7 +357,7 @@ class ClientController extends Controller
             $nameWithoutExt = pathinfo($originalName, PATHINFO_FILENAME);
             $safeName = $nameWithoutExt . '_' . time() . '.' . $extension;
 
-            $path = $file->storeAs('clients/' . $client->id, $safeName, 'public');
+            $path = $file->storeAs('clients/' . $client->id, $safeName, 'local');
 
             $document = $client->documents()->create([
                 'name' => $safeName,
@@ -384,7 +384,7 @@ class ClientController extends Controller
             return response()->json(['error' => 'Forbidden'], 403);
         }
 
-        Storage::disk('public')->delete($document->path);
+        Storage::disk('local')->delete($document->path);
         $document->delete();
 
         return response()->json(['success' => true]);

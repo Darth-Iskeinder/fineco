@@ -7,6 +7,7 @@ use App\Http\Controllers\BuhTasksController;
 use App\Http\Controllers\ClientController;
 use App\Http\Controllers\ClientServiceScheduleController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\EstimateController;
 use App\Http\Controllers\SettingsController;
@@ -49,6 +50,11 @@ Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 
 // Защищённые маршруты (требуют аутентификации)
 Route::middleware('auth:employee')->group(function () {
+    // Документы с приватного диска — единственный способ их получить.
+    // Проверка доступа внутри контроллера: у документов клиента и задачи разные модули.
+    Route::get('/documents/client/{document}', [DocumentController::class, 'client'])->name('documents.client');
+    Route::get('/documents/task/{document}', [DocumentController::class, 'task'])->name('documents.task');
+
     // Страница руководителя (только роль manager, вне системы модулей)
     Route::prefix('dashboard')->name('dashboard.')->middleware('manager')->group(function () {
         Route::get('/', [DashboardController::class, 'index'])->name('index');

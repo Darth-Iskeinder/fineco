@@ -178,7 +178,7 @@ class DemoAuditSeeder extends Seeder
         $fileName = 'demo-' . $log->id . '.txt';
         $path     = 'buh_task_documents/' . $log->id . '/' . $fileName;
 
-        Storage::disk('public')->put(
+        Storage::disk('local')->put(
             $path,
             "ДЕМО-документ\n{$serviceName}\nМесяц: {$month}/2026\nЗадача #{$log->id}\n",
         );

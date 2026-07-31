@@ -159,7 +159,7 @@ class DemoAlfaAuditSeeder extends Seeder
     {
         $path = "buh_task_documents/{$log->id}/demo-{$log->id}-{$n}.txt";
 
-        Storage::disk('public')->put(
+        Storage::disk('local')->put(
             $path,
             "ДЕМО-документ\n{$serviceName}\nПериод: {$month}/2026\nЗадача #{$log->id}\n",
         );

@@ -50,7 +50,7 @@ class TaskMultiDocumentTest extends TestCase
     {
         parent::setUp();
 
-        Storage::fake('public');
+        Storage::fake('local');
 
         Periodicity::firstOrCreate(['name' => 'Ежемесячно'], ['kind' => 'monthly']);
         $employeeRole = Role::firstOrCreate(['name' => Role::EMPLOYEE], ['display_name' => 'Сотрудник']);
@@ -120,9 +120,10 @@ class TaskMultiDocumentTest extends TestCase
         $this->assertCount(2, $docs);
         $this->assertSame(['акт_1.pdf', 'акт_2.xlsx'], array_column($docs, 'name'));
 
-        // Оба файла реально лежат на диске
-        foreach ($docs as $doc) {
-            Storage::disk('public')->assertExists($doc['path']);
+        // Оба файла реально лежат на приватном диске. Путь берём из БД:
+        // наружу отдаётся только ссылка на скачивание, но не путь на диске.
+        foreach ($log->documents()->pluck('path') as $path) {
+            Storage::disk('local')->assertExists($path);
         }
     }
 
@@ -168,7 +169,7 @@ class TaskMultiDocumentTest extends TestCase
     public function test_delete_document_while_open(): void
     {
         $log = $this->makeLog();
-        Storage::disk('public')->put('buh_task_documents/del.pdf', 'x');
+        Storage::disk('local')->put('buh_task_documents/del.pdf', 'x');
         $doc = $log->documents()->create(['path' => 'buh_task_documents/del.pdf', 'name' => 'del.pdf']);
 
         $this->actingAs($this->accountant, 'employee')
@@ -176,7 +177,7 @@ class TaskMultiDocumentTest extends TestCase
             ->assertOk()
             ->assertJsonPath('log.documents', []);
 
-        Storage::disk('public')->assertMissing('buh_task_documents/del.pdf');
+        Storage::disk('local')->assertMissing('buh_task_documents/del.pdf');
         $this->assertSame(0, $log->documents()->count());
     }
 

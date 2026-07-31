@@ -1051,7 +1051,7 @@ class BuhTasksController extends Controller
         $originalName = $file->getClientOriginalName();
         $extension    = $file->getClientOriginalExtension();
         $safeName     = pathinfo($originalName, PATHINFO_FILENAME) . '_' . time() . '.' . $extension;
-        $path         = $file->storeAs('buh_task_documents/' . $log->id, $safeName, 'public');
+        $path         = $file->storeAs('buh_task_documents/' . $log->id, $safeName, 'local');
 
         $log->documents()->create(['path' => $path, 'name' => $originalName]);
 
@@ -1072,7 +1072,7 @@ class BuhTasksController extends Controller
             ], 422);
         }
 
-        Storage::disk('public')->delete($document->path);
+        Storage::disk('local')->delete($document->path);
         $document->delete();
 
         return response()->json(['success' => true, 'log' => $this->formatLog($log)]);
@@ -1133,7 +1133,7 @@ class BuhTasksController extends Controller
             $file         = $request->file('file');
             $originalName = $file->getClientOriginalName();
             $safeName     = pathinfo($originalName, PATHINFO_FILENAME) . '_' . time() . '.' . $file->getClientOriginalExtension();
-            $path         = $file->storeAs('buh_adhoc_documents/' . $adhoc->id, $safeName, 'public');
+            $path         = $file->storeAs('buh_adhoc_documents/' . $adhoc->id, $safeName, 'local');
             $adhoc->documents()->create(['path' => $path, 'name' => $originalName]);
         }
 
@@ -1370,7 +1370,7 @@ class BuhTasksController extends Controller
         $originalName = $file->getClientOriginalName();
         $extension    = $file->getClientOriginalExtension();
         $safeName     = pathinfo($originalName, PATHINFO_FILENAME) . '_' . time() . '.' . $extension;
-        $path         = $file->storeAs('buh_adhoc_documents/' . $task->id, $safeName, 'public');
+        $path         = $file->storeAs('buh_adhoc_documents/' . $task->id, $safeName, 'local');
 
         $task->documents()->create(['path' => $path, 'name' => $originalName]);
 
@@ -1391,7 +1391,7 @@ class BuhTasksController extends Controller
             ], 422);
         }
 
-        Storage::disk('public')->delete($document->path);
+        Storage::disk('local')->delete($document->path);
         $document->delete();
 
         return response()->json(['success' => true, 'log' => $this->formatAdhoc($task)]);
@@ -1426,11 +1426,11 @@ class BuhTasksController extends Controller
 
         // Файлы: и новые (documents), и оставшийся от старой схемы одиночный
         foreach ($task->documents as $doc) {
-            Storage::disk('public')->delete($doc->path);
+            Storage::disk('local')->delete($doc->path);
         }
         $task->documents()->delete();
         if ($task->document_path) {
-            Storage::disk('public')->delete($task->document_path);
+            Storage::disk('local')->delete($task->document_path);
         }
 
         $task->delete();
@@ -1454,11 +1454,11 @@ class BuhTasksController extends Controller
         abort_if($task->employee_id !== $employee->id, 403);
     }
 
-    /** Документы задачи для фронта: [{id, name, path}], по порядку добавления. */
+    /** Документы задачи для фронта: [{id, name, url}], по порядку добавления. */
     private function docs($model): array
     {
         return $model->documents
-            ->map(fn ($d) => ['id' => $d->id, 'name' => $d->name, 'path' => $d->path])
+            ->map(fn ($d) => ['id' => $d->id, 'name' => $d->name, 'url' => $d->url])
             ->values()
             ->all();
     }

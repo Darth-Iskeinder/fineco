@@ -20,8 +20,19 @@ class ClientDocument extends Model
         'size' => 'integer',
     ];
 
+    /** Фронту нужна только ссылка; внутренний путь на диске наружу не отдаём. */
+    protected $appends = ['url'];
+
+    protected $hidden = ['path'];
+
     public function client(): BelongsTo
     {
         return $this->belongsTo(Client::class);
+    }
+
+    /** Файл отдаёт контроллер с проверкой доступа, прямой ссылки на диск больше нет. */
+    public function getUrlAttribute(): string
+    {
+        return route('documents.client', $this);
     }
 }

@@ -30,10 +30,15 @@ return [
 
     'disks' => [
 
+        // Документы клиентов и задач. Отдаются только через DocumentController.
+        // serve = false намеренно: иначе Laravel вешает служебные роуты
+        // GET|PUT /storage/{path} прямо на этот каталог. Дыры они не дают
+        // (диск приватный, нужна подписанная ссылка), но PUT умеет писать
+        // в хранилище документов, а нам эти роуты не нужны вовсе.
         'local' => [
             'driver' => 'local',
             'root' => storage_path('app/private'),
-            'serve' => true,
+            'serve' => false,
             'throw' => false,
             'report' => false,
         ],
@@ -67,14 +72,14 @@ return [
     | Symbolic Links
     |--------------------------------------------------------------------------
     |
-    | Here you may configure the symbolic links that will be created when the
-    | `storage:link` Artisan command is executed. The array keys should be
-    | the locations of the links and the values should be their targets.
+    | Список намеренно пуст. Раньше здесь был public/storage → storage/app/public,
+    | из-за чего документы клиентов и задач раздавал nginx напрямую, без проверки
+    | авторизации и по угадываемому пути. Теперь файлы лежат на приватном диске
+    | `local` и отдаются только через DocumentController.
+    | Не возвращать симлинк и не запускать `storage:link`.
     |
     */
 
-    'links' => [
-        public_path('storage') => storage_path('app/public'),
-    ],
+    'links' => [],
 
 ];
