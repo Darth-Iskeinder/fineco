@@ -207,11 +207,9 @@ Route::middleware('auth:employee')->group(function () {
         // Категория налогоплательщика — классификация ГНС, три значения на всех.
         // Раздела нет намеренно, выбирается селектором в карточке клиента.
 
-        // Метод учёта
-        Route::get('/accounting-methods', [SettingsController::class, 'accountingMethodsPage'])->name('accounting-methods');
-        Route::post('/accounting-methods', [SettingsController::class, 'storeAccountingMethod'])->name('accounting-methods.store');
-        Route::put('/accounting-methods/{accountingMethod}', [SettingsController::class, 'updateAccountingMethod'])->name('accounting-methods.update');
-        Route::delete('/accounting-methods/{accountingMethod}', [SettingsController::class, 'destroyAccountingMethod'])->name('accounting-methods.destroy');
+        // Метод учёта — кассовый или начисления, список зашит в коде
+        // (Client::$accountingMethods). Раздела нет: справочник accounting_methods
+        // ни к чему не подключён, правка в нём ни на что не влияла.
 
         // Тип обслуживания
         Route::get('/service-types', [SettingsController::class, 'serviceTypesPage'])->name('service-types');

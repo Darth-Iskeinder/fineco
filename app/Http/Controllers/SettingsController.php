@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\AccountingMethod;
 use App\Models\ActivityType;
 use App\Models\Billing;
 use App\Models\Category;
@@ -59,7 +58,6 @@ class SettingsController extends Controller
         return response()->json(['success' => true]);
     }
 
-    public function accountingMethodsPage()   { return $this->lookupView('Метод учёта',                 '/settings/accounting-methods',    AccountingMethod::orderBy('name')->get()); }
     public function serviceTypesPage()        { return $this->lookupView('Тип обслуживания',            '/settings/service-types',         ServiceType::orderBy('name')->get()); }
     public function categoriesPage()          { return $this->lookupView('Категория',                   '/settings/categories',            Category::orderBy('name')->get()); }
     public function spheresPage()             { return $this->lookupView('Сфера',                       '/settings/spheres',               Sphere::orderBy('name')->get()); }
@@ -72,10 +70,6 @@ class SettingsController extends Controller
     public function taxAuthoritiesPage()      { return $this->lookupView('Коды налоговых органов',      '/settings/tax-authorities',       TaxAuthority::orderBy('code')->get(), 'Справочник кодов районных ГНС. Используется при добавлении филиалов в карточке клиента.', [
         ['key' => 'code', 'label' => 'Код районной ГНС', 'type' => 'text', 'required' => true],
     ], 'Наименование УГНС'); }
-
-    public function storeAccountingMethod(Request $r)                { return $this->lookupStore($r, AccountingMethod::class); }
-    public function updateAccountingMethod(Request $r, AccountingMethod $accountingMethod) { return $this->lookupUpdate($r, $accountingMethod); }
-    public function destroyAccountingMethod(AccountingMethod $accountingMethod)            { return $this->lookupDestroy($accountingMethod); }
 
     public function storeServiceType(Request $r)                     { return $this->lookupStore($r, ServiceType::class); }
     public function updateServiceType(Request $r, ServiceType $serviceType)                { return $this->lookupUpdate($r, $serviceType); }

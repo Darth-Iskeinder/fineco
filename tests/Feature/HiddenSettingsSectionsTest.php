@@ -61,7 +61,14 @@ class HiddenSettingsSectionsTest extends TestCase
     /** Страниц нет — ни на чтение, ни на запись. */
     public function test_sections_are_gone(): void
     {
-        foreach (['/settings/organization-forms', '/settings/client-statuses', '/settings/taxpayer-categories'] as $url) {
+        $urls = [
+            '/settings/organization-forms',
+            '/settings/client-statuses',
+            '/settings/taxpayer-categories',
+            '/settings/accounting-methods',
+        ];
+
+        foreach ($urls as $url) {
             $this->actingAs($this->admin, 'employee')->get($url)->assertNotFound();
             $this->actingAs($this->admin, 'employee')->postJson($url, ['name' => 'Новое'])->assertNotFound();
         }
@@ -78,6 +85,36 @@ class HiddenSettingsSectionsTest extends TestCase
         $this->assertStringNotContainsString('Форма/тип организации', $html);
         $this->assertStringNotContainsString('Статус клиента', $html);
         $this->assertStringNotContainsString('Категория налогоплательщика', $html);
+        $this->assertStringNotContainsString('Метод учёта', $html);
+    }
+
+    /**
+     * Метод учёта в карточке клиента всегда работал на списке из кода, а
+     * справочник accounting_methods стоял пустой и ни к чему не подключённый —
+     * правка в нём ни на что не влияла. Карточка от удаления раздела не страдает.
+     */
+    public function test_accounting_method_still_selectable_on_client_card(): void
+    {
+        $client = Client::create([
+            'name' => 'ТОО Метод Учёта',
+            'inn'  => strtoupper(substr(md5(uniqid()), 0, 12)),
+        ]);
+
+        $html = $this->actingAs($this->admin, 'employee')
+            ->get('/clients/' . $client->id)
+            ->assertOk()
+            ->getContent();
+
+        // Список уходит в Alpine через @json, а он экранирует кириллицу
+        // как \uXXXX — разэкранируем, иначе искать бесполезно.
+        $html = preg_replace_callback(
+            '/\\\\u([0-9a-fA-F]{4})/',
+            fn ($m) => mb_convert_encoding(pack('H*', $m[1]), 'UTF-8', 'UTF-16BE'),
+            $html,
+        );
+
+        $this->assertStringContainsString('Кассовый метод', $html);
+        $this->assertStringContainsString('Метод начисления', $html);
     }
 
     /**
