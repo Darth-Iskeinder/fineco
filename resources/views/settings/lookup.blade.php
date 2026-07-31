@@ -25,7 +25,9 @@
                         <template x-for="f in fields" :key="f.key">
                             <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider" x-text="f.label"></th>
                         </template>
-                        <th class="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Действия</th>
+                        @unless ($rowsLocked ?? false)
+                            <th class="px-6 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Действия</th>
+                        @endunless
                     </tr>
                 </thead>
                 <tbody class="bg-white divide-y divide-slate-200">
@@ -35,6 +37,7 @@
                             <template x-for="f in fields" :key="f.key">
                                 <td class="px-6 py-4 text-sm text-slate-500" x-text="displayValue(f, item[f.key])"></td>
                             </template>
+                        @unless ($rowsLocked ?? false)
                             <td class="px-6 py-4 text-right">
                                 <div class="flex items-center justify-end gap-1">
                                     <button @click="openEdit(item)" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors">
@@ -45,10 +48,11 @@
                                     </button>
                                 </div>
                             </td>
+                        @endunless
                         </tr>
                     </template>
                     <template x-if="items.length === 0">
-                        <tr><td :colspan="2 + fields.length" class="px-6 py-10 text-center text-slate-400">Нет данных</td></tr>
+                        <tr><td :colspan="{{ ($rowsLocked ?? false) ? 1 : 2 }} + fields.length" class="px-6 py-10 text-center text-slate-400">Нет данных</td></tr>
                     </template>
                 </tbody>
             </table>

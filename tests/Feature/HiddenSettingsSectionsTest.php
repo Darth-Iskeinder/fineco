@@ -9,6 +9,7 @@ use App\Models\Employee;
 use App\Models\OrganizationForm;
 use App\Models\Periodicity;
 use App\Models\Role;
+use App\Models\TaxAuthority;
 use App\Models\TaxpayerCategory;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
@@ -191,6 +192,52 @@ class HiddenSettingsSectionsTest extends TestCase
             ->count();
 
         $this->assertSame(0, $stranded, 'Есть клиенты, оставшиеся на старом поле');
+    }
+
+    /**
+     * Коды районных ГНС — список общий для всех аккаунтов. Существующую строку
+     * тронуть нельзя: переименование задело бы все фирмы сразу. Добавить
+     * недостающий УГНС можно — новые появляются, ждать вендора незачем.
+     */
+    public function test_tax_authorities_are_add_only(): void
+    {
+        $authority = TaxAuthority::create([
+            'name' => 'Тестовое УГНС ' . uniqid(),
+            'code' => (string) random_int(100000, 999999),
+        ]);
+
+        $this->actingAs($this->admin, 'employee')
+            ->putJson('/settings/tax-authorities/' . $authority->id, ['name' => 'Другое', 'code' => '999'])
+            ->assertNotFound();
+
+        $this->actingAs($this->admin, 'employee')
+            ->deleteJson('/settings/tax-authorities/' . $authority->id)
+            ->assertNotFound();
+
+        $this->assertDatabaseHas('tax_authorities', ['id' => $authority->id, 'name' => $authority->name]);
+
+        // Добавление осталось
+        $this->actingAs($this->admin, 'employee')
+            ->postJson('/settings/tax-authorities', [
+                'name' => 'Новое УГНС ' . uniqid(),
+                'code' => (string) random_int(100000, 999999),
+            ])
+            ->assertOk();
+    }
+
+    /** На странице кодов ГНС нет кнопок правки и удаления. */
+    public function test_tax_authorities_page_has_no_row_actions(): void
+    {
+        $html = $this->actingAs($this->admin, 'employee')
+            ->get('/settings/tax-authorities')
+            ->assertOk()
+            ->getContent();
+
+        // Ищем именно кнопки: сами методы openEdit/openDelete в скрипте остаются,
+        // шаблон общий для всех справочников.
+        $this->assertStringNotContainsString('@click="openEdit(item)"', $html);
+        $this->assertStringNotContainsString('@click="openDelete(item)"', $html);
+        $this->assertStringContainsString('@click="openCreate()"', $html);
     }
 
     /** Данные на месте: карточка клиента выбирает их селектором. */

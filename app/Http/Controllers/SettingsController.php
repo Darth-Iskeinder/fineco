@@ -28,9 +28,14 @@ class SettingsController extends Controller
     // ПРОСТЫЕ СПРАВОЧНИКИ (общий паттерн)
     // =============================================
 
-    private function lookupView(string $title, string $endpoint, $items, string $description = '', array $fields = [], string $nameLabel = 'Название')
+    /**
+     * $rowsLocked — спрятать правку и удаление у существующих строк. Нужно там,
+     * где список общий для всех аккаунтов: тронуть чужую строку нельзя,
+     * а добавить недостающую можно.
+     */
+    private function lookupView(string $title, string $endpoint, $items, string $description = '', array $fields = [], string $nameLabel = 'Название', bool $rowsLocked = false)
     {
-        return view('settings.lookup', compact('title', 'description', 'items', 'fields', 'nameLabel') + [
+        return view('settings.lookup', compact('title', 'description', 'items', 'fields', 'nameLabel', 'rowsLocked') + [
             'pageTitle'    => $title,
             'baseEndpoint' => $endpoint,
         ]);
@@ -59,9 +64,9 @@ class SettingsController extends Controller
     public function spheresPage()             { return $this->lookupView('Сфера',                       '/settings/spheres',               Sphere::orderBy('name')->get()); }
     public function groupsPage()              { return $this->lookupView('Группа',                      '/settings/groups',                ServiceGroup::orderBy('name')->get()); }
     public function billingsPage()            { return $this->lookupView('Биллинг',                     '/settings/billings',              Billing::orderBy('id')->get()); }
-    public function taxAuthoritiesPage()      { return $this->lookupView('Коды налоговых органов',      '/settings/tax-authorities',       TaxAuthority::orderBy('code')->get(), 'Справочник кодов районных ГНС. Используется при добавлении филиалов в карточке клиента.', [
+    public function taxAuthoritiesPage()      { return $this->lookupView('Коды налоговых органов',      '/settings/tax-authorities',       TaxAuthority::orderBy('code')->get(), 'Справочник кодов районных ГНС, общий для всех компаний. Используется при добавлении филиалов в карточке клиента. Изменить или удалить существующую запись нельзя, недостающую можно добавить.', [
         ['key' => 'code', 'label' => 'Код районной ГНС', 'type' => 'text', 'required' => true],
-    ], 'Наименование УГНС'); }
+    ], 'Наименование УГНС', rowsLocked: true); }
 
     public function storeSphere(Request $r)                          { return $this->lookupStore($r, Sphere::class); }
     public function updateSphere(Request $r, Sphere $sphere)                               { return $this->lookupUpdate($r, $sphere); }
@@ -76,8 +81,6 @@ class SettingsController extends Controller
     public function destroyBilling(Billing $billing)                                       { return $this->lookupDestroy($billing); }
 
     public function storeTaxAuthority(Request $r)                    { return $this->lookupStore($r, TaxAuthority::class, ['code' => ['required', 'string', 'max:10', Rule::unique('tax_authorities', 'code')]]); }
-    public function updateTaxAuthority(Request $r, TaxAuthority $taxAuthority)             { return $this->lookupUpdate($r, $taxAuthority, ['code' => ['required', 'string', 'max:10', Rule::unique('tax_authorities', 'code')->ignore($taxAuthority->id)]]); }
-    public function destroyTaxAuthority(TaxAuthority $taxAuthority)                         { return $this->lookupDestroy($taxAuthority); }
 
     /**
      * Справочная страница, только просмотр. Список режимов задаёт государство,

@@ -249,7 +249,7 @@ Route::middleware('auth:employee')->group(function () {
         // Коды налоговых органов
         Route::get('/tax-authorities', [SettingsController::class, 'taxAuthoritiesPage'])->name('tax-authorities');
         Route::post('/tax-authorities', [SettingsController::class, 'storeTaxAuthority'])->name('tax-authorities.store');
-        Route::put('/tax-authorities/{taxAuthority}', [SettingsController::class, 'updateTaxAuthority'])->name('tax-authorities.update');
-        Route::delete('/tax-authorities/{taxAuthority}', [SettingsController::class, 'destroyTaxAuthority'])->name('tax-authorities.destroy');
+        // Правки и удаления нет намеренно: список общий для всех аккаунтов,
+        // чужую строку трогать нельзя. Добавить недостающий УГНС можно.
     });
 });

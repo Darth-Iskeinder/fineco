@@ -50,6 +50,7 @@ class TenantSchemaTest extends TestCase
         'services',
         'spheres',
         'service_groups',
+        'billings',
     ];
 
     /** Все таблицы, которым положена пометка «чей это ряд». */
