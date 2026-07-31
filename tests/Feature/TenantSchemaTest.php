@@ -37,6 +37,22 @@ class TenantSchemaTest extends TestCase
         'audit_checklist_items',
     ];
 
+    /**
+     * Справочники, которые решено оставить фирме на редактирование, — значит у
+     * каждой свой набор. Пополняется по мере разбора настроек. Справочники,
+     * закрытые на просмотр (режимы налогообложения), остаются общими и сюда
+     * не попадают.
+     */
+    private const TENANT_DICTIONARIES = [
+        'activity_types',
+    ];
+
+    /** Все таблицы, которым положена пометка «чей это ряд». */
+    private function taggedTables(): array
+    {
+        return array_merge(self::WORKING_TABLES, self::TENANT_DICTIONARIES);
+    }
+
     protected function connectionsToTransact(): array
     {
         return ['mysql'];
@@ -64,7 +80,7 @@ class TenantSchemaTest extends TestCase
 
     public function test_every_working_table_has_tenant_column(): void
     {
-        foreach (self::WORKING_TABLES as $table) {
+        foreach ($this->taggedTables() as $table) {
             $this->assertTrue(
                 Schema::hasColumn($table, 'tenant_id'),
                 "В таблице {$table} нет пометки tenant_id",
@@ -74,7 +90,7 @@ class TenantSchemaTest extends TestCase
 
     public function test_no_rows_without_an_owner(): void
     {
-        foreach (self::WORKING_TABLES as $table) {
+        foreach ($this->taggedTables() as $table) {
             $orphans = DB::table($table)->whereNull('tenant_id')->count();
 
             $this->assertSame(0, $orphans, "В таблице {$table} есть строки без хозяина");
