@@ -1,0 +1,53 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Support\Facades\DB;
+
+/**
+ * Убираем подпорку: у tenant_id больше нет значения по умолчанию.
+ *
+ * Она ставилась осознанно и временно. Когда пометка «чей» стала обязательной,
+ * код ещё нигде её не проставлял — без значения по умолчанию ломалось создание
+ * вообще всего: клиента, сотрудника, задачи. Подпорка писала «первая фирма».
+ *
+ * Пока фирма одна это безобидно, но с появлением второй становится опасно:
+ * забытая привязка молча уехала бы в первый аккаунт вместо того, чтобы честно
+ * упасть. Чужой клиент оказался бы у вас — без ошибки, без следа, без способа
+ * это заметить.
+ *
+ * Теперь фирму проставляет трейт BelongsToTenant из контекста, а если контекста
+ * нет — падение (в терминале) или ошибка базы (везде). Это и есть цель:
+ * строка без хозяина не должна появляться никакими путями.
+ */
+return new class extends Migration
+{
+    public function up(): void
+    {
+        foreach ($this->tablesWithTenantId() as $table) {
+            DB::statement("ALTER TABLE `{$table}` ALTER COLUMN `tenant_id` DROP DEFAULT");
+        }
+    }
+
+    public function down(): void
+    {
+        $tenantId = DB::table('tenants')->orderBy('id')->value('id');
+
+        if (!$tenantId) {
+            return;
+        }
+
+        foreach ($this->tablesWithTenantId() as $table) {
+            DB::statement("ALTER TABLE `{$table}` ALTER COLUMN `tenant_id` SET DEFAULT {$tenantId}");
+        }
+    }
+
+    /** @return string[] */
+    private function tablesWithTenantId(): array
+    {
+        return collect(DB::select(
+            "SELECT TABLE_NAME AS t FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND COLUMN_NAME = 'tenant_id'
+             ORDER BY TABLE_NAME"
+        ))->pluck('t')->all();
+    }
+};

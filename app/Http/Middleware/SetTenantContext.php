@@ -11,11 +11,11 @@ use Symfony\Component\HttpFoundation\Response;
  * Ставит текущую фирму на время запроса — из авторизованного сотрудника.
  *
  * Идёт после сессии, поэтому к моменту его работы сотрудник уже известен.
- * Гость проходит мимо: на странице логина фильтровать нечего.
  *
- * Контекст снимается после ответа. В обычном PHP это не обязательно (процесс
- * умирает), но под Octane или в очереди процесс живёт дальше, и чужая фирма
- * протекла бы в следующий запрос.
+ * Фирма проставляется на КАЖДОМ запросе, в том числе гостевому — там пусто.
+ * Это важнее, чем кажется: под Octane процесс живёт дальше, и если оставить
+ * значение от прошлого запроса, чужая фирма протекла бы в следующий. Поэтому
+ * не «поставить, если есть», а «поставить всегда, хоть и пусто».
  */
 class SetTenantContext
 {
@@ -23,15 +23,8 @@ class SetTenantContext
     {
         $employee = auth('employee')->user();
 
-        if ($employee && $employee->tenant_id) {
-            TenantContext::set((int) $employee->tenant_id);
-        }
+        TenantContext::set($employee?->tenant_id ? (int) $employee->tenant_id : null);
 
         return $next($request);
-    }
-
-    public function terminate(Request $request, Response $response): void
-    {
-        TenantContext::forget();
     }
 }

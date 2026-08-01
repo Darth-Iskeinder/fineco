@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Support\TenantContext;
+
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
@@ -22,8 +24,12 @@ class Module extends Model
 
     public function employees(): BelongsToMany
     {
-        return $this->belongsToMany(Employee::class, 'employee_module')
-            ->withTimestamps();
+        $relation = $this->belongsToMany(Employee::class, 'employee_module')->withTimestamps();
+
+        // Модули общие для всех аккаунтов, своей фирмы у них нет — берём текущую.
+        return TenantContext::has()
+            ? $relation->withPivotValue('tenant_id', TenantContext::id())
+            : $relation;
     }
 
     public function scopeActive($query)

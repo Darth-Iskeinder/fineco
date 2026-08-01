@@ -13,6 +13,7 @@ use App\Models\TaxAuthority;
 use App\Models\Service;
 use App\Models\Tariff;
 use App\Models\TaxSystem;
+use App\Support\TenantContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
@@ -151,7 +152,8 @@ class SettingsController extends Controller
     {
         $validated = $request->validate([
             'name' => 'required|string|max:255',
-            'code' => 'required|string|max:50|unique:activity_types,code',
+            // Коды видов деятельности уникальны в пределах фирмы, а не всей базы.
+            'code' => ['required', 'string', 'max:50', Rule::unique('activity_types', 'code')->where('tenant_id', TenantContext::id())],
             'description' => 'nullable|string|max:500',
             'is_active' => 'boolean',
             'sort_order' => 'integer|min:0',
@@ -173,7 +175,7 @@ class SettingsController extends Controller
     {
         $validated = $request->validate([
             'name' => 'required|string|max:255',
-            'code' => ['required', 'string', 'max:50', Rule::unique('activity_types', 'code')->ignore($activityType->id)],
+            'code' => ['required', 'string', 'max:50', Rule::unique('activity_types', 'code')->where('tenant_id', TenantContext::id())->ignore($activityType->id)],
             'description' => 'nullable|string|max:500',
             'is_active' => 'boolean',
             'sort_order' => 'integer|min:0',

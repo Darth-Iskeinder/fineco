@@ -83,14 +83,23 @@ class Employee extends Authenticatable
 
     public function modules(): BelongsToMany
     {
-        return $this->belongsToMany(Module::class, 'employee_module')
-            ->withTimestamps();
+        $relation = $this->belongsToMany(Module::class, 'employee_module')->withTimestamps();
+
+        // Таблица связи модели не имеет, значит трейт до неё не дотягивается.
+        // Фирму берём у родителя: она у него всегда верная, и не зависит от того,
+        // задан ли контекст (крон, консоль, момент авторизации).
+        return $this->tenant_id
+            ? $relation->withPivotValue('tenant_id', $this->tenant_id)
+            : $relation;
     }
 
     public function clients(): BelongsToMany
     {
-        return $this->belongsToMany(Client::class, 'client_employee')
-            ->withTimestamps();
+        $relation = $this->belongsToMany(Client::class, 'client_employee')->withTimestamps();
+
+        return $this->tenant_id
+            ? $relation->withPivotValue('tenant_id', $this->tenant_id)
+            : $relation;
     }
 
     /** Клиенты, за которых этот сотрудник — ответственное лицо (одно на клиента). */

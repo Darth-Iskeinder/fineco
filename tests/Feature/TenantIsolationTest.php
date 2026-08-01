@@ -73,27 +73,19 @@ class TenantIsolationTest extends TestCase
 
     private function makeEmployee(Tenant $tenant, Role $role): Employee
     {
-        $employee = Employee::create([
+        return TenantContext::for($tenant, fn () => Employee::create([
             'full_name' => 'Сотрудник ' . uniqid(), 'position' => 'Админ',
             'email' => 'iso_' . uniqid() . '@test.kg', 'password' => bcrypt('x'),
             'role_id' => $role->id, 'status' => Employee::STATUS_ACTIVE,
-        ]);
-
-        DB::table('employees')->where('id', $employee->id)->update(['tenant_id' => $tenant->id]);
-
-        return $employee->refresh();
+        ]));
     }
 
     private function makeClient(Tenant $tenant, string $name): Client
     {
-        $client = Client::create([
+        return TenantContext::for($tenant, fn () => Client::create([
             'name' => $name,
             'inn'  => strtoupper(substr(md5(uniqid()), 0, 12)),
-        ]);
-
-        DB::table('clients')->where('id', $client->id)->update(['tenant_id' => $tenant->id]);
-
-        return $client->refresh();
+        ]));
     }
 
     /** Главное: чужой клиент не показывается в списке. */
@@ -156,11 +148,10 @@ class TenantIsolationTest extends TestCase
     /** Справочники тоже разделены — иначе чужие БП попали бы в смету. */
     public function test_dictionaries_are_separated(): void
     {
-        $theirService = Service::create([
+        $theirService = TenantContext::for($this->theirs, fn () => Service::create([
             'name' => 'Чужой БП ' . uniqid(), 'periodicity' => 'Ежемесячно',
             'start_day' => [5], 'is_active' => true,
-        ]);
-        DB::table('services')->where('id', $theirService->id)->update(['tenant_id' => $this->theirs->id]);
+        ]));
 
         TenantContext::set($this->mine);
 
@@ -214,6 +205,40 @@ class TenantIsolationTest extends TestCase
             DB::table('task_reminders')->where('tenant_id', $template->id)->count(),
             'Воркер создал напоминания в аккаунте-образце',
         );
+    }
+
+    /**
+     * Проверка «ИНН уже занят» смотрит таблицу напрямую, мимо фильтра по фирме.
+     * Если её не ограничить, вторая фирма получит отказ из-за вашего клиента —
+     * которого она не видит и найти не может. Ровно та же ловушка, что была
+     * с удалённым клиентом, только между фирмами и вообще необъяснимая.
+     */
+    public function test_same_inn_can_be_registered_by_another_tenant(): void
+    {
+        $theirEmployee = $this->makeEmployee($this->theirs, Role::where('name', Role::ADMIN)->first());
+
+        $response = $this->actingAs($theirEmployee, 'employee')->post('/clients', [
+            'name' => 'ОсОО Тот же ИНН',
+            'inn'  => $this->myClient->inn,
+        ]);
+
+        $response->assertSessionDoesntHaveErrors(['inn'], null, 'createClient');
+
+        $this->assertTrue(
+            Client::acrossTenants()
+                ->where('inn', $this->myClient->inn)
+                ->where('tenant_id', $this->theirs->id)
+                ->exists(),
+            'Вторая фирма не смогла завести клиента с тем же ИНН',
+        );
+    }
+
+    /** А внутри своей фирмы дубль по-прежнему не пройдёт. */
+    public function test_duplicate_inn_inside_own_tenant_is_still_refused(): void
+    {
+        $this->actingAs($this->myEmployee, 'employee')
+            ->post('/clients', ['name' => 'ОсОО Дубль', 'inn' => $this->myClient->inn])
+            ->assertSessionHasErrors(['inn'], null, 'createClient');
     }
 
     /**

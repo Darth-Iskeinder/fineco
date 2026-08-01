@@ -308,8 +308,11 @@ class Client extends Model
 
     public function employees(): BelongsToMany
     {
-        return $this->belongsToMany(Employee::class, 'client_employee')
-            ->withTimestamps();
+        $relation = $this->belongsToMany(Employee::class, 'client_employee')->withTimestamps();
+
+        return $this->tenant_id
+            ? $relation->withPivotValue('tenant_id', $this->tenant_id)
+            : $relation;
     }
 
     public function clientStatus(): BelongsTo

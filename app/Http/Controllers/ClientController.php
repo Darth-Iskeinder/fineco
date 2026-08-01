@@ -8,6 +8,7 @@ use App\Models\ClientStatus;
 use App\Models\Employee;
 use App\Models\Tariff;
 use App\Models\TaxSystem;
+use App\Support\TenantContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -86,7 +87,11 @@ class ClientController extends Controller
     {
         $validated = $request->validateWithBag('createClient', [
             'name' => ['required', 'string', 'max:255'],
-            'inn' => ['required', 'string', 'max:14', 'unique:clients,inn'],
+            // Уникальность ИНН — в пределах своей фирмы. Правило проверки ходит
+            // мимо фильтра по фирме (оно смотрит таблицу напрямую), поэтому
+            // ограничиваем вручную. Иначе фирма получала бы «ИНН занят» из-за
+            // чужого клиента, которого не видит и найти не может.
+            'inn' => ['required', 'string', 'max:14', $this->innIsFreeInTenant()],
             'tax_system_id' => ['nullable', 'exists:tax_systems,id'],
             'tariff_id' => ['nullable', 'exists:tariffs,id'],
             'responsible_employee_id' => ['nullable', 'exists:employees,id'],
@@ -120,7 +125,7 @@ class ClientController extends Controller
     {
         $validated = $request->validateWithBag('updateClient', [
             'name' => ['required', 'string', 'max:255'],
-            'inn' => ['required', 'string', 'max:14', Rule::unique('clients')->ignore($client->id)],
+            'inn' => ['required', 'string', 'max:14', $this->innIsFreeInTenant($client->id)],
             'tax_system_id' => ['nullable', 'exists:tax_systems,id'],
             'tariff_id' => ['nullable', 'exists:tariffs,id'],
             'responsible_employee_id' => ['nullable', 'exists:employees,id'],
@@ -154,7 +159,7 @@ class ClientController extends Controller
             'basic' => [
                 'name' => ['required', 'string', 'max:255'],
                 'organization_form_id' => ['nullable', 'exists:organization_forms,id'],
-                'inn' => ['required', 'string', 'max:14', Rule::unique('clients')->ignore($client->id)],
+                'inn' => ['required', 'string', 'max:14', $this->innIsFreeInTenant($client->id)],
                 'director_inn' => ['nullable', 'string', 'max:14'],
                 'tax_office_code' => ['nullable', 'string', 'max:10'],
                 'activity_type_id' => ['nullable', 'exists:activity_types,id'],
@@ -398,5 +403,13 @@ class ClientController extends Controller
         return redirect()
             ->route('clients.index')
             ->with('success', 'Клиент ' . $name . ' удалён');
+    }
+
+    /** Правило «такой ИНН у нас ещё не занят» — только в своей фирме. */
+    private function innIsFreeInTenant(?int $exceptId = null): \Illuminate\Validation\Rules\Unique
+    {
+        $rule = Rule::unique('clients', 'inn')->where('tenant_id', TenantContext::id());
+
+        return $exceptId ? $rule->ignore($exceptId) : $rule;
     }
 }

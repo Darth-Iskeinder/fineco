@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\Service;
 use App\Models\Tenant;
 use App\Services\TenantTemplate;
+use App\Support\TenantContext;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -70,22 +71,19 @@ class TenantTemplateTest extends TestCase
             'created_at' => now(), 'updated_at' => now(),
         ]);
 
-        // tenant_id не в $fillable у моделей — это защита от массового присвоения,
-        // проставлять его будет трейт на этапе 2. Здесь дописываем напрямую.
-        $root = Service::create([
-            'name' => 'Образцовый БП', 'periodicity' => 'Ежемесячно',
-            'start_day' => [5], 'is_active' => true, 'cost' => 100,
-        ]);
-        $child = Service::create([
-            'parent_id' => $root->id,
-            'name' => 'Подпункт образца', 'periodicity' => 'Ежемесячно',
-            'start_day' => [5], 'is_active' => true,
-        ]);
+        return TenantContext::for($this->template, function () {
+            $root = Service::create([
+                'name' => 'Образцовый БП', 'periodicity' => 'Ежемесячно',
+                'start_day' => [5], 'is_active' => true, 'cost' => 100,
+            ]);
+            Service::create([
+                'parent_id' => $root->id,
+                'name' => 'Подпункт образца', 'periodicity' => 'Ежемесячно',
+                'start_day' => [5], 'is_active' => true,
+            ]);
 
-        DB::table('services')->whereIn('id', [$root->id, $child->id])
-            ->update(['tenant_id' => $this->template->id]);
-
-        return $root->refresh();
+            return $root;
+        });
     }
 
     public function test_template_account_exists_and_is_the_only_one(): void
@@ -131,12 +129,12 @@ class TenantTemplateTest extends TestCase
 
         $this->copier->copyTo($target);
 
-        $child = Service::where('tenant_id', $target->id)->whereNotNull('parent_id')->first();
+        $child = Service::acrossTenants()->where('tenant_id', $target->id)->whereNotNull('parent_id')->first();
 
         $this->assertNotNull($child, 'Подпункт не скопировался');
         $this->assertSame(
             $target->id,
-            (int) Service::find($child->parent_id)->tenant_id,
+            (int) Service::acrossTenants()->find($child->parent_id)->tenant_id,
             'Подпункт прицепился к родителю из чужого аккаунта',
         );
     }
@@ -153,7 +151,7 @@ class TenantTemplateTest extends TestCase
         $this->assertSame(0, DB::table('rates')->where('tenant_id', $target->id)->count());
         $this->assertSame(
             0,
-            Service::where('tenant_id', $target->id)->whereNotNull('rate_id')->count(),
+            Service::acrossTenants()->where('tenant_id', $target->id)->whereNotNull('rate_id')->count(),
             'У скопированного БП осталась ссылка на чужую ставку',
         );
     }
