@@ -183,6 +183,39 @@ class TenantIsolationTest extends TestCase
         TenantContext::forget();
     }
 
+    /**
+     * Ночной воркер обязан ходить по фирмам отдельно. Иначе напоминания второй
+     * фирмы создались бы с фирмой по умолчанию — достались бы первой, а вторая
+     * осталась бы без задач и пропустила сроки. Молча, без ошибки на экране.
+     */
+    public function test_worker_walks_tenants_one_by_one(): void
+    {
+        $this->artisan('tasks:generate', ['--date' => '2026-07-31'])
+            ->expectsOutputToContain('Аккаунт:')
+            ->assertSuccessful();
+
+        $misplaced = DB::table('task_reminders as r')
+            ->join('clients as c', 'r.client_id', '=', 'c.id')
+            ->whereColumn('r.tenant_id', '!=', 'c.tenant_id')
+            ->count();
+
+        $this->assertSame(0, $misplaced, 'Напоминание оказалось в чужой фирме');
+    }
+
+    /** Аккаунт-образец воркер обходит стороной: клиентов и задач в нём нет. */
+    public function test_worker_skips_the_template_account(): void
+    {
+        $template = \App\Models\Tenant::template()->first();
+
+        $this->artisan('tasks:generate', ['--date' => '2026-07-31'])->assertSuccessful();
+
+        $this->assertSame(
+            0,
+            DB::table('task_reminders')->where('tenant_id', $template->id)->count(),
+            'Воркер создал напоминания в аккаунте-образце',
+        );
+    }
+
     /** Без контекста фильтра нет — на этом шаге так и задумано (консоль, крон). */
     public function test_console_still_sees_everything_for_now(): void
     {

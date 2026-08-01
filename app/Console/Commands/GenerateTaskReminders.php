@@ -3,9 +3,11 @@
 namespace App\Console\Commands;
 
 use App\Models\Client;
+use App\Models\Tenant;
 use App\Models\Employee;
 use App\Models\Service;
 use App\Models\TaskReminder;
+use App\Support\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 
@@ -27,7 +29,8 @@ class GenerateTaskReminders extends Command
     protected $signature = 'tasks:generate
                             {--horizon=45 : На сколько дней вперёд генерировать}
                             {--lookback=190 : На сколько дней назад бэкфиллить просрочку (с запасом покрывает 6 месяцев; показ ограничен 6 мес на странице)}
-                            {--date= : База расчёта (YYYY-MM-DD), по умолчанию сегодня}';
+                            {--date= : База расчёта (YYYY-MM-DD), по умолчанию сегодня}
+                            {--tenant= : Только один аккаунт (id или slug); по умолчанию все}';
 
     protected $description = 'Сгенерировать напоминания о сроках выполнения БП для ответственных сотрудников';
 
@@ -38,7 +41,46 @@ class GenerateTaskReminders extends Command
      */
     private const BACKLOG_CUTOFF = '2026-07-01';
 
+    /**
+     * Проход по аккаунтам: каждый обрабатывается в своём контексте.
+     *
+     * Без этого воркер шёл бы по всей базе разом, а созданные напоминания
+     * получали бы фирму по умолчанию — то есть напоминания второй фирмы
+     * достались бы первой, а вторая осталась бы без задач и пропустила сроки.
+     * Ошибки на экране при этом не было бы никакой.
+     */
     public function handle(): int
+    {
+        $tenants = Tenant::real()
+            ->when($this->option('tenant'), function ($q) {
+                $value = $this->option('tenant');
+                $q->where(is_numeric($value) ? 'id' : 'slug', $value);
+            })
+            ->orderBy('id')
+            ->get();
+
+        if ($tenants->isEmpty()) {
+            $this->error('Аккаунты не найдены');
+
+            return self::FAILURE;
+        }
+
+        foreach ($tenants as $tenant) {
+            $this->newLine();
+            $this->line("<info>Аккаунт:</info> {$tenant->name}");
+
+            $status = TenantContext::for($tenant, fn () => $this->generateForCurrentTenant());
+
+            if ($status !== self::SUCCESS) {
+                return $status;
+            }
+        }
+
+        return self::SUCCESS;
+    }
+
+    /** Генерация в пределах текущей фирмы: её клиенты, её БП, её сотрудники. */
+    private function generateForCurrentTenant(): int
     {
         $today = $this->option('date')
             ? CarbonImmutable::parse($this->option('date'))->startOfDay()
