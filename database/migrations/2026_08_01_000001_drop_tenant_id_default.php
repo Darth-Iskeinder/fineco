@@ -25,7 +25,7 @@ return new class extends Migration
     public function up(): void
     {
         foreach ($this->tablesWithTenantId() as $table) {
-            DB::statement("ALTER TABLE `{$table}` ALTER COLUMN `tenant_id` DROP DEFAULT");
+            DB::statement($this->alter($table, 'DROP DEFAULT'));
         }
     }
 
@@ -38,8 +38,22 @@ return new class extends Migration
         }
 
         foreach ($this->tablesWithTenantId() as $table) {
-            DB::statement("ALTER TABLE `{$table}` ALTER COLUMN `tenant_id` SET DEFAULT {$tenantId}");
+            DB::statement($this->alter($table, "SET DEFAULT {$tenantId}"));
         }
+    }
+
+    /**
+     * Кавычки вокруг имён у MySQL и PostgreSQL разные, поэтому не пишем их
+     * руками — пусть подставит грамматика соединения. Сам ALTER ... DEFAULT
+     * в обеих базах пишется одинаково.
+     */
+    private function alter(string $table, string $action): string
+    {
+        $grammar = DB::getQueryGrammar();
+
+        return 'ALTER TABLE ' . $grammar->wrapTable($table)
+            . ' ALTER COLUMN ' . $grammar->wrap('tenant_id')
+            . ' ' . $action;
     }
 
     /**
