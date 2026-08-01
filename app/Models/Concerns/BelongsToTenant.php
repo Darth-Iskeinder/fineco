@@ -2,6 +2,7 @@
 
 namespace App\Models\Concerns;
 
+use App\Exceptions\TenantContextMissing;
 use App\Models\Tenant;
 use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\Builder;
@@ -28,6 +29,13 @@ trait BelongsToTenant
     {
         static::addGlobalScope('tenant', function (Builder $query) {
             if (!TenantContext::has()) {
+                // Терминал и крон: запрос по всей базе почти всегда означает
+                // забытую фирму, а не задумку. Лучше упасть, чем тихо задеть
+                // все аккаунты сразу.
+                if (TenantContext::isStrict()) {
+                    throw TenantContextMissing::for($query->getModel()::class);
+                }
+
                 return;
             }
 
@@ -40,8 +48,18 @@ trait BelongsToTenant
         static::creating(function (Model $model) {
             // tenant_id намеренно не в $fillable — из формы его подсунуть нельзя,
             // проставляем только здесь.
-            if (empty($model->tenant_id) && TenantContext::has()) {
+            if (!empty($model->tenant_id)) {
+                return;
+            }
+
+            if (TenantContext::has()) {
                 $model->tenant_id = TenantContext::id();
+
+                return;
+            }
+
+            if (TenantContext::isStrict()) {
+                throw TenantContextMissing::for($model::class);
             }
         });
     }

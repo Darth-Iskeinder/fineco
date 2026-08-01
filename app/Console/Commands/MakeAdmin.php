@@ -4,6 +4,8 @@ namespace App\Console\Commands;
 
 use App\Models\Employee;
 use App\Models\Role;
+use App\Models\Tenant;
+use App\Support\TenantContext;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
@@ -13,7 +15,8 @@ class MakeAdmin extends Command
     protected $signature = 'make:admin
                             {--email= : Email администратора}
                             {--name= : ФИО администратора}
-                            {--password= : Пароль (минимум 8 символов)}';
+                            {--password= : Пароль (минимум 8 символов)}
+                            {--tenant= : Аккаунт фирмы (id или slug); по умолчанию спросим}';
 
     protected $description = 'Создать нового администратора системы';
 
@@ -24,6 +27,16 @@ class MakeAdmin extends Command
         $this->info('║     Создание администратора ERP      ║');
         $this->info('╚══════════════════════════════════════╝');
         $this->info('');
+
+        // Администратор заводится в конкретную фирму. Раньше вопрос не стоял —
+        // фирма была одна; теперь без него сотрудник повис бы неизвестно где.
+        $tenant = $this->resolveTenant();
+
+        if (!$tenant) {
+            return Command::FAILURE;
+        }
+
+        $this->line("Аккаунт: <info>{$tenant->name}</info>");
 
         $adminRole = Role::where('name', 'admin')->first();
 
@@ -64,15 +77,15 @@ class MakeAdmin extends Command
             return Command::FAILURE;
         }
 
-        // Создаём администратора
-        $employee = Employee::create([
+        // Создаём администратора в выбранной фирме
+        $employee = TenantContext::for($tenant, fn () => Employee::create([
             'full_name' => $name,
             'position' => 'Администратор',
             'email' => $email,
             'password' => Hash::make($password),
             'role_id' => $adminRole->id,
             'status' => 'active',
-        ]);
+        ]));
 
         $this->info('');
         $this->info('Администратор успешно создан!');
@@ -82,6 +95,7 @@ class MakeAdmin extends Command
                 ['ID', $employee->id],
                 ['ФИО', $employee->full_name],
                 ['Email', $employee->email],
+                ['Фирма', $tenant->name],
                 ['Роль', 'Администратор'],
                 ['Статус', 'Активен'],
             ]
@@ -90,5 +104,35 @@ class MakeAdmin extends Command
         $this->warn('Сохраните учётные данные в надёжном месте!');
 
         return Command::SUCCESS;
+    }
+
+    /** Фирма, в которую заводим администратора. */
+    private function resolveTenant(): ?Tenant
+    {
+        $tenants = TenantContext::withoutTenant(fn () => Tenant::real()->orderBy('id')->get());
+
+        if ($tenants->isEmpty()) {
+            $this->error('Нет ни одного аккаунта. Сначала запустите миграции: php artisan migrate');
+
+            return null;
+        }
+
+        if ($value = $this->option('tenant')) {
+            $tenant = $tenants->first(fn (Tenant $t) => (string) $t->id === (string) $value || $t->slug === $value);
+
+            if (!$tenant) {
+                $this->error("Аккаунт «{$value}» не найден");
+            }
+
+            return $tenant;
+        }
+
+        if ($tenants->count() === 1) {
+            return $tenants->first();
+        }
+
+        $name = $this->choice('В какую фирму завести администратора?', $tenants->pluck('name')->all());
+
+        return $tenants->firstWhere('name', $name);
     }
 }

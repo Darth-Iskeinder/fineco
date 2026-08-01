@@ -15,21 +15,25 @@ use Illuminate\Database\Seeder;
  */
 class AuditChecklistTemplateSeeder extends Seeder
 {
+    use RunsInFirstTenant;
+
     public const STANDARD_NAME = 'Стандарт проверки';
 
     public function run(): void
     {
-        $this->template(
-            self::STANDARD_NAME,
-            'Контрольные точки по участкам учёта — подставляются в каждый новый аудит',
-            $this->baseItems(),
-        );
+        $this->inFirstTenant(function () {
+            $this->template(
+                self::STANDARD_NAME,
+                'Контрольные точки по участкам учёта — подставляются в каждый новый аудит',
+                $this->baseItems(),
+            );
 
-        // Прежние шаблоны (когда стандарт ещё выбирали руками) выводим из обращения:
-        // неиспользованные удаляем, использованные оставляем как историю аудита.
-        $legacy = ['Стандарт: базовая проверка', 'Стандарт: ИП, упрощёнка'];
-        AuditChecklistTemplate::whereIn('name', $legacy)->update(['is_active' => false]);
-        AuditChecklistTemplate::whereIn('name', $legacy)->doesntHave('audits')->delete();
+            // Прежние шаблоны (когда стандарт ещё выбирали руками) выводим из обращения:
+            // неиспользованные удаляем, использованные оставляем как историю аудита.
+            $legacy = ['Стандарт: базовая проверка', 'Стандарт: ИП, упрощёнка'];
+            AuditChecklistTemplate::whereIn('name', $legacy)->update(['is_active' => false]);
+            AuditChecklistTemplate::whereIn('name', $legacy)->doesntHave('audits')->delete();
+        });
     }
 
     /** @param array<int, array{0:string,1:?string,2:string,3:?string}> $items */

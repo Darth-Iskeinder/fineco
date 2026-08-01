@@ -216,8 +216,57 @@ class TenantIsolationTest extends TestCase
         );
     }
 
-    /** Без контекста фильтра нет — на этом шаге так и задумано (консоль, крон). */
-    public function test_console_still_sees_everything_for_now(): void
+    /**
+     * Терминал и крон: запрос без указания фирмы обязан упасть, а не уйти по
+     * всей базе. Тихая работа по всем аккаунтам сразу — это обновлённые цены
+     * не той фирмы и удалённые чужие задачи, причём без единой ошибки.
+     */
+    public function test_strict_mode_refuses_queries_without_a_tenant(): void
+    {
+        $this->expectException(\App\Exceptions\TenantContextMissing::class);
+
+        TenantContext::forget();
+        TenantContext::strictly(fn () => Client::count());
+    }
+
+    /** И запись тоже: строка без хозяина не должна появляться молча. */
+    public function test_strict_mode_refuses_writes_without_a_tenant(): void
+    {
+        $this->expectException(\App\Exceptions\TenantContextMissing::class);
+
+        TenantContext::forget();
+        TenantContext::strictly(fn () => Client::create([
+            'name' => 'ОсОО Без фирмы',
+            'inn'  => strtoupper(substr(md5(uniqid()), 0, 12)),
+        ]));
+    }
+
+    /** С указанной фирмой всё работает как обычно. */
+    public function test_strict_mode_allows_work_inside_a_tenant(): void
+    {
+        $count = TenantContext::strictly(
+            fn () => TenantContext::for($this->mine, fn () => Client::count())
+        );
+
+        $this->assertGreaterThan(0, $count);
+    }
+
+    /** Работа поверх фирм возможна, но только явно — она видна в коде. */
+    public function test_explicit_opt_out_survives_strict_mode(): void
+    {
+        $count = TenantContext::strictly(
+            fn () => TenantContext::withoutTenant(fn () => Client::count())
+        );
+
+        $this->assertGreaterThan(0, $count);
+    }
+
+    /**
+     * В вебе строгости нет намеренно: до авторизации фирма ещё неизвестна —
+     * вход ищет сотрудника по почте. После авторизации контекст ставит
+     * middleware, так что дыры не остаётся.
+     */
+    public function test_web_stays_permissive_before_login(): void
     {
         TenantContext::forget();
 

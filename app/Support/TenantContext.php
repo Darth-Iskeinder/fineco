@@ -24,6 +24,12 @@ class TenantContext
 {
     private static ?int $tenantId = null;
 
+    /** Явно разрешённая работа поверх фирм: копирование образца, супер-админка. */
+    private static bool $withoutTenant = false;
+
+    /** Ручное переключение строгости — нужно тестам, в бою не используется. */
+    private static ?bool $strictOverride = null;
+
     public static function set(int|Tenant|null $tenant): void
     {
         self::$tenantId = $tenant instanceof Tenant ? $tenant->id : $tenant;
@@ -54,6 +60,62 @@ class TenantContext
             return $callback();
         } finally {
             self::$tenantId = $previous;
+        }
+    }
+
+    /**
+     * Осознанная работа поверх всех фирм.
+     *
+     * Нужна там, где это и есть задача: скопировать образец в новый аккаунт,
+     * показать вендору список фирм. Оформляется явно, чтобы в коде было видно,
+     * кто выходит за пределы своей фирмы — незаметно проскочить нельзя.
+     */
+    public static function withoutTenant(callable $callback): mixed
+    {
+        $previous = self::$withoutTenant;
+        self::$withoutTenant = true;
+
+        try {
+            return $callback();
+        } finally {
+            self::$withoutTenant = $previous;
+        }
+    }
+
+    /**
+     * Должен ли запрос без указания фирмы падать с ошибкой.
+     *
+     * В терминале и кроне — да: там нет вошедшего сотрудника, и запрос по всей
+     * базе почти всегда означает забытый контекст, а не задумку.
+     *
+     * В вебе — нет: до авторизации фирма ещё неизвестна (вход ищет сотрудника
+     * по почте), а после авторизации контекст ставит middleware, так что дыры
+     * не остаётся. В тестах строгость выключена по умолчанию и включается
+     * точечно там, где её и проверяют.
+     */
+    public static function isStrict(): bool
+    {
+        if (self::$withoutTenant) {
+            return false;
+        }
+
+        if (self::$strictOverride !== null) {
+            return self::$strictOverride;
+        }
+
+        return app()->runningInConsole() && !app()->runningUnitTests();
+    }
+
+    /** Только для тестов: включить строгость и вернуть как было. */
+    public static function strictly(callable $callback): mixed
+    {
+        $previous = self::$strictOverride;
+        self::$strictOverride = true;
+
+        try {
+            return $callback();
+        } finally {
+            self::$strictOverride = $previous;
         }
     }
 }
