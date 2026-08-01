@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Убираем подпорку: у tenant_id больше нет значения по умолчанию.
@@ -41,13 +42,20 @@ return new class extends Migration
         }
     }
 
-    /** @return string[] */
+    /**
+     * Список таблиц берём средствами Laravel, а не запросом к information_schema:
+     * прод работает на PostgreSQL, разработка на MySQL, и DATABASE() есть только
+     * во втором. Сам ALTER ... DROP DEFAULT одинаков в обеих базах.
+     *
+     * @return string[]
+     */
     private function tablesWithTenantId(): array
     {
-        return collect(DB::select(
-            "SELECT TABLE_NAME AS t FROM information_schema.COLUMNS
-             WHERE TABLE_SCHEMA = DATABASE() AND COLUMN_NAME = 'tenant_id'
-             ORDER BY TABLE_NAME"
-        ))->pluck('t')->all();
+        return collect(Schema::getTables())
+            ->pluck('name')
+            ->filter(fn (string $table) => Schema::hasColumn($table, 'tenant_id'))
+            ->sort()
+            ->values()
+            ->all();
     }
 };
