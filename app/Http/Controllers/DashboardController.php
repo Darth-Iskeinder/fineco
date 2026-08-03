@@ -123,19 +123,24 @@ class DashboardController extends Controller
         $byCompany = [];
 
         foreach ($clients as $client) {
-            $items     = $client->estimates->first()?->rootItems ?? collect();
+            $estimate  = $client->estimates->first();
+            $items     = $estimate?->rootItems ?? collect();
             $overrides = $client->serviceSchedules->keyBy('service_id');
 
             // Клиент со сметой виден всегда, даже без задач в выбранном месяце
             $this->ensureCompanyRow($byCompany, (int) $client->id, $client->name, (float) $items->sum('total'));
 
-            // Не генерируем даты раньше старта обслуживания клиента
+            // Не генерируем даты раньше старта обслуживания клиента и раньше начала
+            // генерации по смете (месяц её создания холостой) — те же границы, что в задачнике.
             $clientFrom = $scanFrom;
             if ($client->service_start_date) {
                 $serviceStart = CarbonImmutable::parse($client->service_start_date)->startOfDay();
                 if ($serviceStart->gt($clientFrom)) {
                     $clientFrom = $serviceStart;
                 }
+            }
+            if ($estimate && $estimate->tasksStartFrom()->gt($clientFrom)) {
+                $clientFrom = $estimate->tasksStartFrom();
             }
 
             foreach ($items as $item) {
@@ -153,8 +158,9 @@ class DashboardController extends Controller
                     foreach ($service->dueDatesForClient($override, $clientFrom, $scanTo) as $due) {
                         $occurrences[] = [$due->year, $due->month, $due];
                     }
-                } else {
-                    // Позиции без расписания — задача текущего месяца (как в задачнике)
+                } elseif ($today->startOfMonth()->gte($clientFrom)) {
+                    // Позиции без расписания — задача текущего месяца (как в задачнике),
+                    // но не в холостой месяц только что заведённой сметы
                     $dueDay = $item->due_day ? min((int) $item->due_day, $today->daysInMonth) : null;
                     $occurrences[] = [$today->year, $today->month, $dueDay ? $today->startOfMonth()->addDays($dueDay - 1) : null];
                 }

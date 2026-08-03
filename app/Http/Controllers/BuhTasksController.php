@@ -239,11 +239,13 @@ class BuhTasksController extends Controller
         // (ручные one_time или БП без периодичности) показываем как текущую задачу.
         $tasks = [];
         foreach ($clients as $client) {
-            $items = $client->estimates->first()?->rootItems ?? collect();
+            $estimate = $client->estimates->first();
+            $items = $estimate?->rootItems ?? collect();
             $overrides = $client->serviceSchedules->keyBy('service_id');
 
             // Просрочку показываем только за последние 6 месяцев (единая логика с воркером напоминаний),
-            // но не раньше старта обслуживания клиента и не раньше отсечки backlog (июль 2026).
+            // но не раньше старта обслуживания клиента, не раньше отсечки backlog (июль 2026)
+            // и не раньше начала генерации по смете (месяц её создания — холостой).
             $lookbackStart = $today->subMonths(6);
             if ($backlogCutoff->gt($lookbackStart)) {
                 $lookbackStart = $backlogCutoff;
@@ -253,6 +255,9 @@ class BuhTasksController extends Controller
                 if ($serviceStart->gt($lookbackStart)) {
                     $lookbackStart = $serviceStart;
                 }
+            }
+            if ($estimate && $estimate->tasksStartFrom()->gt($lookbackStart)) {
+                $lookbackStart = $estimate->tasksStartFrom();
             }
 
             foreach ($items as $item) {
@@ -280,7 +285,9 @@ class BuhTasksController extends Controller
                     foreach ($service->dueDatesForClient($override, $lookbackStart, $horizonEnd) as $due) {
                         $occurrences[] = [$due->year, $due->month, $due->toDateString(), (int) $due->day, $due];
                     }
-                } else {
+                } elseif ($curStart->gte($lookbackStart)) {
+                    // Позиции без расписания — задача текущего месяца. В холостой месяц
+                    // (смета только что заведена) их тоже не показываем.
                     $dueDay = $item->due_day ? min((int) $item->due_day, $curStart->daysInMonth) : null;
                     $dueObj = $dueDay ? $curStart->day($dueDay) : null;
                     $occurrences[] = [$curStart->year, $curStart->month, $dueObj?->toDateString(), $item->due_day ? (int) $item->due_day : null, $dueObj];

@@ -85,13 +85,16 @@ class TaskReassignmentTest extends TestCase
             'name' => 'Тест отчёт ' . uniqid(), 'periodicity' => 'Ежемесячно',
             'start_day' => [5], 'is_active' => true,
         ]);
-        $this->item = Estimate::create(['client_id' => $this->client->id, 'total' => 0])
-            ->items()->create([
-                'service_id' => $service->id, 'type' => 'recurring',
-                'name' => $service->name, 'periodicity' => 'Ежемесячно',
-                'cost' => 0, 'quantity' => 1, 'total' => 0, 'sort_order' => 0,
-                'assignee_id' => $this->head->id,
-            ]);
+        $estimate = Estimate::create(['client_id' => $this->client->id, 'total' => 0]);
+        // Смета не сегодняшняя: месяц создания холостой (Estimate::tasksStartFrom),
+        // а здесь нужны задачи и за прошлый месяц — проверяем переназначение, не посадку.
+        $estimate->forceFill(['created_at' => now()->subMonths(3)])->save();
+        $this->item = $estimate->items()->create([
+            'service_id' => $service->id, 'type' => 'recurring',
+            'name' => $service->name, 'periodicity' => 'Ежемесячно',
+            'cost' => 0, 'quantity' => 1, 'total' => 0, 'sort_order' => 0,
+            'assignee_id' => $this->head->id,
+        ]);
     }
 
     /** Прошлый месяц: он уже просрочен, но не раньше отсечки backlog (июль 2026). */

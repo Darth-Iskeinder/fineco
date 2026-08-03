@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToTenant;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -30,6 +31,20 @@ class Estimate extends Model
     public function rootItems(): HasMany
     {
         return $this->hasMany(EstimateItem::class)->whereNull('parent_id')->orderBy('sort_order');
+    }
+
+    /**
+     * С какого дня по этой смете идут задачи. Месяц, в котором смету завели, — холостой:
+     * клиента «сажают» (собирают документы, договариваются), задач в этом месяце нет.
+     * Генерация начинается с 1-го числа следующего месяца.
+     *
+     * Это отдельная граница от даты начала обслуживания клиента: клиента могли завести
+     * раньше, а список работ по нему появился только сейчас. Обе границы применяются
+     * вместе — побеждает более поздняя (см. BuhTasksController/DashboardController).
+     */
+    public function tasksStartFrom(): CarbonImmutable
+    {
+        return CarbonImmutable::parse($this->created_at)->addMonth()->startOfMonth();
     }
 
     public function recalculateTotal(): void

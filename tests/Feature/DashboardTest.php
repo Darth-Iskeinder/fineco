@@ -219,6 +219,9 @@ class DashboardTest extends TestCase
             'responsible_employee_id' => $this->accountant->id,
         ]);
         $estimate = Estimate::create(['client_id' => $client->id, 'total' => 60000]);
+        // Смета «из прошлого»: месяц её создания холостой (Estimate::tasksStartFrom),
+        // а тут нужен клиент, по которому задачи текущего месяца уже генерятся.
+        $estimate->forceFill(['created_at' => now()->subMonths(3)])->save();
         $item = $estimate->items()->create([
             'service_id' => $service->id, 'type' => 'recurring',
             'name' => 'Ведение учёта', 'periodicity' => 'Ежемесячно',
