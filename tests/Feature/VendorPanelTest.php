@@ -105,7 +105,9 @@ class VendorPanelTest extends TestCase
             ->assertOk()
             ->assertSee($this->tenant->name)
             // Первая фирма системы тоже в списке — вендор видит всех.
-            ->assertSee(TenantContext::withoutTenant(fn () => Tenant::real()->orderBy('id')->first()->name));
+            ->assertSee(TenantContext::withoutTenant(fn () => Tenant::real()->orderBy('id')->first()->name))
+            // Заход внутрь — только через подтверждение, случайным нажатием не войти.
+            ->assertSee('Да, войти');
     }
 
     public function test_template_account_is_hidden_from_the_list(): void
