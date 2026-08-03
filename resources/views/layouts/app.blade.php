@@ -58,7 +58,30 @@
         }
     </style>
 </head>
-<body class="bg-slate-50 min-h-screen antialiased">
+@php
+    // Владелец системы, зашедший внутрь чужой фирмы. Полоса висит всё время,
+    // чтобы он не забыл, где находится, и не начал править чужие данные,
+    // думая, что он у себя.
+    $vendorInsideTenant = \App\Support\Impersonation::tenantName();
+@endphp
+<body class="bg-slate-50 min-h-screen antialiased {{ $vendorInsideTenant ? 'pb-14' : '' }}">
+    @if ($vendorInsideTenant)
+        <div class="fixed bottom-0 inset-x-0 z-50 bg-amber-400 border-t border-amber-500 shadow-lg">
+            <div class="px-6 h-14 flex items-center justify-between">
+                <span class="text-sm font-semibold text-amber-950">
+                    Вы работаете в аккаунте «{{ $vendorInsideTenant }}» как владелец системы. Это не ваша фирма.
+                </span>
+                <form action="{{ route('vendor.leave') }}" method="POST">
+                    @csrf
+                    <button type="submit"
+                            class="px-4 py-2 rounded-lg text-xs font-semibold text-amber-50 bg-amber-900 hover:bg-amber-950 transition-colors">
+                        Выйти из аккаунта
+                    </button>
+                </form>
+            </div>
+        </div>
+    @endif
+
     <div class="flex min-h-screen">
         <!-- Sidebar -->
         <aside class="w-72 bg-white border-r border-slate-200/80 flex flex-col fixed h-full shadow-sm">

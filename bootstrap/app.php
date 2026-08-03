@@ -3,6 +3,7 @@
 use App\Http\Middleware\AdminMiddleware;
 use App\Http\Middleware\AuditAccessMiddleware;
 use App\Http\Middleware\CheckModuleAccess;
+use App\Http\Middleware\EndIdleImpersonation;
 use App\Http\Middleware\ManagerMiddleware;
 use App\Http\Middleware\SetTenantContext;
 use Illuminate\Foundation\Application;
@@ -16,7 +17,12 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->redirectGuestsTo('/login');
+        // Гостя отправляем на «свой» вход: у вендора он отдельный.
+        $middleware->redirectGuestsTo(
+            fn (Illuminate\Http\Request $request) => $request->is('vendor', 'vendor/*')
+                ? '/vendor/login'
+                : '/login'
+        );
 
         // Текущая фирма ставится на каждый веб-запрос. Порядок здесь важнее,
         // чем кажется, и обойтись обычным append нельзя:
@@ -28,7 +34,11 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(remove: [
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
         ]);
+        // EndIdleImpersonation стоит перед SetTenantContext: если вендора пора
+        // выставить из чужой фирмы, сделать это надо до того, как запрос начнёт
+        // работать от её имени.
         $middleware->web(append: [
+            EndIdleImpersonation::class,
             SetTenantContext::class,
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
         ]);

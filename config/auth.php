@@ -47,6 +47,14 @@ return [
             'driver' => 'session',
             'provider' => 'employees',
         ],
+
+        // Владелец системы: свой вход, свой список людей, ни к одной фирме
+        // не привязан. Работает параллельно с employee — вендор может быть
+        // залогинен и как вендор, и «внутри» фирмы одновременно.
+        'vendor' => [
+            'driver' => 'session',
+            'provider' => 'vendor_users',
+        ],
     ],
 
     /*
@@ -75,6 +83,11 @@ return [
         'employees' => [
             'driver' => 'eloquent',
             'model' => Employee::class,
+        ],
+
+        'vendor_users' => [
+            'driver' => 'eloquent',
+            'model' => App\Models\VendorUser::class,
         ],
     ],
 

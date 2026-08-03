@@ -12,6 +12,8 @@ use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\EstimateController;
 use App\Http\Controllers\RegisterController;
 use App\Http\Controllers\SettingsController;
+use App\Http\Controllers\Vendor\VendorAuthController;
+use App\Http\Controllers\Vendor\VendorPanelController;
 use Illuminate\Support\Facades\Route;
 
 // Публичные маршруты
@@ -54,6 +56,21 @@ Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 // него нет нигде намеренно: фирмы заводим сами, заходя по прямому адресу.
 Route::get('/onboarding', [RegisterController::class, 'showForm'])->name('onboarding');
 Route::post('/onboarding', [RegisterController::class, 'register']);
+
+// Панель владельца системы. Своя проходная: вендор не сотрудник ни одной фирмы,
+// поэтому и вход у него отдельный от employee.
+Route::prefix('vendor')->name('vendor.')->group(function () {
+    Route::get('/login', [VendorAuthController::class, 'showLoginForm'])->name('login');
+    Route::post('/login', [VendorAuthController::class, 'login']);
+
+    Route::middleware('auth:vendor')->group(function () {
+        Route::post('/logout', [VendorAuthController::class, 'logout'])->name('logout');
+
+        Route::get('/', [VendorPanelController::class, 'index'])->name('index');
+        Route::post('/tenants/{tenant}/enter', [VendorPanelController::class, 'enter'])->name('enter');
+        Route::post('/leave', [VendorPanelController::class, 'leave'])->name('leave');
+    });
+});
 
 // Защищённые маршруты (требуют аутентификации)
 Route::middleware('auth:employee')->group(function () {

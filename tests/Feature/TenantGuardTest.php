@@ -29,6 +29,8 @@ class TenantGuardTest extends TestCase
         'cache', 'cache_locks', 'failed_jobs', 'job_batches', 'jobs',
         'migrations', 'password_reset_tokens', 'sessions', 'users',
         'tenants',
+        // Владельцы системы: живут вне фирм, привязывать их не к чему.
+        'vendor_users',
     ];
 
     /**
