@@ -63,10 +63,17 @@
         <!-- Sidebar -->
         <aside class="w-72 bg-white border-r border-slate-200/80 flex flex-col fixed h-full shadow-sm">
             <!-- Logo -->
+            @php
+                // Название своей фирмы, а не системы: аккаунтов теперь несколько,
+                // и по одному логотипу не понять, в чьих данных находишься.
+                $currentTenantName = auth('employee')->user()?->tenant?->name ?? 'ERP Fineco';
+            @endphp
             <div class="h-16 flex items-center px-6 border-b border-slate-100">
-                <a href="{{ route('employees.index') }}" class="flex items-center space-x-3 group">
-                    <img src="{{ asset('images/Fineco-logo.png') }}" alt="Fineco" class="h-9 w-auto transition-transform duration-300 group-hover:scale-105">
-                    <span class="text-lg font-semibold bg-gradient-to-r from-slate-800 to-slate-600 bg-clip-text text-transparent">ERP Fineco</span>
+                <a href="{{ route('employees.index') }}" class="flex items-center space-x-3 group min-w-0">
+                    <img src="{{ asset('images/Fineco-logo.png') }}" alt="Fineco" class="h-9 w-auto flex-shrink-0 transition-transform duration-300 group-hover:scale-105">
+                    {{-- Длинное название не должно ломать колонку: обрезаем, полное — в подсказке --}}
+                    <span title="{{ $currentTenantName }}"
+                          class="text-lg font-semibold bg-gradient-to-r from-slate-800 to-slate-600 bg-clip-text text-transparent truncate">{{ $currentTenantName }}</span>
                 </a>
             </div>
 

@@ -10,6 +10,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\EstimateController;
+use App\Http\Controllers\RegisterController;
 use App\Http\Controllers\SettingsController;
 use Illuminate\Support\Facades\Route;
 
@@ -47,6 +48,12 @@ Route::get('/no-access', function () {
 Route::get('/login', [AuthController::class, 'showLoginForm'])->name('login');
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
+
+// Регистрация новой бухфирмы: заводит аккаунт, стартовый набор справочников
+// и его администратора. Публичный роут — работает до авторизации. Ссылки на
+// него нет нигде намеренно: фирмы заводим сами, заходя по прямому адресу.
+Route::get('/onboarding', [RegisterController::class, 'showForm'])->name('onboarding');
+Route::post('/onboarding', [RegisterController::class, 'register']);
 
 // Защищённые маршруты (требуют аутентификации)
 Route::middleware('auth:employee')->group(function () {
