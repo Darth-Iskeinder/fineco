@@ -13,12 +13,27 @@ use App\Models\Service;
 use App\Models\TaskReminder;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 
 class BuhTasksController extends Controller
 {
     /** Глубина истории вкладки «Выполненные» (дней назад) */
     private const COMPLETED_HISTORY_DAYS = 90;
+
+    /**
+     * Насколько «далеко» ушла задача — для выбора победителя среди логов одного слота.
+     * Дубли остались от переназначения БП: прежний исполнитель закрыл период, новому
+     * завёлся свой лог (до того, как отметка стала общей, см. logsForSlots()).
+     */
+    private const LOG_STATUS_RANK = [
+        'completed' => 5,
+        'review'    => 4,
+        'rework'    => 3,
+        'running'   => 2,
+        'paused'    => 2,
+        'pending'   => 1,
+    ];
 
     /** Максимум документов на одну задачу */
     private const MAX_DOCUMENTS = 10;
@@ -67,15 +82,19 @@ class BuhTasksController extends Controller
             return $task->status === 'completed';
         }
 
-        // Подпункт: смотрим состояние родительской задачи (тот же слот, что в complete())
-        $parentLog = BuhTaskLog::where('employee_id', $task->employee_id)
-            ->where('year', $task->year)
-            ->where('month', $task->month)
-            ->where('estimate_item_id', $parentItemId)
-            ->when($task->due_date,
-                fn ($q) => $q->whereDate('due_date', $task->due_date),
-                fn ($q) => $q->whereNull('due_date'))
-            ->first();
+        // Подпункт: смотрим состояние родительской задачи (тот же слот, что в complete()).
+        // Ищем по слоту, а не по сотруднику: после переназначения родитель мог остаться
+        // за прежним исполнителем, и блокировка должна работать по нему же.
+        $parentLog = $this->pickLog(
+            BuhTaskLog::where('client_id', $task->client_id)
+                ->where('year', $task->year)
+                ->where('month', $task->month)
+                ->where('estimate_item_id', $parentItemId)
+                ->when($task->due_date,
+                    fn ($q) => $q->whereDate('due_date', $task->due_date),
+                    fn ($q) => $q->whereNull('due_date'))
+                ->get()
+        );
 
         return $parentLog && in_array($parentLog->status, ['completed', 'review'], true);
     }
@@ -171,17 +190,24 @@ class BuhTasksController extends Controller
         $historyFrom = $today->subDays(self::COMPLETED_HISTORY_DAYS)->startOfDay(); // глубина вкладки «Выполненные»
         $backlogCutoff = CarbonImmutable::parse(self::BACKLOG_CUTOFF)->startOfDay(); // просрочку раньше июля 2026 не показываем
 
-        // Логи плановых задач сотрудника (нужны статусы за прошлое для просрочки), ключ year-month-item.
-        // Ограничиваем годом окна просрочки (6 мес назад) — старые логи всё равно не запрашиваются,
-        // а индекс (employee_id, year, month) поднимает в память кратно меньше строк.
-        // Ключ лога — «слот»: year-month-item + дата для weekly (due_date), иначе пусто.
-        // Так weekly-вхождения в одном месяце различаются, а помесячные логи (due_date=NULL)
-        // продолжают матчиться как раньше — без бэкфилла.
-        $logs = BuhTaskLog::where('employee_id', $employee->id)
+        // Логи плановых задач (нужны статусы за прошлое для просрочки), ключ — «слот»:
+        // year-month-item + дата для weekly (due_date), иначе пусто. Так weekly-вхождения
+        // в одном месяце различаются, а помесячные логи (due_date=NULL) матчатся помесячно.
+        // Ограничиваем годом окна просрочки (6 мес назад) — старые логи всё равно не запрашиваются.
+        //
+        // Раньше логи брались только свои (where employee_id), и после смены исполнителя БП
+        // уже закрытые прошлые периоды всплывали у нового бухгалтера как «просрочено» —
+        // отметка о выполнении оставалась на прежнем исполнителе. Теперь берём логи всей
+        // зоны видимости и группируем по слоту без employee_id, а кому какой лог показать,
+        // решает logForEmployee(). Той же картой пользуется вкладка «Задачи бухгалтеров».
+        $logs = BuhTaskLog::where(fn ($q) => $q
+                ->whereIn('client_id', $clients->pluck('id'))
+                ->orWhere('employee_id', $employee->id)
+                ->orWhereIn('employee_id', $myAccountantIds))
             ->where('year', '>=', $today->subMonths(6)->year)
             ->with('documents')
             ->get()
-            ->keyBy(fn ($l) => $l->year . '-' . $l->month . '-' . $l->estimate_item_id
+            ->groupBy(fn ($l) => $l->year . '-' . $l->month . '-' . $l->estimate_item_id
                 . ($l->due_date ? '-' . $l->due_date->toDateString() : ''));
 
         // Все внеплановые задачи сотрудника (невыполненные висят, пока не закроют)
@@ -194,18 +220,6 @@ class BuhTasksController extends Controller
         // + любые задачи моих бухгалтеров. Применяется к логам и внеплановым.
         $teamScope = fn ($q) => $q->whereIn('client_id', $myClientIds)
             ->orWhereIn('employee_id', $myAccountantIds);
-
-        // Логи бухгалтеров (статусы их задач), ключ с employee_id —
-        // у одной позиции-месяца могут быть логи разных исполнителей после переназначения.
-        $teamLogs = $myClientIds->isNotEmpty()
-            ? BuhTaskLog::where('employee_id', '!=', $employee->id)
-                ->where($teamScope)
-                ->where('year', '>=', $today->subMonths(6)->year)
-                ->with('documents')
-                ->get()
-                ->keyBy(fn ($l) => $l->employee_id . '-' . $l->year . '-' . $l->month . '-' . $l->estimate_item_id
-                    . ($l->due_date ? '-' . $l->due_date->toDateString() : ''))
-            : collect();
 
         $employeeNames = Employee::pluck('full_name', 'id');
         $teamTasks = [];
@@ -281,8 +295,11 @@ class BuhTasksController extends Controller
                     // «у бухгалтера» — не начатое, в работе, на паузе или на доработке.
                     // Выполненные — этап 2 (вкладка «Выполненные»), review уже в основном списке.
                     if ($isTeam) {
-                        $tLog    = $teamLogs->get($effectiveAssignee . '-' . $wy . '-' . $wm . '-' . $item->id . $slotKey);
+                        $tLog    = $this->logForEmployee($logs->get($wy . '-' . $wm . '-' . $item->id . $slotKey), $effectiveAssignee);
                         $tStatus = $tLog?->status ?? 'pending';
+                        // Кто реально делает: исполнитель лога, если он уже заведён (после
+                        // переназначения прошлый период мог остаться за прежним бухгалтером).
+                        $tDoer   = (int) ($tLog?->employee_id ?? $effectiveAssignee);
                         if (!in_array($tStatus, ['pending', 'running', 'paused', 'rework'], true)) {
                             continue;
                         }
@@ -302,14 +319,14 @@ class BuhTasksController extends Controller
                             'reporting_period' => Service::reportingPeriodLabel($kind, $dueObj, $today->year),
                             'due_date'         => $dueDateStr,
                             'status'           => $tStatus,
-                            'doer_id'          => $effectiveAssignee,
-                            'doer_name'        => $employeeNames->get($effectiveAssignee),
+                            'doer_id'          => $tDoer,
+                            'doer_name'        => $employeeNames->get($tDoer),
                             'employee_comment' => $tLog?->employee_comment,
                         ];
                         continue;
                     }
 
-                    $log = $logs->get($wy . '-' . $wm . '-' . $item->id . $slotKey);
+                    $log = $this->logForEmployee($logs->get($wy . '-' . $wm . '-' . $item->id . $slotKey), $employee->id);
                     $status = $log?->status ?? 'pending';
 
                     // Фильтр видимости в активном списке:
@@ -360,8 +377,8 @@ class BuhTasksController extends Controller
                         'documents'        => $log ? $this->docs($log) : [],
                         'force_closed'        => (bool) ($log?->force_closed),
                         'force_close_comment' => $log?->force_close_comment,
-                        'children'        => $item->children->map(function ($child) use ($logs, $wy, $wm, $slotKey, $slot) {
-                            $childLog = $logs->get($wy . '-' . $wm . '-' . $child->id . $slotKey);
+                        'children'        => $item->children->map(function ($child) use ($logs, $wy, $wm, $slotKey, $slot, $employee) {
+                            $childLog = $this->logForEmployee($logs->get($wy . '-' . $wm . '-' . $child->id . $slotKey), $employee->id);
 
                             return [
                                 'id'                 => $child->id,
@@ -595,7 +612,7 @@ class BuhTasksController extends Controller
                     'force_close_comment' => $l->force_close_comment,
                     'children'         => ($item?->children ?? collect())->map(function ($child) use ($logs, $l) {
                         $cSlotKey = $l->due_date ? '-' . $l->due_date->toDateString() : '';
-                        $childLog = $logs->get($l->year . '-' . $l->month . '-' . $child->id . $cSlotKey);
+                        $childLog = $this->logForEmployee($logs->get($l->year . '-' . $l->month . '-' . $child->id . $cSlotKey), $l->employee_id);
                         $cs = $child->service;
 
                         return [
@@ -649,7 +666,7 @@ class BuhTasksController extends Controller
                 ->where('completed_at', '>=', $historyFrom)
                 ->with(['estimateItem.service', 'estimateItem.children.service', 'client:id,name', 'documents'])
                 ->get()
-                ->map(function ($l) use ($teamLogs, $employeeNames) {
+                ->map(function ($l) use ($logs, $employeeNames) {
                     $item    = $l->estimateItem;
                     $service = $item?->service;
 
@@ -674,9 +691,9 @@ class BuhTasksController extends Controller
                         'documents'        => $this->docs($l),
                         'force_closed'        => (bool) $l->force_closed,
                         'force_close_comment' => $l->force_close_comment,
-                        'children'         => ($item?->children ?? collect())->map(function ($child) use ($teamLogs, $l) {
+                        'children'         => ($item?->children ?? collect())->map(function ($child) use ($logs, $l) {
                             $cSlotKey = $l->due_date ? '-' . $l->due_date->toDateString() : '';
-                            $childLog = $teamLogs->get($l->employee_id . '-' . $l->year . '-' . $l->month . '-' . $child->id . $cSlotKey);
+                            $childLog = $this->logForEmployee($logs->get($l->year . '-' . $l->month . '-' . $child->id . $cSlotKey), $l->employee_id);
                             $cs = $child->service;
 
                             return [
@@ -813,16 +830,28 @@ class BuhTasksController extends Controller
 
         $employee = auth('employee')->user();
 
-        $log = BuhTaskLog::firstOrCreate([
+        // Ищем лог слота теми же правилами, что и список: если период уже закрыл прежний
+        // исполнитель, отдаём его лог, а не заводим второй — иначе закрытое им прошлое
+        // снова выглядело бы невыполненным. Свою запись заводим, только если готовой нет.
+        $log = $this->logForEmployee(
+            BuhTaskLog::where('client_id', $request->client_id)
+                ->where('estimate_item_id', $request->estimate_item_id)
+                ->where('year', $request->year)
+                ->where('month', $request->month)
+                ->when($request->due_date,
+                    fn ($q) => $q->whereDate('due_date', $request->due_date),
+                    fn ($q) => $q->whereNull('due_date'))
+                ->get(),
+            $employee->id,
+        ) ?? BuhTaskLog::create([
             'employee_id'      => $employee->id,
             'client_id'        => $request->client_id,
             'estimate_item_id' => $request->estimate_item_id,
             'year'             => $request->year,
             'month'            => $request->month,
             'due_date'         => $request->due_date,
-        ], [
-            'status'         => 'pending',
-            'paused_seconds' => 0,
+            'status'           => 'pending',
+            'paused_seconds'   => 0,
         ]);
 
         return response()->json(['success' => true, 'log' => $this->formatLog($log)]);
@@ -882,7 +911,9 @@ class BuhTasksController extends Controller
         // Задачу с подпунктами нельзя закрыть, пока все подпункты не выполнены
         $childIds = $log->estimateItem?->children()->pluck('id') ?? collect();
         if ($childIds->isNotEmpty()) {
-            $doneChildren = BuhTaskLog::where('employee_id', $log->employee_id)
+            // Подпункты считаем по слоту, а не по сотруднику: после переназначения часть
+            // галочек могла проставить прежний исполнитель — они остаются в силе.
+            $doneChildren = BuhTaskLog::where('client_id', $log->client_id)
                 ->where('year', $log->year)
                 ->where('month', $log->month)
                 ->when($log->due_date,
@@ -890,7 +921,8 @@ class BuhTasksController extends Controller
                     fn ($q) => $q->whereNull('due_date'))
                 ->whereIn('estimate_item_id', $childIds)
                 ->where('status', 'completed')
-                ->count();
+                ->distinct()
+                ->count('estimate_item_id');
             if ($doneChildren < $childIds->count()) {
                 return response()->json([
                     'success'            => false,
@@ -1446,6 +1478,46 @@ class BuhTasksController extends Controller
     {
         $employee = auth('employee')->user();
         abort_if($log->employee_id !== $employee->id, 403);
+    }
+
+    /**
+     * Лог слота глазами конкретного исполнителя. Закрытая задача (и ушедшая на проверку) —
+     * ОБЩИЙ факт: её видит любой, кто окажется исполнителем этого БП, поэтому после смены
+     * исполнителя прошлые закрытые периоды не всплывают у нового бухгалтера как «просрочено».
+     * А незаконченная работа личная: чужой лог «в работе» не подхватываем — иначе сотрудник
+     * увидел бы чужой таймер и упёрся в 403 при попытке что-то с ним сделать.
+     */
+    private function logForEmployee(?Collection $slot, ?int $employeeId): ?BuhTaskLog
+    {
+        if (!$slot || $slot->isEmpty()) {
+            return null;
+        }
+
+        $finished = $slot->whereIn('status', ['completed', 'review']);
+        if ($finished->isNotEmpty()) {
+            return $this->pickLog($finished);
+        }
+
+        return $employeeId ? $slot->firstWhere('employee_id', $employeeId) : null;
+    }
+
+    /**
+     * Победитель среди логов одного слота: после переназначения БП у периода могут
+     * оказаться записи разных исполнителей. Берём самый «продвинутый» статус, при
+     * равенстве — закрытую раньше (настоящая работа, а не повторное закрытие фантома).
+     */
+    private function pickLog(Collection $slot): ?BuhTaskLog
+    {
+        return $slot->sort(function (BuhTaskLog $a, BuhTaskLog $b) {
+            $rank = (self::LOG_STATUS_RANK[$b->status] ?? 0) <=> (self::LOG_STATUS_RANK[$a->status] ?? 0);
+            if ($rank !== 0) {
+                return $rank;
+            }
+
+            $done = ($a->completed_at?->timestamp ?? PHP_INT_MAX) <=> ($b->completed_at?->timestamp ?? PHP_INT_MAX);
+
+            return $done !== 0 ? $done : $a->id <=> $b->id;
+        })->first();
     }
 
     private function authorizeAdhoc(BuhAdhocTask $task): void
