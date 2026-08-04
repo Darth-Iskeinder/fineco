@@ -46,6 +46,26 @@ class BuhTasksController extends Controller
     ];
 
     /** Правило валидации загружаемого документа (общее для всех точек загрузки). */
+    /**
+     * Отчётный период выполненной задачи: «за июль», «за 2 квартал», «за 2025 год».
+     *
+     * Считается от месяца срока — year/month лога. Точную дату восстанавливать не нужно:
+     * reportingPeriodLabel смотрит только на месяц и год. У еженедельных периода словами
+     * нет (вернётся null) — такие вхождения различают по due_date, как и в активном списке.
+     */
+    private function reportingPeriodForLog(BuhTaskLog $log, ?EstimateItem $item, int $curYear): ?string
+    {
+        if (!$item?->periodicity) {
+            return null;
+        }
+
+        return Service::reportingPeriodLabel(
+            Service::kindForPeriodicity($item->periodicity),
+            CarbonImmutable::create($log->year, $log->month, 1),
+            $curYear,
+        );
+    }
+
     private function documentFileRules(bool $required = true): array
     {
         return [
@@ -593,7 +613,7 @@ class BuhTasksController extends Controller
             ->where('completed_at', '>=', $historyFrom)
             ->with(['estimateItem.service', 'estimateItem.children.service', 'client:id,name', 'documents'])
             ->get()
-            ->map(function ($l) use ($logs) {
+            ->map(function ($l) use ($logs, $today) {
                 $item    = $l->estimateItem;
                 $service = $item?->service;
 
@@ -610,6 +630,8 @@ class BuhTasksController extends Controller
                     'description'       => $service?->description,
                     'comment'          => $service?->comment,
                     'periodicity'      => $item?->periodicity,
+                    'reporting_period' => $this->reportingPeriodForLog($l, $item, $today->year),
+                    'due_date'         => $l->due_date?->toDateString(),
                     'allows_quantity'  => (bool) ($service?->allows_quantity),
                     'quantity'         => (int) ($item?->quantity ?? 0),
                     'actual_quantity'  => $l->actual_quantity,
@@ -653,6 +675,9 @@ class BuhTasksController extends Controller
                 'description'       => $a->description,
                 'comment'          => null,
                 'periodicity'      => null,
+                // У внеплановых отчётного периода нет — в колонке прочерк
+                'reporting_period' => null,
+                'due_date'         => null,
                 'allows_quantity'  => false,
                 'quantity'         => 1,
                 'actual_quantity'  => null,
@@ -673,7 +698,7 @@ class BuhTasksController extends Controller
                 ->where('completed_at', '>=', $historyFrom)
                 ->with(['estimateItem.service', 'estimateItem.children.service', 'client:id,name', 'documents'])
                 ->get()
-                ->map(function ($l) use ($logs, $employeeNames) {
+                ->map(function ($l) use ($logs, $employeeNames, $today) {
                     $item    = $l->estimateItem;
                     $service = $item?->service;
 
@@ -691,6 +716,8 @@ class BuhTasksController extends Controller
                         'description'       => $service?->description,
                         'comment'          => $service?->comment,
                         'periodicity'      => $item?->periodicity,
+                        'reporting_period' => $this->reportingPeriodForLog($l, $item, $today->year),
+                        'due_date'         => $l->due_date?->toDateString(),
                         'allows_quantity'  => (bool) ($service?->allows_quantity),
                         'quantity'         => (int) ($item?->quantity ?? 0),
                         'actual_quantity'  => $l->actual_quantity,
@@ -737,6 +764,9 @@ class BuhTasksController extends Controller
                     'description'       => $a->description,
                     'comment'          => null,
                     'periodicity'      => null,
+                    // У внеплановых отчётного периода нет — в колонке прочерк
+                    'reporting_period' => null,
+                    'due_date'         => null,
                     'allows_quantity'  => false,
                     'quantity'         => 1,
                     'actual_quantity'  => null,

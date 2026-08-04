@@ -578,7 +578,9 @@
                                     <span x-text="'бухгалтер: ' + c.doer_name"></span>
                                 </span>
                             </div>
-                            <p class="text-xs text-slate-400 truncate" x-text="c.client_name"></p>
+                            <p class="text-xs text-slate-400 truncate">
+                                <span x-text="c.client_name"></span><span x-show="periodLabel(c)" class="text-slate-500 font-medium" x-text="' · ' + periodLabel(c)"></span>
+                            </p>
                         </div>
                         {{-- Колонка «Комментарий»: причина принудительного закрытия + заметка сотрудника --}}
                         <div class="hidden sm:flex flex-1 min-w-0 items-center gap-1.5 text-slate-500">
@@ -1383,7 +1385,9 @@
                                 <span x-text="completedItem.branch_label"></span>
                             </span>
                         </h3>
-                        <p class="text-sm text-slate-500 mt-0.5" x-text="completedItem.client_name"></p>
+                        <p class="text-sm text-slate-500 mt-0.5">
+                            <span x-text="completedItem.client_name"></span><span x-show="periodLabel(completedItem)" class="text-slate-700 font-medium" x-text="' · ' + periodLabel(completedItem)"></span>
+                        </p>
                     </div>
                     <button @click="completedItem = null" class="text-slate-300 hover:text-slate-500 transition-colors flex-shrink-0">
                         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -2044,6 +2048,16 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             return this.teamTasks.filter(t => t.doer_id === id).length;
         },
 
+        // За какой период сделана выполненная задача. Дата закрытия отвечает «когда»,
+        // а этого мало: отчёт за июль могли сдать 3 августа. Помесячные/квартальные/годовые
+        // получают метку словами («за июль»), еженедельные — дату срока, потому что словами
+        // периода у них нет и различить вхождения можно только по ней. Внеплановые — пусто.
+        periodLabel(c) {
+            if (c.reporting_period) return c.reporting_period;
+            if (c.due_date) return 'срок ' + this.fmtDue(c.due_date);
+            return '';
+        },
+
         // Дата+время выполнения для истории: «3.06.2026, 14:30»
         fmtCompleted(iso) {
             if (!iso) return '';
@@ -2160,6 +2174,10 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 description: task.description ?? null,
                 comment: task.comment ?? null,
                 periodicity: task.periodicity ?? null,
+                // Отчётный период — как отдаёт контроллер при следующем заходе. У внеплановых
+                // в активном списке due_date есть, а в истории его быть не должно: там прочерк.
+                reporting_period: task.reporting_period ?? null,
+                due_date: task.type === 'planned' ? (task.due_date ?? null) : null,
                 allows_quantity: !!task.allows_quantity,
                 quantity: task.quantity ?? 0,
                 actual_quantity: task.actual_quantity ?? null,
