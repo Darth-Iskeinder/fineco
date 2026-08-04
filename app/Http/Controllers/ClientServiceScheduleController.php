@@ -21,8 +21,11 @@ class ClientServiceScheduleController extends Controller
             'periodicity'   => ['nullable', 'string', 'max:100', Rule::exists('periodicities', 'name')],
             'start_month'   => ['nullable', 'array'],
             'start_month.*' => ['integer', 'min:1', 'max:12'],
-            'start_day'     => ['nullable', 'array'],
+            // Периодичность без дня срока = БП молча не порождает задач (см. Service::computeDueDates)
+            'start_day'     => ['nullable', 'array', 'required_with:periodicity'],
             'start_day.*'   => ['integer', 'min:1', 'max:31'],
+        ], [
+            'start_day.required_with' => 'Выбрана периодичность — укажите день срока, иначе задачи по этому БП создаваться не будут.',
         ]);
 
         $schedule = ClientServiceSchedule::updateOrCreate(

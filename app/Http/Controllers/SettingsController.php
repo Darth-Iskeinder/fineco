@@ -325,6 +325,15 @@ class SettingsController extends Controller
     // SERVICES (БИЗНЕС ПРОЦЕССЫ)
     // =============================================
 
+    /**
+     * Расписание БП заполняется целиком или не заполняется вовсе: периодичность без дня
+     * срока даёт ноль дат в Service::computeDueDates, и задачи по такому БП не создаются
+     * никогда — молча, без ошибок. Так на проде «Контроль сдачи отчетов» простоял в 40 сметах.
+     */
+    private const SCHEDULE_MESSAGES = [
+        'start_day.required_with' => 'Выбрана периодичность — укажите день срока, иначе задачи по этому БП создаваться не будут.',
+    ];
+
     public function storeService(Request $request)
     {
         $request->validate([
@@ -341,7 +350,8 @@ class SettingsController extends Controller
             'due_day'                       => 'nullable|integer|min:1|max:31',
             'start_month'                   => 'nullable|array',
             'start_month.*'                 => 'integer|min:1|max:12',
-            'start_day'                     => 'nullable|array',
+            // Периодичность без дня срока = БП молча не порождает задач (см. Service::computeDueDates)
+            'start_day'                     => 'nullable|array|required_with:periodicity',
             'start_day.*'                   => 'integer|min:1|max:31',
             'deadline_days'                 => 'nullable|integer|min:0',
             'execution_minutes'             => 'nullable|integer|min:0',
@@ -364,7 +374,7 @@ class SettingsController extends Controller
             'children.*.rate_id'            => 'nullable|exists:rates,id',
             'children.*.periodicity'        => 'nullable|string|max:100',
             'children.*.allows_quantity'    => 'boolean',
-        ]);
+        ], self::SCHEDULE_MESSAGES);
 
         // Новый бизнес-процесс ставим в начало списка (сортировка по sort_order ASC)
         $minSortOrder = (int) Service::roots()->min('sort_order');
@@ -438,7 +448,8 @@ class SettingsController extends Controller
             'due_day'                       => 'nullable|integer|min:1|max:31',
             'start_month'                   => 'nullable|array',
             'start_month.*'                 => 'integer|min:1|max:12',
-            'start_day'                     => 'nullable|array',
+            // Периодичность без дня срока = БП молча не порождает задач (см. Service::computeDueDates)
+            'start_day'                     => 'nullable|array|required_with:periodicity',
             'start_day.*'                   => 'integer|min:1|max:31',
             'deadline_days'                 => 'nullable|integer|min:0',
             'execution_minutes'             => 'nullable|integer|min:0',
@@ -462,7 +473,7 @@ class SettingsController extends Controller
             'children.*.rate_id'            => 'nullable|exists:rates,id',
             'children.*.periodicity'        => 'nullable|string|max:100',
             'children.*.allows_quantity'    => 'boolean',
-        ]);
+        ], self::SCHEDULE_MESSAGES);
 
         // Есть подпункты → родитель-контейнер, собственного тарифа у него нет.
         $hasChildren = !empty($request->input('children'));
