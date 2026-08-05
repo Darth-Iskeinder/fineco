@@ -152,6 +152,7 @@
             <option value="pending" x-text="'Не начаты (' + statusCounts.pending + ')'"></option>
             <option value="paused" x-text="'На паузе (' + statusCounts.paused + ')'"></option>
             <option value="running" x-text="'В работе (' + statusCounts.running + ')'"></option>
+            <option value="review" x-text="'На проверке (' + statusCounts.review + ')'"></option>
             <option value="rework" x-text="'На доработку (' + statusCounts.rework + ')'"></option>
         </select>
 
@@ -1801,7 +1802,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         // Счётчики по состоянию (для подписей в выпадающем списке фильтра). Считаем по активным
         // строкам с учётом остальных фильтров (компания/срок) — как их рисует список.
         get statusCounts() {
-            const c = { pending: 0, paused: 0, running: 0, rework: 0 };
+            const c = { pending: 0, paused: 0, running: 0, review: 0, rework: 0 };
             for (const t of this.tasks) {
                 if (t.status === 'completed') continue;
                 if (!this.matchesFilter(t) || !this.matchesDue(t)) continue;
