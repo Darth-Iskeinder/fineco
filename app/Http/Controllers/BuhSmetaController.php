@@ -12,9 +12,19 @@ class BuhSmetaController extends Controller
 {
     public function index(Request $request)
     {
-        // Только компании, у которых уже создана смета
+        $employee = auth('employee')->user();
+
+        // Только компании, у которых уже создана смета.
+        // Видимость: админ и руководитель — все; остальные (главбух, бухгалтер) — только те
+        // компании, где они ответственные. Правило то же, что в задачнике: своё — это своё.
+        // Следствие: компания без ответственного не попадает никому, кроме админа
+        // и руководителя, — так и договорились.
         $clients = Client::active()
             ->has('estimates')
+            ->when(
+                !$employee->isAdmin() && !$employee->isManager(),
+                fn ($q) => $q->where('responsible_employee_id', $employee->id),
+            )
             ->with(['taxSystem', 'tariff', 'responsibleEmployee', 'estimate'])
             ->orderBy('name')
             ->get();
