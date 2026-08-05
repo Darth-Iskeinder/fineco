@@ -162,10 +162,60 @@
         <span class="ml-auto text-sm text-slate-500 font-medium" x-text="visibleCount + ' задач'"></span>
     </div>
 
-    {{-- Подсказка про горизонт показа --}}
-    <div class="flex items-center gap-1.5 mb-6 text-xs text-slate-400">
+    {{-- Подсказка про горизонт показа — только там, где виден активный набор задач.
+         На вкладке «Выполненные» она противоречит содержимому (там история за 90 дней,
+         и у неё своя шапка), поэтому скрыта. --}}
+    <div x-show="viewMode !== 'completed'" class="flex items-center gap-1.5 mb-6 text-xs text-slate-400">
         <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
         <span>Показаны задачи текущего месяца и все просроченные. Выполненные исчезают из списка на следующий день — их история во вкладке «Выполненные».</span>
+    </div>
+
+    {{-- Фильтры вкладки «Выполненные»: поиск + компания + период + исполнитель.
+         Всё считается на клиенте по уже загруженной истории — без обращений к серверу. --}}
+    <div x-show="viewMode === 'completed'" class="flex items-center gap-3 flex-wrap mb-4">
+        {{-- Поиск: главный инструмент. Ищет по названию, компании, заметке и исполнителю сразу. --}}
+        <div class="relative flex-1 min-w-[16rem] max-w-md">
+            <svg class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"/></svg>
+            <input type="search" x-model="completedSearch"
+                   placeholder="Поиск по задаче, компании, заметке…"
+                   class="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+        </div>
+
+        {{-- Компания: только те, что реально есть в истории, со счётчиками --}}
+        <select x-model="completedClient"
+                class="px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+            <option value="all" x-text="'Все компании (' + completed.length + ')'"></option>
+            <template x-for="c in completedClientOptions" :key="c.id">
+                <option :value="String(c.id)" x-text="c.name + ' (' + c.count + ')'"></option>
+            </template>
+        </select>
+
+        {{-- Период выполнения: пресеты кнопками — частый вопрос «что закрыли за неделю» в одно нажатие --}}
+        <div class="inline-flex bg-slate-100 rounded-xl p-1 gap-1">
+            <template x-for="p in [{ v: 'all', l: 'Всё' }, { v: 'today', l: 'Сегодня' }, { v: 'd7', l: 'Неделя' }, { v: 'd30', l: 'Месяц' }]" :key="p.v">
+                <button type="button" @click="completedPeriod = p.v"
+                        :class="completedPeriod === p.v ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'"
+                        class="px-3 py-1.5 rounded-lg text-sm font-medium transition-all" x-text="p.l"></button>
+            </template>
+        </div>
+
+        {{-- Исполнитель: только у главбуха — появляется, когда в истории есть чужие задачи --}}
+        <select x-show="completedDoerOptions.length > 0" x-model="completedDoer"
+                class="px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+            <option value="all" x-text="'Все исполнители (' + completed.length + ')'"></option>
+            <option value="mine" x-text="'Мои задачи (' + completedMineCount + ')'"></option>
+            <template x-for="d in completedDoerOptions" :key="d.id">
+                <option :value="String(d.id)" x-text="d.name + ' (' + d.count + ')'"></option>
+            </template>
+        </select>
+
+        <button x-show="completedFiltersActive" @click="resetCompletedFilters()"
+                class="text-xs text-slate-400 hover:text-slate-600 underline">Сбросить</button>
+
+        <span class="ml-auto text-sm text-slate-500 font-medium"
+              x-text="completedFiltersActive
+                        ? 'Найдено ' + filteredCompleted.length + ' из ' + completed.length
+                        : completed.length + ' задач'"></span>
     </div>
 
     {{-- Фильтр вкладки «Задачи бухгалтеров»: по исполнителю --}}
@@ -558,6 +608,14 @@
             </div>
             <template x-if="completed.length === 0">
                 <div class="px-6 py-10 text-center text-sm text-slate-400">За последние {{ $completedDays }} дней нет выполненных задач.</div>
+            </template>
+            {{-- Ничего не нашлось по фильтрам: отдельный текст, чтобы не читалось как «задач нет вообще» --}}
+            <template x-if="completed.length > 0 && filteredCompleted.length === 0">
+                <div class="px-6 py-10 text-center">
+                    <p class="text-sm text-slate-400">Ничего не найдено среди выполненных за последние {{ $completedDays }} дней.</p>
+                    <button type="button" @click="resetCompletedFilters()"
+                            class="mt-2 text-sm text-indigo-600 hover:text-indigo-700 underline">Сбросить фильтры</button>
+                </div>
             </template>
             <div class="divide-y divide-slate-100">
                 <template x-for="c in completedPageItems" :key="c.id">
@@ -1543,6 +1601,9 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
     // Кэш матрицы чеклиста: тяжёлый расчёт (проход по всем задачам) не должен повторяться
     // на каждое из тысяч обращений из ячеек. Инвалидируется по сигнатуре ниже.
     let checklistCache = { key: null, data: null };
+    // Кэш фильтрации «Выполненных» — тоже вне реактивного state: запись в реактивное
+    // свойство прямо из геттера гоняла бы Alpine по кругу.
+    let completedCache = { key: null, list: [] };
 
     return {
         tasks: initialTasks.map((t, i) => ({
@@ -1557,6 +1618,12 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         completedPage: 1,
         completedPerPage: 20,
         completedItem: null,
+        // Фильтры вкладки «Выполненные». Вся история (90 дней) уже на клиенте,
+        // поэтому фильтруем без запросов к серверу — результат мгновенный.
+        completedSearch: '',        // поиск по названию, компании, заметке, исполнителю
+        completedClient: 'all',     // 'all' | client_id
+        completedPeriod: 'all',     // 'all' | 'today' | 'd7' | 'd30' — по дате выполнения
+        completedDoer: 'all',       // 'all' | 'mine' (свои) | employee_id
         year,
         month,
         allClients,
@@ -1983,13 +2050,109 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             if (this.$refs.loadMore) this._io.observe(this.$refs.loadMore);
         },
 
-        // Пагинация вкладки «Выполненные» (по 20)
+        // === Фильтры вкладки «Выполненные» ===
+        // История за 90 дней целиком лежит на клиенте, поэтому фильтруем локально:
+        // ни одного запроса к серверу, результат появляется по мере ввода.
+        // Скорость держится на трёх вещах: строка поиска склеивается в запись один раз
+        // (_s, ленивое поле), результат мемоизируется по ключу фильтров, и рисуется
+        // всегда максимум одна страница (20 строк).
+
+        /** Строка записи для поиска: название + компания + заметка + исполнитель, в нижнем регистре. */
+        _completedHaystack(c) {
+            if (c._s === undefined) {
+                c._s = [c.name, c.client_name, c.employee_comment, c.doer_name, c.force_close_comment]
+                    .filter(Boolean).join(' ').toLowerCase();
+            }
+
+            return c._s;
+        },
+
+        /** Порог даты выполнения для пресета периода: null = без ограничения. */
+        _completedPeriodFrom() {
+            const days = { today: 0, d7: 6, d30: 29 }[this.completedPeriod];
+            if (days === undefined) return null;
+
+            const from = new Date();
+            from.setHours(0, 0, 0, 0);
+            from.setDate(from.getDate() - days);
+
+            return from;
+        },
+
+        get filteredCompleted() {
+            const key = [this.completedSearch, this.completedClient, this.completedPeriod,
+                this.completedDoer, this.completed.length].join('|');
+            if (completedCache.key === key) {
+                return completedCache.list;
+            }
+
+            const q    = this.completedSearch.trim().toLowerCase();
+            const from = this._completedPeriodFrom();
+            const list = this.completed.filter(c => {
+                if (this.completedClient !== 'all' && String(c.client_id) !== this.completedClient) return false;
+                if (this.completedDoer === 'mine' && c.doer_id) return false;
+                if (this.completedDoer !== 'all' && this.completedDoer !== 'mine'
+                    && String(c.doer_id) !== this.completedDoer) return false;
+                if (from && new Date(c.completed_at) < from) return false;
+                if (q && !this._completedHaystack(c).includes(q)) return false;
+
+                return true;
+            });
+
+            completedCache = { key, list };
+
+            return list;
+        },
+
+        /** Компании, реально встречающиеся в истории, со счётчиками — пустых вариантов не предлагаем. */
+        get completedClientOptions() {
+            const byId = new Map();
+            for (const c of this.completed) {
+                if (!c.client_id) continue;
+                const row = byId.get(c.client_id) || { id: c.client_id, name: c.client_name, count: 0 };
+                row.count++;
+                byId.set(c.client_id, row);
+            }
+
+            return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+        },
+
+        /** Исполнители в истории: свои задачи (doer_id пуст) + бухгалтеры. Пусто → селект скрыт. */
+        get completedDoerOptions() {
+            const byId = new Map();
+            for (const c of this.completed) {
+                if (!c.doer_id) continue;
+                const row = byId.get(c.doer_id) || { id: c.doer_id, name: c.doer_name, count: 0 };
+                row.count++;
+                byId.set(c.doer_id, row);
+            }
+
+            return [...byId.values()].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
+        },
+
+        get completedMineCount() {
+            return this.completed.filter(c => !c.doer_id).length;
+        },
+
+        get completedFiltersActive() {
+            return this.completedSearch.trim() !== '' || this.completedClient !== 'all'
+                || this.completedPeriod !== 'all' || this.completedDoer !== 'all';
+        },
+
+        resetCompletedFilters() {
+            this.completedSearch = '';
+            this.completedClient = 'all';
+            this.completedPeriod = 'all';
+            this.completedDoer   = 'all';
+        },
+
+        // Пагинация вкладки «Выполненные» (по 20) — уже по отфильтрованному набору
         get completedTotalPages() {
-            return Math.max(1, Math.ceil(this.completed.length / this.completedPerPage));
+            return Math.max(1, Math.ceil(this.filteredCompleted.length / this.completedPerPage));
         },
         get completedPageItems() {
             const start = (this.completedPage - 1) * this.completedPerPage;
-            return this.completed.slice(start, start + this.completedPerPage);
+            return this.filteredCompleted.slice(start, start + this.completedPerPage);
         },
         openCompleted(c) {
             this.completedItem = c;
@@ -2080,6 +2243,11 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             this.$watch('statusFilter', () => { this.visibleLimit = 20; });
             this.$watch('sortDir', () => { this.visibleLimit = 20; });
             this.$watch('sortBy', () => { this.visibleLimit = 20; });
+
+            // Смена любого фильтра «Выполненных» возвращает на первую страницу — иначе
+            // при сузившемся списке пользователь оказывается на пустой странице.
+            ['completedSearch', 'completedClient', 'completedPeriod', 'completedDoer']
+                .forEach(f => this.$watch(f, () => { this.completedPage = 1; }));
             this.$nextTick(() => this._initInfiniteScroll());
         },
 
@@ -2164,7 +2332,10 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 type: task.type,
                 name: task.name,
                 branch_label: task.branch_label ?? null,
+                client_id: task.client_id ?? null, // нужен фильтру по компании
                 client_name: task.client_name ?? '—',
+                doer_id: null,   // закрыть задачу может только её исполнитель — значит это своя
+                doer_name: null,
                 completed_at: new Date().toISOString(),
                 employee_comment: task.employee_comment ?? null,
                 comment_url: task.type === 'planned'
@@ -2226,8 +2397,18 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             if ((item.employee_comment ?? '') === v) return;
 
             item.employee_comment = v; // оптимистично — строка списка и деталь обновятся сразу
+            this._invalidateCompletedSearch(item); // заметка входит в поиск — пересобрать строку
             const data = await this.post(item.comment_url, { employee_comment: v });
-            if (data.success) item.employee_comment = data.log.employee_comment;
+            if (data.success) {
+                item.employee_comment = data.log.employee_comment;
+                this._invalidateCompletedSearch(item);
+            }
+        },
+
+        /** Сбрасывает закэшированную строку поиска записи и результат фильтрации. */
+        _invalidateCompletedSearch(item) {
+            item._s = undefined;
+            completedCache = { key: null, list: [] };
         },
 
         // Возвращает URL для действия в зависимости от типа задачи

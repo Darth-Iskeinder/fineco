@@ -601,6 +601,7 @@ class BuhTasksController extends Controller
                     'type'         => 'planned',
                     'name'         => $item?->name ?? '—',
                     'branch_label' => $item?->branch_label,
+                    'client_id'    => $l->client_id, // фильтр вкладки «Выполненные»
                     'client_name'  => $l->client?->name ?? '—',
                     'completed_at' => $l->completed_at->toIso8601String(),
                     'employee_comment' => $l->employee_comment,
@@ -646,6 +647,7 @@ class BuhTasksController extends Controller
                 'id'           => 'adhoc_' . $a->id,
                 'type'         => 'adhoc',
                 'name'         => $a->name,
+                'client_id'    => $a->client_id, // фильтр вкладки «Выполненные»
                 'client_name'  => $a->client?->name ?? '—',
                 'completed_at' => $a->completed_at->toIso8601String(),
                 'employee_comment' => $a->employee_comment,
@@ -684,9 +686,11 @@ class BuhTasksController extends Controller
                     return [
                         'id'           => 'team_log_' . $l->id,
                         'type'         => 'planned',
+                        'doer_id'      => $l->employee_id, // фильтр «исполнитель» во «Выполненных»
                         'doer_name'    => $employeeNames->get($l->employee_id),
                         'name'         => $item?->name ?? '—',
                         'branch_label' => $item?->branch_label,
+                        'client_id'    => $l->client_id,
                         'client_name'  => $l->client?->name ?? '—',
                         'completed_at' => $l->completed_at->toIso8601String(),
                         'employee_comment' => $l->employee_comment,
@@ -733,8 +737,10 @@ class BuhTasksController extends Controller
                 ->map(fn ($a) => [
                     'id'           => 'team_adhoc_' . $a->id,
                     'type'         => 'adhoc',
+                    'doer_id'      => $a->employee_id, // фильтр «исполнитель» во «Выполненных»
                     'doer_name'    => $employeeNames->get($a->employee_id),
                     'name'         => $a->name,
+                    'client_id'    => $a->client_id,
                     'client_name'  => $a->client?->name ?? '—',
                     'completed_at' => $a->completed_at->toIso8601String(),
                     'employee_comment' => $a->employee_comment,
