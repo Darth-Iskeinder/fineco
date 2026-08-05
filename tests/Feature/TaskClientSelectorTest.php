@@ -14,8 +14,8 @@ use Tests\TestCase;
 
 /**
  * Селектор компаний в модалке «Добавить задачу» (allClients на странице /buhtasks):
- * админ/руководитель — все активные; главбух — свои + клиенты своих бухгалтеров;
- * остальные — только связанные. По боевому mysql в транзакции (как DashboardTest).
+ * админ/руководитель — все активные; остальные (включая главбуха) — только свои:
+ * где ответственный или исполнитель БП. По боевому mysql в транзакции (как DashboardTest).
  */
 class TaskClientSelectorTest extends TestCase
 {
@@ -114,9 +114,9 @@ class TaskClientSelectorTest extends TestCase
         $this->assertNotContains($foreign->name, $names);
     }
 
-    public function test_head_sees_clients_of_his_accountants(): void
+    public function test_head_sees_only_his_own_clients(): void
     {
-        // Клиент главбуха, где бухгалтер — исполнитель БП (так бухгалтер попадает в «команду»)
+        // Клиент главбуха, где бухгалтер — исполнитель БП
         $headClient = $this->client('ТОО Главбуха ' . uniqid(), $this->head->id);
         $service = Service::create([
             'name' => 'Тест услуга ' . uniqid(), 'periodicity' => 'Ежемесячно',
@@ -129,11 +129,13 @@ class TaskClientSelectorTest extends TestCase
             'assignee_id' => $this->accountant->id,
         ]);
 
-        // Клиент бухгалтера, за которого главбух НЕ ответственен
+        // Клиент бухгалтера, за которого главбух НЕ ответственен: назначение одного БП
+        // не делает бухгалтера «своим» насквозь — чужая компания в селектор не попадает,
+        // иначе главбух поставил бы задачу, которую потом нигде не увидит.
         $accClient = $this->client('ТОО Бухгалтера ' . uniqid(), $this->accountant->id);
 
         $names = $this->allClientNames($this->head);
         $this->assertContains($headClient->name, $names);
-        $this->assertContains($accClient->name, $names);
+        $this->assertNotContains($accClient->name, $names);
     }
 }

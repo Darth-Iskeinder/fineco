@@ -143,25 +143,16 @@ class BuhTasksController extends Controller
                 ->whereNull('parent_id')
                 ->where('assignee_id', $employee->id));
 
-        // Мои клиенты (я — ответственный/главбух) и «мои бухгалтеры» — назначены хоть
-        // на один БП моих клиентов. Главбух видит ВСЕ текущие задачи своих бухгалтеров:
-        // и по чужим клиентам, и внеплановые без клиента (в т.ч. самозаведённые).
+        // Мои клиенты — те, где я ответственный (главбух). Зона видимости команды строится
+        // ТОЛЬКО от них: главбух ведёт свои компании и следит за задачами по ним, кто бы их
+        // ни делал. Задачи бухгалтера по чужим компаниям и без компании — не его дело.
+        // Раньше «моим бухгалтером» становился любой, кому назначен хоть один БП моих клиентов,
+        // и тогда ВСЕ его задачи (включая самозаведённые внеплановые) сыпались главбуху.
         $myClientIds = Client::where('responsible_employee_id', $employee->id)->pluck('id');
-        $myAccountantIds = $myClientIds->isNotEmpty()
-            ? EstimateItem::whereNull('parent_id')
-                ->whereNotNull('assignee_id')
-                ->where('assignee_id', '!=', $employee->id)
-                ->whereHas('estimate', fn ($q) => $q->whereIn('client_id', $myClientIds))
-                ->pluck('assignee_id')->unique()->values()
-            : collect();
 
-        // Клиенты с задачами этого сотрудника ИЛИ его бухгалтеров, с непустой сметой (одна на клиента)
+        // Клиенты с задачами этого сотрудника, с непустой сметой (одна на клиента)
         $clients = Client::query()
-            ->where(fn ($q) => $q
-                ->where($assignedToEmployee)
-                ->orWhereHas('estimates.rootItems', fn ($i) => $i
-                    ->whereNull('parent_id')
-                    ->whereIn('assignee_id', $myAccountantIds)))
+            ->where($assignedToEmployee)
             ->with([
                 'serviceSchedules',
                 'estimates' => fn($q) => $q
@@ -177,22 +168,13 @@ class BuhTasksController extends Controller
             ->get();
 
         // Компании для селектора «Добавить задачу»: админ/руководитель — все активные;
-        // главбух — свои + клиенты своих бухгалтеров (ставит им задачи и по клиентам,
-        // за которых сам не ответственен); остальные — где ответственный или исполнитель БП.
+        // остальные (включая главбуха) — только свои: где ответственный или исполнитель БП.
+        // Ставить задачу по чужой компании нельзя — иначе поставивший её потом не увидит.
         if ($employee->isAdmin() || $employee->isManager()) {
             $allClients = Client::active()->orderBy('name')->get(['id', 'name']);
         } else {
             $allClients = Client::query()
-                ->where(function ($q) use ($assignedToEmployee, $myAccountantIds) {
-                    $q->where($assignedToEmployee);
-                    if ($myAccountantIds->isNotEmpty()) {
-                        $q->orWhere(fn ($qq) => $qq
-                            ->whereIn('responsible_employee_id', $myAccountantIds)
-                            ->orWhereHas('estimates.rootItems', fn ($i) => $i
-                                ->whereNull('parent_id')
-                                ->whereIn('assignee_id', $myAccountantIds)));
-                    }
-                })
+                ->where($assignedToEmployee)
                 ->orderBy('name')->get(['id', 'name']);
         }
 
@@ -222,8 +204,7 @@ class BuhTasksController extends Controller
         // решает logForEmployee(). Той же картой пользуется вкладка «Задачи бухгалтеров».
         $logs = BuhTaskLog::where(fn ($q) => $q
                 ->whereIn('client_id', $clients->pluck('id'))
-                ->orWhere('employee_id', $employee->id)
-                ->orWhereIn('employee_id', $myAccountantIds))
+                ->orWhere('employee_id', $employee->id))
             ->where('year', '>=', $today->subMonths(6)->year)
             ->with('documents')
             ->get()
@@ -236,10 +217,9 @@ class BuhTasksController extends Controller
             ->get();
 
         // === Задачи бухгалтеров (этап 1): вкладка главбуха ===
-        // Общий охват «команды»: задачи по моим клиентам (кто бы ни делал, кроме меня)
-        // + любые задачи моих бухгалтеров. Применяется к логам и внеплановым.
-        $teamScope = fn ($q) => $q->whereIn('client_id', $myClientIds)
-            ->orWhereIn('employee_id', $myAccountantIds);
+        // Общий охват «команды» — задачи по МОИМ клиентам, кто бы их ни делал (кроме меня).
+        // Применяется к логам и внеплановым, в активном списке и во вкладке «Выполненные».
+        $teamScope = fn ($q) => $q->whereIn('client_id', $myClientIds);
 
         $employeeNames = Employee::pluck('full_name', 'id');
         $teamTasks = [];
@@ -283,12 +263,11 @@ class BuhTasksController extends Controller
             foreach ($items as $item) {
                 // Исполнитель позиции: assignee_id, при пустом — ответственный клиента.
                 // Свои БП идут в основной список; во вкладку «задачи бухгалтеров» — БП моих
-                // клиентов (кто бы ни делал) и БП моих бухгалтеров по любым клиентам.
+                // клиентов, кто бы их ни делал.
                 $effectiveAssignee = (int) ($item->assignee_id ?? $client->responsible_employee_id);
                 $isMine = $effectiveAssignee === $employee->id;
                 $isTeam = !$isMine && $effectiveAssignee !== 0
-                    && ((int) $client->responsible_employee_id === $employee->id
-                        || $myAccountantIds->contains($effectiveAssignee));
+                    && (int) $client->responsible_employee_id === $employee->id;
                 if (!$isMine && !$isTeam) {
                     continue;
                 }
@@ -474,8 +453,8 @@ class BuhTasksController extends Controller
             ];
         }
 
-        // Внеплановые задачи команды — в ту же вкладку главбуха: по моим клиентам
-        // (кто бы ни делал) + любые задачи моих бухгалтеров, включая без клиента.
+        // Внеплановые задачи команды — в ту же вкладку главбуха: по моим клиентам,
+        // кто бы ни делал. Задачи бухгалтера по чужим клиентам и без клиента сюда не идут.
         if ($myClientIds->isNotEmpty()) {
             $teamAdhocs = BuhAdhocTask::where('employee_id', '!=', $employee->id)
                 ->where($teamScope)
