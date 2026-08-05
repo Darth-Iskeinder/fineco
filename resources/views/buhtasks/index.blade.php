@@ -199,6 +199,21 @@
             </template>
         </div>
 
+        {{-- Только с документом: выключен по умолчанию, ничего не прячем без спроса.
+             Переключатель — тот же, что в настройках услуг, чтобы вид был один на всё приложение.
+             Кликается целиком, вместе с подписью. --}}
+        <button type="button" role="switch" :aria-checked="completedWithDoc"
+                @click="completedWithDoc = !completedWithDoc"
+                :class="completedWithDoc ? 'text-indigo-700' : 'text-slate-500 hover:text-slate-700'"
+                class="inline-flex items-center gap-2 px-1 py-2 text-sm font-medium transition-colors focus:outline-none">
+            <span :class="completedWithDoc ? 'bg-indigo-600' : 'bg-slate-300'"
+                  class="relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors">
+                <span :class="completedWithDoc ? 'translate-x-6' : 'translate-x-1'"
+                      class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform"></span>
+            </span>
+            <span x-text="'Только с документом (' + completedWithDocCount + ')'"></span>
+        </button>
+
         {{-- Исполнитель: только у главбуха — появляется, когда в истории есть чужие задачи --}}
         <select x-show="completedDoerOptions.length > 0" x-model="completedDoer"
                 class="px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
@@ -658,6 +673,17 @@
                                 <span class="text-xs text-slate-300 italic">без заметки</span>
                             </template>
                         </div>
+                        {{-- Скрепка: сразу видно, есть ли документ, без открывания карточки.
+                             Клик по ней — просмотр (один PDF) или карточка (несколько файлов). --}}
+                        <span class="flex-shrink-0 w-9 flex justify-end">
+                            <button type="button" x-show="docCount(c) > 0"
+                                    @click.stop="openDocFromRow(c)"
+                                    :title="docCount(c) === 1 ? 'Посмотреть документ' : 'Документов: ' + docCount(c)"
+                                    class="inline-flex items-center gap-0.5 p-1 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors">
+                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
+                                <span x-show="docCount(c) > 1" class="text-xs font-medium" x-text="docCount(c)"></span>
+                            </button>
+                        </span>
                         <span class="text-xs text-slate-400 whitespace-nowrap" x-text="fmtCompleted(c.completed_at)"></span>
                     </div>
                 </template>
@@ -1429,7 +1455,8 @@
          x-transition:leave-end="opacity-0"
          class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
          @click.self="completedItem = null"
-         @keydown.escape.window="completedItem = null"
+         {{-- Escape закрывает сначала просмотрщик документа, и только потом карточку задачи --}}
+         @keydown.escape.window="docViewer.show ? closeDocViewer() : (completedItem = null)"
          style="display:none">
         <template x-if="completedItem !== null">
             <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 max-h-[85vh] overflow-y-auto">
@@ -1537,12 +1564,30 @@
                     <div class="mt-4 pt-4 border-t border-slate-100">
                         <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Прикреплённые документы</p>
                         <div class="space-y-1">
+                            {{-- PDF открывается тут же во встроенном просмотрщике,
+                                 рядом иконка скачивания. Остальные типы — как раньше, ссылкой. --}}
                             <template x-for="doc in (completedItem.documents || [])" :key="doc.id">
-                                <a :href="doc.url" target="_blank"
-                                   class="flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 underline truncate max-w-[320px] w-fit">
-                                    <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                                    <span x-text="doc.name"></span>
-                                </a>
+                                <div class="flex items-center gap-1.5 max-w-[340px]">
+                                    <template x-if="isPdf(doc)">
+                                        <button type="button" @click="openDocViewer(doc)"
+                                                title="Посмотреть, не покидая страницу"
+                                                class="flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 underline truncate min-w-0">
+                                            <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                                            <span class="truncate" x-text="doc.name"></span>
+                                        </button>
+                                    </template>
+                                    <template x-if="!isPdf(doc)">
+                                        <a :href="doc.url" target="_blank"
+                                           class="flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 underline truncate min-w-0">
+                                            <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                                            <span class="truncate" x-text="doc.name"></span>
+                                        </a>
+                                    </template>
+                                    <a x-show="isPdf(doc)" :href="doc.url" title="Скачать"
+                                       class="flex-shrink-0 text-slate-300 hover:text-slate-500 transition-colors">
+                                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                                    </a>
+                                </div>
                             </template>
                             <template x-if="(completedItem.documents || []).length === 0">
                                 <span class="text-sm text-slate-400 italic">Документы не прикреплены</span>
@@ -1572,11 +1617,23 @@
                                     <template x-if="child.requires_document && (child.documents || []).length > 0">
                                         <div class="mt-1 text-xs space-y-0.5" style="margin-left:1.625rem">
                                             <template x-for="doc in (child.documents || [])" :key="doc.id">
-                                                <a :href="doc.url" target="_blank"
-                                                   class="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 underline truncate max-w-[260px] w-fit">
-                                                    <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                                                    <span x-text="doc.name"></span>
-                                                </a>
+                                                <div class="flex items-center gap-1 max-w-[280px]">
+                                                    <template x-if="isPdf(doc)">
+                                                        <button type="button" @click="openDocViewer(doc)"
+                                                                title="Посмотреть, не покидая страницу"
+                                                                class="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 underline truncate min-w-0">
+                                                            <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                                                            <span class="truncate" x-text="doc.name"></span>
+                                                        </button>
+                                                    </template>
+                                                    <template x-if="!isPdf(doc)">
+                                                        <a :href="doc.url" target="_blank"
+                                                           class="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 underline truncate min-w-0">
+                                                            <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                                                            <span class="truncate" x-text="doc.name"></span>
+                                                        </a>
+                                                    </template>
+                                                </div>
                                             </template>
                                         </div>
                                     </template>
@@ -1587,6 +1644,39 @@
                 </template>
             </div>
         </template>
+    </div>
+
+    {{-- Просмотрщик PDF: поверх карточки задачи, чтобы, закрыв его, вернуться к деталям.
+         Рисует сам браузер — iframe на ссылку документа с ?inline=1. --}}
+    <div x-show="docViewer.show"
+         x-transition:enter="ease-out duration-150"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         class="fixed inset-0 z-[60] flex flex-col bg-black/70 p-3 sm:p-6"
+         @click.self="closeDocViewer()"
+         style="display:none">
+        <div class="w-full max-w-5xl mx-auto flex flex-col flex-1 min-h-0 bg-white rounded-2xl shadow-2xl overflow-hidden">
+            <div class="flex items-center gap-3 px-4 py-3 border-b border-slate-100 flex-shrink-0">
+                <svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                <p class="text-sm font-medium text-slate-700 truncate flex-1" x-text="docViewer.name"></p>
+                <a :href="docViewer.url.replace('?inline=1', '')" title="Скачать"
+                   class="flex-shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                </a>
+                <a :href="docViewer.url" target="_blank" title="Открыть в новой вкладке"
+                   class="flex-shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                </a>
+                <button type="button" @click="closeDocViewer()" title="Закрыть"
+                        class="flex-shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            {{-- iframe создаём только когда просмотрщик открыт: иначе браузер тянет файл заранее --}}
+            <template x-if="docViewer.show">
+                <iframe :src="docViewer.url" :title="docViewer.name" class="flex-1 w-full min-h-0 border-0"></iframe>
+            </template>
+        </div>
     </div>
 
 </div>
@@ -1624,6 +1714,10 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         completedClient: 'all',     // 'all' | client_id
         completedPeriod: 'all',     // 'all' | 'today' | 'd7' | 'd30' — по дате выполнения
         completedDoer: 'all',       // 'all' | 'mine' (свои) | employee_id
+        completedWithDoc: false,    // «Только с документом» — по умолчанию выключен, ничего не прячем
+        // Просмотр PDF прямо в окне: DocumentController отдаёт файл с ?inline=1,
+        // дальше его рисует встроенный просмотрщик браузера в iframe.
+        docViewer: { show: false, name: '', url: '' },
         year,
         month,
         allClients,
@@ -2081,7 +2175,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
 
         get filteredCompleted() {
             const key = [this.completedSearch, this.completedClient, this.completedPeriod,
-                this.completedDoer, this.completed.length].join('|');
+                this.completedDoer, this.completedWithDoc, this.completed.length].join('|');
             if (completedCache.key === key) {
                 return completedCache.list;
             }
@@ -2089,6 +2183,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             const q    = this.completedSearch.trim().toLowerCase();
             const from = this._completedPeriodFrom();
             const list = this.completed.filter(c => {
+                if (this.completedWithDoc && this.docCount(c) === 0) return false;
                 if (this.completedClient !== 'all' && String(c.client_id) !== this.completedClient) return false;
                 if (this.completedDoer === 'mine' && c.doer_id) return false;
                 if (this.completedDoer !== 'all' && this.completedDoer !== 'mine'
@@ -2134,16 +2229,27 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             return this.completed.filter(c => !c.doer_id).length;
         },
 
+        /** Документов у записи (у своих и командных строк поле одно и то же). */
+        docCount(c) {
+            return (c.documents || []).length;
+        },
+
+        get completedWithDocCount() {
+            return this.completed.filter(c => this.docCount(c) > 0).length;
+        },
+
         get completedFiltersActive() {
             return this.completedSearch.trim() !== '' || this.completedClient !== 'all'
-                || this.completedPeriod !== 'all' || this.completedDoer !== 'all';
+                || this.completedPeriod !== 'all' || this.completedDoer !== 'all'
+                || this.completedWithDoc;
         },
 
         resetCompletedFilters() {
-            this.completedSearch = '';
-            this.completedClient = 'all';
-            this.completedPeriod = 'all';
-            this.completedDoer   = 'all';
+            this.completedSearch  = '';
+            this.completedClient  = 'all';
+            this.completedPeriod  = 'all';
+            this.completedDoer    = 'all';
+            this.completedWithDoc = false;
         },
 
         // Пагинация вкладки «Выполненные» (по 20) — уже по отфильтрованному набору
@@ -2156,6 +2262,37 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         },
         openCompleted(c) {
             this.completedItem = c;
+        },
+
+        // === Просмотр документа без ухода со страницы ===
+        // Показываем только PDF: остальные типы браузер либо скачает, либо покажет
+        // непредсказуемо. Тип определяем по расширению — с сервера приходят только id, имя и ссылка.
+        isPdf(doc) {
+            return /\.pdf$/i.test(doc?.name || '');
+        },
+        openDocViewer(doc) {
+            // inline=1 — единственный режим, в котором контроллер отдаёт файл
+            // с Content-Disposition: inline (и только для разрешённых типов).
+            this.docViewer = { show: true, name: doc.name, url: doc.url + '?inline=1' };
+        },
+        closeDocViewer() {
+            this.docViewer = { show: false, name: '', url: '' };
+        },
+
+        /**
+         * Клик по скрепке в строке «Выполненных». Один PDF — сразу открываем просмотр
+         * (ради этого скрепка и кликабельная). Если файлов несколько или это не PDF,
+         * показываем карточку задачи: там видны имена и можно выбрать нужный.
+         */
+        openDocFromRow(c) {
+            const docs = c.documents || [];
+            if (docs.length === 1 && this.isPdf(docs[0])) {
+                this.openDocViewer(docs[0]);
+
+                return;
+            }
+
+            this.openCompleted(c);
         },
 
         // Числитель: выполнено в текущем месяце. Контроллер держит в наборе только закрытые
@@ -2246,7 +2383,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
 
             // Смена любого фильтра «Выполненных» возвращает на первую страницу — иначе
             // при сузившемся списке пользователь оказывается на пустой странице.
-            ['completedSearch', 'completedClient', 'completedPeriod', 'completedDoer']
+            ['completedSearch', 'completedClient', 'completedPeriod', 'completedDoer', 'completedWithDoc']
                 .forEach(f => this.$watch(f, () => { this.completedPage = 1; }));
             this.$nextTick(() => this._initInfiniteScroll());
         },

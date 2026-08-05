@@ -164,6 +164,24 @@ class DocumentDownloadTest extends TestCase
         $this->assertSame('%PDF-1.4 тест', $response->streamedContent());
     }
 
+    /**
+     * Просмотрщик во вкладке «Выполненные» грузит документ задачи в iframe с ?inline=1.
+     * У документов задач mime не хранится в БД, а определяется с диска — своя ветка,
+     * поэтому проверяем её отдельно от документа клиента.
+     */
+    public function test_task_pdf_opens_inline_for_preview(): void
+    {
+        [, $doc] = $this->makeTaskDocument();
+
+        $response = $this->actingAs($this->accountant, 'employee')
+            ->get(route('documents.task', $doc) . '?inline=1')
+            ->assertOk()
+            ->assertHeader('Content-Type', 'application/pdf')
+            ->assertHeader('X-Content-Type-Options', 'nosniff');
+
+        $this->assertStringContainsString('inline', $response->headers->get('Content-Disposition'));
+    }
+
     public function test_client_document_downloads_under_original_name(): void
     {
         $doc = $this->makeClientDocument();
