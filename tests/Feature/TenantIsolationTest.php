@@ -233,6 +233,70 @@ class TenantIsolationTest extends TestCase
         );
     }
 
+    /** Выгрузка — это тот же список клиентов: чужих в файле быть не может. */
+    public function test_export_carries_only_own_clients(): void
+    {
+        $csv = $this->actingAs($this->myEmployee, 'employee')
+            ->get('/clients/export')
+            ->streamedContent();
+
+        $this->assertStringContainsString($this->myClient->name, $csv);
+        $this->assertStringNotContainsString($this->theirClient->name, $csv);
+    }
+
+    /**
+     * Импорт видит только свою базу: ИНН, занятый в чужой фирме, для нас
+     * свободен. Иначе загрузка спотыкалась бы о клиентов, которых не показывает.
+     */
+    public function test_import_does_not_see_other_tenants_inns(): void
+    {
+        $content = "\xEF\xBB\xBF" . "Название;ИНН\n" . "ОсОО Из файла;{$this->theirClient->inn}\n";
+
+        $plan = $this->actingAs($this->myEmployee, 'employee')
+            ->post('/clients/import/preview', [
+                'file' => \Illuminate\Http\UploadedFile::fake()->createWithContent('clients.csv', $content),
+            ])
+            ->assertOk()
+            ->viewData('plan');
+
+        $this->assertSame('create', $plan[0]['verdict']);
+    }
+
+    /** Ссылка на чужого клиента в файле не даёт до него дотянуться. */
+    public function test_import_cannot_update_a_client_of_another_tenant(): void
+    {
+        $content = "\xEF\xBB\xBF" . "id;Название;ИНН\n"
+            . "{$this->theirClient->id};Захват;{$this->theirClient->inn}\n";
+
+        $plan = $this->actingAs($this->myEmployee, 'employee')
+            ->post('/clients/import/preview', [
+                'file' => \Illuminate\Http\UploadedFile::fake()->createWithContent('clients.csv', $content),
+            ])
+            ->assertOk()
+            ->viewData('plan');
+
+        $this->assertSame('error', $plan[0]['verdict']);
+        $this->assertStringContainsString('в базе нет', $plan[0]['reason']);
+        $this->assertSame('ОсОО Чужой клиент', $this->theirClient->refresh()->name);
+    }
+
+    /** История загрузок тоже своя: чужие импорты в списке не появляются. */
+    public function test_import_history_is_separated(): void
+    {
+        $theirImport = TenantContext::for($this->theirs, fn () => \App\Models\ClientImport::create([
+            'employee_id' => null,
+            'file_name'   => 'чужой-файл.csv',
+        ]));
+
+        $imports = $this->actingAs($this->myEmployee, 'employee')
+            ->get('/clients/imports')
+            ->assertOk()
+            ->assertDontSee('чужой-файл.csv')
+            ->viewData('imports');
+
+        $this->assertNotContains($theirImport->id, $imports->pluck('id')->all());
+    }
+
     /** А внутри своей фирмы дубль по-прежнему не пройдёт. */
     public function test_duplicate_inn_inside_own_tenant_is_still_refused(): void
     {

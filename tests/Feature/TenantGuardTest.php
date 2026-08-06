@@ -63,6 +63,9 @@ class TenantGuardTest extends TestCase
     private const PIVOTS_WITHOUT_TENANT = [
         'service_tariff',
         'service_tax_system',
+        // Построчный журнал загрузки клиентов: строка живёт только внутри
+        // client_imports и достаётся через него, а фирма помечена там.
+        'client_import_rows',
     ];
 
     protected function connectionsToTransact(): array

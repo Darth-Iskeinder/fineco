@@ -6,6 +6,8 @@
 @section('content')
 <div x-data="{
     showCreateModal: {{ $errors->createClient->isNotEmpty() ? 'true' : 'false' }},
+    // Файл не прошёл проверку — открываем окно импорта заново, а не прячем ошибку.
+    showImportModal: {{ $errors->has('file') ? 'true' : 'false' }},
     showEditModal: false,
     showDeleteModal: false,
     deleteClient: null,
@@ -120,7 +122,25 @@
         <div>
             <p class="text-slate-500">Управление клиентской базой</p>
         </div>
-        <div class="mt-4 sm:mt-0">
+        <div class="mt-4 sm:mt-0 flex items-center gap-3">
+            <button @click="showImportModal = true" type="button"
+                    class="inline-flex items-center px-4 py-2.5 bg-white text-slate-600 text-sm font-medium rounded-xl border border-slate-200 hover:bg-slate-50 hover:text-slate-800 transition-all duration-200">
+                <svg class="-ml-0.5 mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+                </svg>
+                Импорт
+            </button>
+            {{-- Выгружаем то, что человек сейчас видит: с поиском — найденное,
+                 без поиска — всех. Поиск живёт в Alpine, поэтому ссылку собираем на лету. --}}
+            <a :href="'{{ route('clients.export') }}' + (searchQuery ? '?search=' + encodeURIComponent(searchQuery) : '')"
+               :title="searchQuery ? 'Выгрузить найденных клиентов в CSV' : 'Выгрузить всех клиентов в CSV'"
+               class="inline-flex items-center px-4 py-2.5 bg-white text-slate-600 text-sm font-medium rounded-xl border border-slate-200 hover:bg-slate-50 hover:text-slate-800 transition-all duration-200">
+                <svg class="-ml-0.5 mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                </svg>
+                Экспорт
+                <span x-show="searchQuery.length > 0" class="ml-1 text-slate-400" x-text="'(' + clients.length + ')'"></span>
+            </a>
             <button @click="showCreateModal = true; resetCreateForm()"
                     type="button"
                     class="inline-flex items-center px-5 py-2.5 bg-gradient-to-r from-violet-500 to-indigo-600 text-white text-sm font-medium rounded-xl shadow-lg shadow-indigo-500/25 hover:shadow-xl hover:shadow-indigo-500/30 hover:-translate-y-0.5 transition-all duration-200">
@@ -129,6 +149,69 @@
                 </svg>
                 Добавить клиента
             </button>
+        </div>
+    </div>
+
+    {{-- Итог загрузки: сразу видно, что произошло, и как это отменить --}}
+    @if (session('import_result'))
+        @php($result = session('import_result'))
+        <div class="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 flex items-center justify-between gap-4">
+            <p class="text-sm text-emerald-900">
+                Импорт завершён: создано <span class="font-semibold">{{ $result['created'] }}</span>,
+                обновлено <span class="font-semibold">{{ $result['updated'] }}</span>,
+                пропущено <span class="font-semibold">{{ $result['skipped'] }}</span>.
+            </p>
+            <a href="{{ route('clients.imports.show', $result['id']) }}"
+               class="flex-shrink-0 text-sm font-medium text-emerald-800 hover:text-emerald-950 underline">
+                Кого затронуло
+            </a>
+        </div>
+    @endif
+
+    {{-- Окно импорта: только выбор файла. Всё, что можно сделать не так,
+         человек увидит на следующем экране — до записи в базу. --}}
+    <div x-show="showImportModal" x-cloak
+         class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+         @click.self="showImportModal = false"
+         @keydown.escape.window="showImportModal = false">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div class="flex items-start justify-between gap-4 mb-4">
+                <h3 class="text-base font-semibold text-slate-800">Импорт клиентов</h3>
+                <button @click="showImportModal = false" type="button" class="text-slate-300 hover:text-slate-500">
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+
+            @error('file')
+                <p class="mb-3 rounded-xl bg-rose-50 border border-rose-200 px-4 py-2.5 text-sm text-rose-700">{{ $message }}</p>
+            @enderror
+
+            <form action="{{ route('clients.import.preview') }}" method="POST" enctype="multipart/form-data">
+                @csrf
+                <input type="file" name="file" accept=".csv,text/csv" required
+                       class="block w-full text-sm text-slate-600 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200 cursor-pointer">
+
+                <p class="text-xs text-slate-500 mt-3">
+                    Файл CSV, до 1000 строк. Обязательны только «Название» и «ИНН».
+                    Не знаете формат — <a href="{{ route('clients.import.template') }}" class="text-indigo-600 hover:text-indigo-800 underline">скачайте шаблон</a>
+                    или выгрузите текущих клиентов кнопкой «Экспорт».
+                </p>
+                <p class="text-xs text-slate-500 mt-1.5">
+                    Ничего не запишется сразу: сначала покажем, что изменится.
+                    <a href="{{ route('clients.imports.index') }}" class="text-indigo-600 hover:text-indigo-800 underline">Прошлые загрузки</a>
+                </p>
+
+                <div class="flex gap-3 mt-5">
+                    <button type="button" @click="showImportModal = false"
+                            class="flex-1 py-2.5 px-4 bg-slate-100 text-slate-600 text-sm font-medium rounded-xl hover:bg-slate-200 transition-colors">
+                        Отмена
+                    </button>
+                    <button type="submit"
+                            class="flex-1 py-2.5 px-4 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 transition-colors">
+                        Проверить файл
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
 

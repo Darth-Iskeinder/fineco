@@ -5,6 +5,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BuhSmetaController;
 use App\Http\Controllers\BuhTasksController;
 use App\Http\Controllers\ClientController;
+use App\Http\Controllers\ClientImportController;
 use App\Http\Controllers\ClientServiceScheduleController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentController;
@@ -98,6 +99,17 @@ Route::middleware('auth:employee')->group(function () {
     Route::prefix('clients')->name('clients.')->middleware('module:clients')->group(function () {
         Route::get('/', [ClientController::class, 'index'])->name('index');
         Route::get('/search', [ClientController::class, 'search'])->name('search');
+
+        // Обмен CSV. Объявлены до `/{client}`: иначе «export» уедет в показ
+        // клиента с таким идентификатором.
+        Route::get('/export', [ClientImportController::class, 'export'])->name('export');
+        Route::get('/import/template', [ClientImportController::class, 'template'])->name('import.template');
+        Route::get('/imports', [ClientImportController::class, 'history'])->name('imports.index');
+        Route::get('/imports/{import}', [ClientImportController::class, 'show'])->name('imports.show');
+        Route::post('/import/preview', [ClientImportController::class, 'preview'])->name('import.preview');
+        Route::post('/import/{token}/apply', [ClientImportController::class, 'apply'])->name('import.apply');
+        Route::get('/import/{token}/errors', [ClientImportController::class, 'errors'])->name('import.errors');
+
         Route::post('/', [ClientController::class, 'store'])->name('store');
         Route::get('/{client}', [ClientController::class, 'show'])->name('show');
         Route::put('/{client}', [ClientController::class, 'update'])->name('update');
