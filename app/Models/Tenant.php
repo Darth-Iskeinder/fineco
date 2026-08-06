@@ -24,7 +24,12 @@ class Tenant extends Model
     /** Служебный аккаунт-образец: в него не входят, из него копируют. */
     public const STATUS_TEMPLATE = 'template';
 
-    protected $fillable = ['name', 'slug', 'status', 'plan', 'settings', 'is_template'];
+    protected $fillable = [
+        'name', 'slug', 'status', 'plan', 'settings', 'is_template',
+        // Профиль фирмы: правится в настройках, уходит в акты и сметы.
+        'legal_name', 'logo_path', 'inn', 'address', 'phone', 'email',
+        'director_name', 'bank_name', 'bank_account', 'bank_bik',
+    ];
 
     protected $casts = [
         'settings'    => 'array',
@@ -44,6 +49,41 @@ class Tenant extends Model
     public function isActive(): bool
     {
         return $this->status === self::STATUS_ACTIVE;
+    }
+
+    /**
+     * Ссылка на логотип фирмы; null — фирма его не загрузила.
+     *
+     * Файл лежит на закрытом диске и отдаётся маршрутом, а не из public: так
+     * логотип не зависит от symlink «storage» и не виден посторонним. В хвосте
+     * метка времени — иначе браузер продолжит показывать прежнюю картинку.
+     */
+    public function logoUrl(): ?string
+    {
+        if (!$this->logo_path) {
+            return null;
+        }
+
+        return route('company.logo', ['v' => $this->updated_at?->timestamp ?? 1]);
+    }
+
+    /**
+     * Буква для значка-заглушки, пока фирма не загрузила логотип.
+     *
+     * Так делают все многофирменные системы: чужой логотип показывать нельзя,
+     * пустое место выглядит поломкой, а инициал сразу отвечает «где я».
+     */
+    public function initial(): string
+    {
+        $name = trim((string) $this->name);
+
+        return $name === '' ? '?' : mb_strtoupper(mb_substr($name, 0, 1));
+    }
+
+    /** Название для документов: полное юридическое, если заполнено. */
+    public function documentName(): string
+    {
+        return $this->legal_name ?: $this->name;
     }
 
     /** Образец, из которого новые аккаунты получают стартовый набор. */

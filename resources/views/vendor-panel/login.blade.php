@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Панель владельца - ERP Fineco</title>
+    <title>Панель владельца - ERP</title>
     @vite('resources/css/app.css')
 </head>
 {{-- Тёмный экран — чтобы не спутать со входом сотрудника: это разные двери. --}}
@@ -65,7 +65,7 @@
         </div>
 
         <p class="text-center text-xs text-slate-600">
-            ERP Fineco &copy; {{ date('Y') }}
+            ERP &copy; {{ date('Y') }}
         </p>
     </div>
 </body>

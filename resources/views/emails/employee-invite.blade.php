@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Приглашение в ERP Fineco</title>
+    <title>Приглашение в ERP</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
@@ -54,13 +54,13 @@
 </head>
 <body>
     <div class="header">
-        <h1>ERP Fineco</h1>
+        <h1>ERP</h1>
     </div>
 
     <div class="content">
         <p>Здравствуйте, {{ $employee->full_name }}!</p>
 
-        <p>Вы были добавлены в систему ERP Fineco в качестве сотрудника.</p>
+        <p>Вы были добавлены в систему ERP в качестве сотрудника.</p>
 
         <div class="info">
             <strong>Ваши данные:</strong><br>
@@ -81,7 +81,7 @@
 
     <div class="footer">
         <p>Если вы не запрашивали это приглашение, просто проигнорируйте это письмо.</p>
-        <p>С уважением,<br>Команда ERP Fineco</p>
+        <p>С уважением,<br>Команда ERP</p>
     </div>
 </body>
 </html>

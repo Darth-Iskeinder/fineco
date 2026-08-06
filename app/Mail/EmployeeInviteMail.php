@@ -20,7 +20,7 @@ class EmployeeInviteMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Приглашение в ERP Fineco',
+            subject: 'Приглашение в ERP',
         );
     }
 

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Активация аккаунта - ERP Fineco</title>
+    <title>Активация аккаунта - ERP</title>
     @vite('resources/css/app.css')
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <style>[x-cloak] { display: none !important; }</style>
@@ -12,7 +12,7 @@
     <div class="max-w-md w-full space-y-8">
         <div>
             <h2 class="mt-6 text-center text-3xl font-extrabold text-gray-900">
-                ERP Fineco
+                ERP
             </h2>
             <p class="mt-2 text-center text-sm text-gray-600">
                 Добро пожаловать, {{ $employee->full_name }}!

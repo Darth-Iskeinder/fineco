@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Регистрация фирмы - ERP Fineco</title>
+    <title>Регистрация фирмы - ERP</title>
     @vite('resources/css/app.css')
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <style>[x-cloak] { display: none !important; }</style>
@@ -11,8 +11,16 @@
 <body class="bg-slate-50 min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
     <div class="max-w-md w-full space-y-8">
         <div class="text-center">
+            {{-- Знак системы, а не какой-то одной фирмы: логотип загружает
+                 сама фирма, и внутри системы он подставляется в меню. --}}
             <div class="flex justify-center mb-6">
-                <img src="{{ asset('images/Fineco-logo.png') }}" alt="Fineco" class="h-16 w-auto">
+                <span class="h-16 w-16 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/25">
+                    <svg class="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 3l8 4-8 4-8-4 8-4z"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M4 12l8 4 8-4"/>
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M4 17l8 4 8-4"/>
+                    </svg>
+                </span>
             </div>
             <h2 class="text-3xl font-bold bg-gradient-to-r from-slate-800 to-slate-600 bg-clip-text text-transparent">
                 Регистрация фирмы
@@ -158,7 +166,7 @@
         </div>
 
         <p class="text-center text-xs text-slate-400">
-            ERP Fineco &copy; {{ date('Y') }}
+            ERP &copy; {{ date('Y') }}
         </p>
     </div>
 </body>

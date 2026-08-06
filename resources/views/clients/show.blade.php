@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', $client->name . ' - ERP Fineco')
+@section('title', $client->name . ' - ERP')
 @section('page-title', $client->name)
 
 @section('content')

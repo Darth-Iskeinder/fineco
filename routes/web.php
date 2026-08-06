@@ -7,6 +7,7 @@ use App\Http\Controllers\BuhTasksController;
 use App\Http\Controllers\ClientController;
 use App\Http\Controllers\ClientImportController;
 use App\Http\Controllers\ClientServiceScheduleController;
+use App\Http\Controllers\CompanyProfileController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\EmployeeController;
@@ -79,6 +80,10 @@ Route::middleware('auth:employee')->group(function () {
     // Проверка доступа внутри контроллера: у документов клиента и задачи разные модули.
     Route::get('/documents/client/{document}', [DocumentController::class, 'client'])->name('documents.client');
     Route::get('/documents/task/{document}', [DocumentController::class, 'task'])->name('documents.task');
+
+    // Логотип своей фирмы: нужен в шапке на каждой странице, поэтому вне
+    // настроек — видеть его должны все сотрудники, а не только допущенные туда.
+    Route::get('/company/logo', [CompanyProfileController::class, 'logo'])->name('company.logo');
 
     // Страница руководителя (только роль manager, вне системы модулей)
     Route::prefix('dashboard')->name('dashboard.')->middleware('manager')->group(function () {
@@ -198,6 +203,13 @@ Route::middleware('auth:employee')->group(function () {
     // Настройки (доступ по модулю settings; админ имеет доступ всегда)
     Route::prefix('settings')->name('settings.')->middleware('module:settings')->group(function () {
         Route::get('/', fn() => redirect()->route('settings.tax-systems'))->name('index');
+
+        // Профиль своей фирмы: смотрят все допущенные в настройки,
+        // правят только руководитель и админ — проверка внутри контроллера.
+        Route::get('/profile', [CompanyProfileController::class, 'show'])->name('profile');
+        Route::put('/profile', [CompanyProfileController::class, 'update'])->name('profile.update');
+        Route::post('/profile/logo', [CompanyProfileController::class, 'updateLogo'])->name('profile.logo');
+        Route::delete('/profile/logo', [CompanyProfileController::class, 'destroyLogo'])->name('profile.logo.destroy');
 
         // Страницы разделов
         Route::get('/tax-systems', [SettingsController::class, 'taxSystemsPage'])->name('tax-systems');
