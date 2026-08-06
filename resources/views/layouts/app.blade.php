@@ -63,6 +63,7 @@
     // чтобы он не забыл, где находится, и не начал править чужие данные,
     // думая, что он у себя.
     $vendorInsideTenant = \App\Support\Impersonation::tenantName();
+    $vendorActingAs = \App\Support\Impersonation::actingAs();
 @endphp
 <body class="bg-slate-50 min-h-screen antialiased {{ $vendorInsideTenant ? 'pb-14' : '' }}">
     @if ($vendorInsideTenant)
@@ -70,6 +71,9 @@
             <div class="px-6 h-14 flex items-center justify-between">
                 <span class="text-sm font-semibold text-amber-950">
                     Вы работаете в аккаунте «{{ $vendorInsideTenant }}» как владелец системы. Это не ваша фирма.
+                    @if ($vendorActingAs)
+                        <span class="font-normal text-amber-900">Вошли как {{ $vendorActingAs }} — видно и можно ровно то, что доступно ему.</span>
+                    @endif
                 </span>
                 <form action="{{ route('vendor.leave') }}" method="POST">
                     @csrf

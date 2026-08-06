@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use App\Models\Employee;
 use App\Models\Tenant;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Session;
@@ -12,9 +13,9 @@ use Illuminate\Support\Facades\Session;
  * Хранится в сессии, а не в базе: заход внутрь — это состояние одной вкладки
  * браузера, а не факт о фирме.
  *
- * Метки две — какая фирма и когда вендор последний раз что-то делал. Вторая
- * нужна для автовыхода: отошёл от компьютера с открытой чужой фирмой — через
- * полчаса система сама закроет дверь.
+ * Метки три — какая фирма, под кем вошли и когда вендор последний раз что-то
+ * делал. Последняя нужна для автовыхода: отошёл от компьютера с открытой чужой
+ * фирмой — через полчаса система сама закроет дверь.
  */
 class Impersonation
 {
@@ -23,12 +24,20 @@ class Impersonation
 
     private const KEY_TENANT = 'vendor.tenant_id';
     private const KEY_NAME   = 'vendor.tenant_name';
+    private const KEY_AS     = 'vendor.as';
     private const KEY_SEEN   = 'vendor.last_seen';
 
-    public static function start(Tenant $tenant): void
+    public static function start(Tenant $tenant, ?Employee $as = null): void
     {
         Session::put(self::KEY_TENANT, $tenant->id);
         Session::put(self::KEY_NAME, $tenant->name);
+
+        // Роль сотрудника решает, что вендору видно и можно, — держим её перед
+        // глазами: «многого не вижу» и «прав не хватило» объясняются именно ей.
+        Session::put(self::KEY_AS, $as
+            ? trim($as->full_name . ', ' . mb_strtolower($as->role?->display_name ?? 'сотрудник'))
+            : null);
+
         self::touch();
     }
 
@@ -37,7 +46,7 @@ class Impersonation
     {
         Auth::guard('employee')->logout();
 
-        Session::forget([self::KEY_TENANT, self::KEY_NAME, self::KEY_SEEN]);
+        Session::forget([self::KEY_TENANT, self::KEY_NAME, self::KEY_AS, self::KEY_SEEN]);
     }
 
     public static function isActive(): bool
@@ -56,6 +65,12 @@ class Impersonation
     public static function tenantName(): ?string
     {
         return Session::get(self::KEY_NAME);
+    }
+
+    /** «Иванов, руководитель» — кем вендор представлен внутри фирмы. */
+    public static function actingAs(): ?string
+    {
+        return Session::get(self::KEY_AS);
     }
 
     public static function touch(): void

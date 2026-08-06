@@ -12,13 +12,28 @@ use Illuminate\Support\Facades\Auth;
 /**
  * Панель владельца системы: все фирмы списком и заход внутрь любой из них.
  *
- * Заход устроен просто: вендор входит как администратор этой фирмы. Пароль
- * администратора при этом не нужен и не становится известен — система логинит
- * его сама. Права полные, чтобы можно было не только посмотреть на проблему,
- * но и починить.
+ * Заход устроен просто: вендор входит сотрудником этой фирмы. Пароль сотрудника
+ * при этом не нужен и не становится известен — система логинит его сама.
+ *
+ * Кем именно — решает порядок ниже: берём самого старшего из активных. Раньше
+ * искали только администратора, и фирма, раздавшая роли по-своему (руководитель,
+ * главбухи, бухгалтеры — а админа нет), становилась недоступной для поддержки.
+ * Права нужны максимально возможные: чтобы не только увидеть проблему, но и
+ * починить, — однако выше того, что есть в фирме, всё равно не прыгнуть.
  */
 class VendorPanelController extends Controller
 {
+    /** Кем входим в чужую фирму: сверху вниз, пока кто-то не найдётся. */
+    private const ENTER_ROLE_ORDER = [
+        Role::ADMIN,
+        Role::MANAGER,
+        Role::HEAD_ACCOUNTANT,
+        Role::AUDITOR,
+        Role::ACCOUNTANT,
+        Role::EMPLOYEE,
+    ];
+
+
     public function index()
     {
         // Считаем в обход фильтра по фирме: увидеть все аккаунты — это и есть
@@ -37,30 +52,51 @@ class VendorPanelController extends Controller
         ]);
     }
 
-    /** Войти в аккаунт фирмы её администратором. */
+    /** Войти в аккаунт фирмы её сотрудником — самым старшим из активных. */
     public function enter(Tenant $tenant)
     {
         if ($tenant->isTemplate()) {
             return back()->withErrors(['tenant' => 'В аккаунт-образец входить нельзя: рабочих данных в нём нет.']);
         }
 
-        $admin = Employee::acrossTenants()
-            ->where('tenant_id', $tenant->id)
-            ->where('status', Employee::STATUS_ACTIVE)
-            ->whereHas('role', fn ($q) => $q->where('name', Role::ADMIN))
-            ->orderBy('id')
-            ->first();
+        $employee = $this->whoToEnterAs($tenant);
 
-        if (!$admin) {
+        if (!$employee) {
             return back()->withErrors([
-                'tenant' => "В аккаунте «{$tenant->name}» нет активного администратора — входить не от кого.",
+                'tenant' => "В аккаунте «{$tenant->name}» нет активных сотрудников — входить не от кого.",
             ]);
         }
 
-        Auth::guard('employee')->login($admin);
-        Impersonation::start($tenant);
+        Auth::guard('employee')->login($employee);
+        Impersonation::start($tenant, $employee);
 
         return redirect('/');
+    }
+
+    /**
+     * Сотрудник, под которым вендор войдёт в фирму.
+     *
+     * Роли перебираем по старшинству, а в конце берём кого угодно активного:
+     * появится новая роль вне списка — вход всё равно не сломается.
+     */
+    private function whoToEnterAs(Tenant $tenant): ?Employee
+    {
+        $active = fn () => Employee::acrossTenants()
+            ->where('tenant_id', $tenant->id)
+            ->where('status', Employee::STATUS_ACTIVE)
+            ->orderBy('id');
+
+        foreach (self::ENTER_ROLE_ORDER as $role) {
+            $employee = $active()
+                ->whereHas('role', fn ($q) => $q->where('name', $role))
+                ->first();
+
+            if ($employee) {
+                return $employee;
+            }
+        }
+
+        return $active()->first();
     }
 
     /** Выйти из фирмы обратно в панель. Вендором при этом остаёмся. */

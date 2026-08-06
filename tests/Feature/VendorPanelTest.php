@@ -179,13 +179,74 @@ class VendorPanelTest extends TestCase
         $this->assertGuest('vendor');
     }
 
-    public function test_firm_without_an_active_admin_says_so_instead_of_breaking(): void
+    public function test_firm_without_an_admin_is_entered_as_its_manager(): void
+    {
+        // Так живут реальные фирмы: админа не завели, всем раздали рабочие роли.
+        // Раньше поддержка в такой аккаунт попасть не могла вообще.
+        $firm = Tenant::create([
+            'name'   => 'Фирма без админа ' . uniqid(),
+            'slug'   => 'no-admin-' . uniqid(),
+            'status' => Tenant::STATUS_ACTIVE,
+        ]);
+
+        $accountant = $this->employeeIn($firm, Role::ACCOUNTANT);
+        $manager    = $this->employeeIn($firm, Role::MANAGER);
+
+        $this->actingAs($this->vendor, 'vendor')
+            ->post(route('vendor.enter', $firm))
+            ->assertRedirect('/');
+
+        $this->assertAuthenticatedAs($manager, 'employee');
+        $this->assertNotSame($accountant->id, auth('employee')->id());
+    }
+
+    public function test_admin_still_wins_over_other_roles(): void
+    {
+        $this->employeeIn($this->tenant, Role::MANAGER);
+
+        $this->actingAs($this->vendor, 'vendor')
+            ->post(route('vendor.enter', $this->tenant));
+
+        $this->assertAuthenticatedAs($this->tenantAdmin, 'employee');
+    }
+
+    public function test_firm_with_only_rank_and_file_staff_is_still_reachable(): void
+    {
+        $firm = Tenant::create([
+            'name'   => 'Фирма из одних бухгалтеров ' . uniqid(),
+            'slug'   => 'staff-only-' . uniqid(),
+            'status' => Tenant::STATUS_ACTIVE,
+        ]);
+
+        $accountant = $this->employeeIn($firm, Role::ACCOUNTANT);
+
+        $this->actingAs($this->vendor, 'vendor')
+            ->post(route('vendor.enter', $firm))
+            ->assertRedirect('/');
+
+        $this->assertAuthenticatedAs($accountant, 'employee');
+    }
+
+    public function test_the_strip_says_who_the_vendor_is_signed_in_as(): void
+    {
+        $this->actingAs($this->vendor, 'vendor')
+            ->post(route('vendor.enter', $this->tenant));
+
+        $this->get('/employees')
+            ->assertOk()
+            ->assertSee('Вошли как ' . $this->tenantAdmin->full_name, false);
+    }
+
+    public function test_firm_without_any_active_employee_says_so_instead_of_breaking(): void
     {
         $orphan = Tenant::create([
-            'name'   => 'Фирма без админа ' . uniqid(),
+            'name'   => 'Пустая фирма ' . uniqid(),
             'slug'   => 'orphan-' . uniqid(),
             'status' => Tenant::STATUS_ACTIVE,
         ]);
+
+        // Сотрудник есть, но не работает — под таким не входим.
+        $this->employeeIn($orphan, Role::MANAGER, Employee::STATUS_INACTIVE);
 
         $this->actingAs($this->vendor, 'vendor')
             ->from(route('vendor.index'))
@@ -194,5 +255,17 @@ class VendorPanelTest extends TestCase
             ->assertSessionHasErrors('tenant');
 
         $this->assertGuest('employee');
+    }
+
+    private function employeeIn(Tenant $tenant, string $role, string $status = Employee::STATUS_ACTIVE): Employee
+    {
+        return TenantContext::for($tenant, fn () => Employee::create([
+            'full_name' => 'Сотрудник ' . $role,
+            'position'  => $role,
+            'email'     => $role . '.' . uniqid() . '@example.com',
+            'password'  => 'secret123',
+            'role_id'   => Role::where('name', $role)->value('id'),
+            'status'    => $status,
+        ]));
     }
 }
