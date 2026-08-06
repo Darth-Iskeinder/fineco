@@ -1113,7 +1113,8 @@
          x-transition:leave-end="opacity-0"
          class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
          @click.self="closeTaskModal()"
-         @keydown.escape.window="closeTaskModal()"
+         {{-- Escape закрывает сначала просмотрщик документа, и только потом карточку задачи --}}
+         @keydown.escape.window="docViewer.show ? closeDocViewer() : closeTaskModal()"
          style="display:none">
         <template x-if="taskModalIdx !== null">
             <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 p-6 max-h-[85vh] overflow-y-auto">
@@ -1306,12 +1307,29 @@
                         <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5"
                            x-text="tasks[taskModalIdx].requires_document ? 'Документы для закрытия' : 'Документы (необязательно)'"></p>
                         <div class="space-y-1">
+                            {{-- PDF открывается тут же во встроенном просмотрщике (это нужно проверяющему,
+                                 чтобы не скачивать файл ради приёмки), рядом иконка скачивания.
+                                 Остальные типы — как раньше, ссылкой. --}}
                             <template x-for="doc in (tasks[taskModalIdx].documents || [])" :key="doc.id">
                                 <div class="flex items-center gap-2">
-                                    <a :href="doc.url" target="_blank"
-                                       class="inline-flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 underline truncate max-w-[260px]">
-                                        <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                                        <span x-text="doc.name"></span>
+                                    <template x-if="isPdf(doc)">
+                                        <button type="button" @click="openDocViewer(doc)"
+                                                title="Посмотреть, не покидая страницу"
+                                                class="inline-flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 underline truncate max-w-[240px] min-w-0">
+                                            <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                                            <span class="truncate" x-text="doc.name"></span>
+                                        </button>
+                                    </template>
+                                    <template x-if="!isPdf(doc)">
+                                        <a :href="doc.url" target="_blank"
+                                           class="inline-flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 underline truncate max-w-[260px]">
+                                            <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                                            <span x-text="doc.name"></span>
+                                        </a>
+                                    </template>
+                                    <a x-show="isPdf(doc)" :href="doc.url" title="Скачать"
+                                       class="flex-shrink-0 text-slate-300 hover:text-slate-500 transition-colors">
+                                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                                     </a>
                                     <button x-show="canEditDocs(tasks[taskModalIdx])"
                                             @click="deleteRootDocument(taskModalIdx, doc.id)"
@@ -1370,8 +1388,22 @@
                                         <div class="mt-1 ml-6 text-xs">
                                             <template x-for="doc in (child.documents || [])" :key="doc.id">
                                                 <div class="flex items-center gap-1.5 py-0.5">
-                                                    <a :href="doc.url" target="_blank"
-                                                       class="text-indigo-600 hover:text-indigo-800 underline truncate max-w-[180px]" x-text="doc.name"></a>
+                                                    <template x-if="isPdf(doc)">
+                                                        <button type="button" @click="openDocViewer(doc)"
+                                                                title="Посмотреть, не покидая страницу"
+                                                                class="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 underline truncate max-w-[170px] min-w-0">
+                                                            <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                                                            <span class="truncate" x-text="doc.name"></span>
+                                                        </button>
+                                                    </template>
+                                                    <template x-if="!isPdf(doc)">
+                                                        <a :href="doc.url" target="_blank"
+                                                           class="text-indigo-600 hover:text-indigo-800 underline truncate max-w-[180px]" x-text="doc.name"></a>
+                                                    </template>
+                                                    <a x-show="isPdf(doc)" :href="doc.url" title="Скачать"
+                                                       class="flex-shrink-0 text-slate-300 hover:text-slate-500 transition-colors">
+                                                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                                                    </a>
                                                     <button x-show="canEditDocs(tasks[taskModalIdx]) && child.status !== 'review'"
                                                             @click="deleteChildDocument(taskModalIdx, cidx, doc.id)"
                                                             title="Удалить документ"
