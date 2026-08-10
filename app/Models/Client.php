@@ -373,6 +373,45 @@ class Client extends Model
         });
     }
 
+    /**
+     * Ключи фильтров списка клиентов — общий словарь для страницы, живого поиска
+     * и выгрузки CSV. Контроллеры берут из запроса ровно их: $request->only(Client::FILTER_KEYS).
+     */
+    public const FILTER_KEYS = ['search', 'responsible', 'tax_system', 'status'];
+
+    /**
+     * Фильтры списка клиентов. Один источник правды для страницы, /clients/search и
+     * экспорта — иначе выгрузка разойдётся с тем, что человек видит на экране
+     * («нашёл двенадцать, скачал триста сорок»).
+     *
+     * Пустые значения игнорируются. У селектов есть отдельное значение 'none' —
+     * «не указан» (клиент без ответственного или без РН виден только так: задачи
+     * по нему никуда не идут, а в смету ничего не подтягивается).
+     */
+    public function scopeFilter($query, array $filters)
+    {
+        $query->search($filters['search'] ?? null);
+
+        $byId = function (string $key, string $column) use ($query, $filters) {
+            $value = $filters[$key] ?? null;
+            if ($value === 'none') {
+                $query->whereNull($column);
+            } elseif (is_numeric($value)) {
+                $query->where($column, (int) $value);
+            }
+        };
+
+        $byId('responsible', 'responsible_employee_id');
+        $byId('tax_system', 'tax_system_id');
+
+        $status = $filters['status'] ?? null;
+        if (in_array($status, ['active', 'inactive'], true)) {
+            $query->where('is_active', $status === 'active');
+        }
+
+        return $query;
+    }
+
     // =============================================
     // АКСЕССОРЫ
     // =============================================

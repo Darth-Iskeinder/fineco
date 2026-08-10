@@ -220,7 +220,7 @@ class ClientImportController extends Controller
     public function export(Request $request): StreamedResponse
     {
         // Тот же запрос, что и на странице клиентов: человек выгружает то, что
-        // видит, включая результат поиска. Иначе «нашёл десять, скачал тысячу».
+        // видит — с поиском и фильтрами. Иначе «нашёл десять, скачал тысячу».
         $clients = Client::with([
             'organizationForm',
             'activityType',
@@ -228,7 +228,7 @@ class ClientImportController extends Controller
             'tariff',
             'responsibleEmployee',
         ])
-            ->search($request->search)
+            ->filter($request->only(Client::FILTER_KEYS))
             ->orderBy('id')
             ->get();
 

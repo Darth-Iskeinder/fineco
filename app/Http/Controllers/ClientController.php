@@ -21,7 +21,7 @@ class ClientController extends Controller
         // с точностью до секунды, и без неё порядок «последний созданный сверху» плавает.
         $clients = Client::with(['taxSystem', 'tariff', 'responsibleEmployee'])
             ->withCount('estimateRootItems')
-            ->search($request->search)
+            ->filter($request->only(Client::FILTER_KEYS))
             ->orderBy('created_at', 'desc')
             ->orderBy('id', 'desc')
             ->get();
@@ -29,6 +29,9 @@ class ClientController extends Controller
         return view('clients.index', [
             'clients' => $clients,
             'search' => $request->search,
+            'filters' => $request->only(Client::FILTER_KEYS),
+            // Всего клиентов без фильтров — для счётчика «Найдено N из M»
+            'totalClients' => Client::count(),
             'taxSystems' => TaxSystem::active()->ordered()->get(),
             'employees' => Employee::active()->orderBy('full_name')->get(),
             'tariffs' => Tariff::active()->ordered()->get(),
@@ -37,11 +40,13 @@ class ClientController extends Controller
 
     public function search(Request $request)
     {
-        $search = $request->get('q', '');
+        // q — прежнее имя параметра поиска, оставлено для внешних ссылок
+        $filters = $request->only(Client::FILTER_KEYS);
+        $filters['search'] = $filters['search'] ?? $request->get('q', '');
 
         $clients = Client::with(['taxSystem', 'tariff', 'responsibleEmployee'])
             ->withCount('estimateRootItems')
-            ->search($search)
+            ->filter($filters)
             ->orderBy('created_at', 'desc')
             ->orderBy('id', 'desc')
             ->get()

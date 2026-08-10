@@ -54,6 +54,67 @@
     loading: false,
     searchTimeout: null,
 
+    // Быстрые фильтры. '' — «все», 'none' — «не указан». Значения приходят с сервера,
+    // чтобы ссылка вида /clients?status=inactive открывалась уже отфильтрованной.
+    filters: {
+        responsible: @js((string) ($filters['responsible'] ?? '')),
+        status:      @js((string) ($filters['status'] ?? '')),
+        tax_system:  @js((string) ($filters['tax_system'] ?? '')),
+    },
+
+    get isFiltered() {
+        return this.searchQuery.length > 0 || Object.values(this.filters).some(v => v !== '');
+    },
+
+    // Подписи чипов: показываем выбранное значение, а не название поля —
+    // «Асанова А.» читается быстрее, чем «Ответственный: Асанова А.»
+    get filterChips() {
+        const chips = [];
+        const named = (list, id) => (list.find(x => String(x.id) === String(id)) || {}).name || id;
+
+        if (this.filters.responsible === 'none') chips.push({ key: 'responsible', label: 'Без ответственного' });
+        else if (this.filters.responsible) chips.push({ key: 'responsible', label: named(this.allEmployees, this.filters.responsible) });
+
+        if (this.filters.status) chips.push({ key: 'status', label: this.filters.status === 'active' ? 'Активные' : 'Неактивные' });
+
+        if (this.filters.tax_system === 'none') chips.push({ key: 'tax_system', label: 'Без СНО' });
+        else if (this.filters.tax_system) chips.push({ key: 'tax_system', label: named(this.taxSystems, this.filters.tax_system) });
+
+        if (this.searchQuery) chips.push({ key: 'search', label: '«' + this.searchQuery + '»' });
+
+        return chips;
+    },
+
+    // Поиск, фильтры и выгрузка CSV ходят с одними и теми же параметрами,
+    // иначе скачается не то, что человек видит на экране.
+    filterParams() {
+        const params = new URLSearchParams();
+        if (this.searchQuery) params.set('search', this.searchQuery);
+        Object.entries(this.filters).forEach(([k, v]) => { if (v !== '') params.set(k, v); });
+        return params;
+    },
+
+    get exportUrl() {
+        const qs = this.filterParams().toString();
+        return '{{ route('clients.export') }}' + (qs ? '?' + qs : '');
+    },
+
+    applyFilters() {
+        this.searchClients();
+    },
+
+    clearFilter(key) {
+        if (key === 'search') this.searchQuery = '';
+        else this.filters[key] = '';
+        this.searchClients();
+    },
+
+    resetFilters() {
+        this.searchQuery = '';
+        Object.keys(this.filters).forEach(k => { this.filters[k] = ''; });
+        this.searchClients();
+    },
+
     // Сортировка: колонка ('name' | 'responsible') + направление ('asc' → А-Я, 'desc' → Я-А).
     // Обе null → порядок с сервера (последний созданный клиент сверху). Сортировка одна на таблицу:
     // клик по другой колонке перехватывает её на себя.
@@ -90,7 +151,7 @@
     async searchClients() {
         this.loading = true;
         try {
-            const response = await fetch('/clients/search?q=' + encodeURIComponent(this.searchQuery));
+            const response = await fetch('/clients/search?' + this.filterParams().toString());
             this.clients = await response.json();
         } catch (error) {
             console.error('Search error:', error);
@@ -130,16 +191,16 @@
                 </svg>
                 Импорт
             </button>
-            {{-- Выгружаем то, что человек сейчас видит: с поиском — найденное,
-                 без поиска — всех. Поиск живёт в Alpine, поэтому ссылку собираем на лету. --}}
-            <a :href="'{{ route('clients.export') }}' + (searchQuery ? '?search=' + encodeURIComponent(searchQuery) : '')"
-               :title="searchQuery ? 'Выгрузить найденных клиентов в CSV' : 'Выгрузить всех клиентов в CSV'"
+            {{-- Выгружаем то, что человек сейчас видит: с поиском и фильтрами — найденное,
+                 без них — всех. Фильтры живут в Alpine, поэтому ссылку собираем на лету. --}}
+            <a :href="exportUrl"
+               :title="isFiltered ? 'Выгрузить найденных клиентов в CSV' : 'Выгрузить всех клиентов в CSV'"
                class="inline-flex items-center px-4 py-2.5 bg-white text-slate-600 text-sm font-medium rounded-xl border border-slate-200 hover:bg-slate-50 hover:text-slate-800 transition-all duration-200">
                 <svg class="-ml-0.5 mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
                 </svg>
                 Экспорт
-                <span x-show="searchQuery.length > 0" class="ml-1 text-slate-400" x-text="'(' + clients.length + ')'"></span>
+                <span x-show="isFiltered" class="ml-1 text-slate-400" x-text="'(' + clients.length + ')'"></span>
             </a>
             <button @click="showCreateModal = true; resetCreateForm()"
                     type="button"
@@ -248,10 +309,62 @@
                     </div>
                 </div>
                 <div class="mt-4 sm:mt-0">
-                    <span x-show="searchQuery.length > 0" class="text-sm text-slate-500">
+                    {{-- «из N» показываем только когда список сужен: иначе цифра сбивает с толку --}}
+                    <span x-show="isFiltered" class="text-sm text-slate-500">
                         Найдено: <span class="font-medium text-slate-700" x-text="clients.length"></span>
+                        из {{ $totalClients }}
                     </span>
                 </div>
+            </div>
+
+            {{-- Быстрые фильтры. Значение '' — «все», 'none' — «не указан»:
+                 клиент без ответственного или без РН иначе не находится, а именно
+                 такие ломают работу (задачи никуда не идут, смета пустая). --}}
+            <div class="mt-4 flex flex-wrap items-center gap-2">
+                <select x-model="filters.responsible" @change="applyFilters()"
+                        :class="filters.responsible ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-slate-50/50 text-slate-600'"
+                        class="px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 transition-colors">
+                    <option value="">Ответственный: все</option>
+                    <option value="none">— не назначен —</option>
+                    <template x-for="e in allEmployees" :key="e.id">
+                        <option :value="e.id" x-text="e.name"></option>
+                    </template>
+                </select>
+
+                <select x-model="filters.status" @change="applyFilters()"
+                        :class="filters.status ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-slate-50/50 text-slate-600'"
+                        class="px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 transition-colors">
+                    <option value="">Статус: все</option>
+                    <option value="active">Активные</option>
+                    <option value="inactive">Неактивные</option>
+                </select>
+
+                <select x-model="filters.tax_system" @change="applyFilters()"
+                        :class="filters.tax_system ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-slate-50/50 text-slate-600'"
+                        class="px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 transition-colors">
+                    <option value="">СНО: все</option>
+                    <option value="none">— не указан —</option>
+                    <template x-for="t in taxSystems" :key="t.id">
+                        <option :value="t.id" x-text="t.name"></option>
+                    </template>
+                </select>
+
+            </div>
+
+            {{-- Чипы применённых фильтров: видно, почему список короткий, и снимается в один клик --}}
+            <div x-show="isFiltered" class="mt-3 flex flex-wrap items-center gap-2">
+                <template x-for="chip in filterChips" :key="chip.key">
+                    <span class="inline-flex items-center gap-1.5 pl-3 pr-2 py-1 rounded-lg text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-100">
+                        <span x-text="chip.label"></span>
+                        <button type="button" @click="clearFilter(chip.key)" class="text-indigo-400 hover:text-indigo-700" :title="'Снять фильтр: ' + chip.label">
+                            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </span>
+                </template>
+                <button type="button" @click="resetFilters()"
+                        class="text-xs font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2">
+                    Сбросить всё
+                </button>
             </div>
         </div>
     </div>
@@ -398,8 +511,14 @@
                 </svg>
             </div>
             <h3 class="text-sm font-medium text-slate-800 mb-1">Клиенты не найдены</h3>
-            <p class="text-sm text-slate-500 mb-6" x-text="searchQuery ? 'Попробуйте изменить параметры поиска' : 'Начните с добавления нового клиента'"></p>
-            <button x-show="!searchQuery"
+            <p class="text-sm text-slate-500 mb-6" x-text="isFiltered ? 'Попробуйте изменить поиск или снять фильтры' : 'Начните с добавления нового клиента'"></p>
+            {{-- Под фильтром предлагаем снять фильтры, а не заводить нового клиента:
+                 клиент, скорее всего, есть — просто не попал в выборку. --}}
+            <button x-show="isFiltered" @click="resetFilters()" type="button"
+                    class="inline-flex items-center px-5 py-2.5 bg-white text-slate-600 text-sm font-medium rounded-xl border border-slate-200 hover:bg-slate-50 hover:text-slate-800 transition-all duration-200">
+                Сбросить фильтры
+            </button>
+            <button x-show="!isFiltered"
                     @click="showCreateModal = true; resetCreateForm()"
                     type="button"
                     class="inline-flex items-center px-5 py-2.5 bg-gradient-to-r from-violet-500 to-indigo-600 text-white text-sm font-medium rounded-xl shadow-lg shadow-indigo-500/25 hover:shadow-xl hover:shadow-indigo-500/30 transition-all duration-200">
