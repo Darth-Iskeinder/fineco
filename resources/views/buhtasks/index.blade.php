@@ -1903,16 +1903,18 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         get dueChips() {
             const c = this.dueCounts;
             return [
+                // Цвет только у нажатой кнопки: пока фильтр выключен, кнопка нейтральная и
+                // не притворяется предупреждением. Так видно, включён фильтр или нет.
                 {
                     v: 'overdue', label: 'Просрочено', count: c.overdue,
                     activeClass: 'bg-red-600 text-white border-red-600',
-                    idleClass:   'bg-white text-red-600 border-red-200 hover:bg-red-50',
+                    idleClass:   'bg-white text-slate-600 border-slate-200 hover:bg-slate-50',
                     emptyClass:  'bg-white text-slate-400 border-slate-200',
                 },
                 {
                     v: 'today', label: 'Сегодня', count: c.today,
                     activeClass: 'bg-orange-500 text-white border-orange-500',
-                    idleClass:   'bg-white text-orange-600 border-orange-200 hover:bg-orange-50',
+                    idleClass:   'bg-white text-slate-600 border-slate-200 hover:bg-slate-50',
                     emptyClass:  'bg-white text-slate-400 border-slate-200',
                 },
             ];
