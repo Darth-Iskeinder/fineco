@@ -55,8 +55,10 @@ $servicesJson = $services->map(fn($s) => array_merge([
 
 <div x-data="servicesPage()" class="space-y-4">
 
-    <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
-        <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+    {{-- Карточка ростом во весь экран: шапка с кнопкой и фильтры закреплены, прокручивается
+         только таблица. Иначе при длинном списке страница уезжала вниз вместе с «Добавить БП». --}}
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden flex flex-col max-h-[calc(100vh-7rem)]">
+        <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
             <div>
                 <h2 class="text-lg font-semibold text-slate-800">Бизнес-процессы</h2>
                 <p class="text-sm text-slate-500 mt-0.5">Перечень услуг, оказываемых клиентам</p>
@@ -66,7 +68,7 @@ $servicesJson = $services->map(fn($s) => array_merge([
                 Добавить БП
             </button>
         </div>
-        <div class="px-6 py-3 border-b border-slate-100 flex flex-wrap items-center gap-4 bg-slate-50/40">
+        <div class="px-6 py-3 border-b border-slate-100 flex flex-wrap items-center gap-4 bg-slate-50/40 flex-shrink-0">
             <div class="relative">
                 <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 pointer-events-none">
                     <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z"/></svg>
@@ -92,11 +94,12 @@ $servicesJson = $services->map(fn($s) => array_merge([
             </label>
             <span class="text-xs text-slate-400" x-show="sphereFilter || searchQuery.trim()" x-text="visibleServices.length + ' из ' + services.length"></span>
         </div>
-        <div class="overflow-auto" style="max-height: calc(100vh - 13rem);">
+        <div class="flex-1 min-h-0 overflow-auto">
             <table class="min-w-full divide-y divide-slate-200">
-                <thead class="bg-slate-50 sticky top-0 z-10 [&_th]:bg-slate-50">
+                <thead class="bg-slate-50 sticky top-0 z-20 [&_th]:bg-slate-50">
                     <tr>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Бизнес процесс</th>
+                        {{-- Название закреплено слева: при прокрутке вправо видно, о каком БП строка --}}
+                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap sticky left-0 z-30 border-r border-slate-200">Бизнес процесс</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Сфера</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Группа</th>
                         {{-- TODO: колонка "Бизнес процесс" (поле business_process) удалена — дублировала "Название", рассмотреть удаление поля из таблицы --}}
@@ -115,10 +118,14 @@ $servicesJson = $services->map(fn($s) => array_merge([
                 </thead>
                 <template x-for="row in displayRows" :key="row.key">
                     <tbody class="bg-white divide-y divide-slate-100">
-                        <tr x-show="row.type === 'header'" class="bg-slate-100/70">
+                        <tr x-show="row.type === 'header'" class="bg-slate-100">
                             <td colspan="13" class="px-4 py-2 text-sm font-semibold text-slate-700">
-                                <span x-text="row.sphere"></span>
-                                <span class="ml-1 font-normal text-slate-400" x-text="'(' + row.count + ')'"></span>
+                                {{-- Название сферы прижато к левому краю окна: при прокрутке вправо
+                                     остаётся видно, в какой группе находишься. --}}
+                                <div class="sticky left-0 w-fit">
+                                    <span x-text="row.sphere"></span>
+                                    <span class="ml-1 font-normal text-slate-400" x-text="'(' + row.count + ')'"></span>
+                                </div>
                             </td>
                         </tr>
 
@@ -126,17 +133,25 @@ $servicesJson = $services->map(fn($s) => array_merge([
                             @click="selectedRowId = (selectedRowId === 's' + row.svc.id ? null : 's' + row.svc.id)"
                             @dblclick="openServiceModal(row.svc)"
                             :class="selectedRowId === 's' + row.svc.id ? 'bg-indigo-50/70 ring-1 ring-inset ring-indigo-200' : 'hover:bg-slate-50'"
-                            class="cursor-pointer select-none">
-                            <td class="px-4 py-3 text-sm font-semibold text-slate-900 whitespace-nowrap">
-                                <span x-text="row.svc.name"></span>
-                                <span x-show="row.svc.allows_quantity" class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">кол-во</span>
-                                <span x-show="row.svc.splits_by_branch" class="ml-1 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
-                                    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 6h4"/></svg>
-                                    по филиалам
-                                </span>
-                                <template x-for="f in specialFlags" :key="f.key">
-                                    <span x-show="row.svc[f.key]" class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium" :class="'bg-' + f.color + '-100 text-' + f.color + '-700'" x-text="f.label"></span>
-                                </template>
+                            class="group cursor-pointer select-none">
+                            {{-- Закреплённая колонка: фон обязателен и должен быть непрозрачным,
+                                 иначе под неё будут просвечивать уезжающие ячейки. --}}
+                            {{-- Ширина фиксирована: колонка закреплена и не должна съедать экран.
+                                 Длинное название обрезается (полное — в подсказке), метки условий
+                                 переносятся на следующую строку. --}}
+                            <td class="px-4 py-3 text-sm font-semibold text-slate-900 sticky left-0 z-10 border-r border-slate-200"
+                                :class="selectedRowId === 's' + row.svc.id ? 'bg-indigo-50' : 'bg-white group-hover:bg-slate-50'">
+                                <div class="flex flex-wrap items-center gap-1 w-64">
+                                    <span class="truncate max-w-full" :title="row.svc.name" x-text="row.svc.name"></span>
+                                    <span x-show="row.svc.allows_quantity" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">кол-во</span>
+                                    <span x-show="row.svc.splits_by_branch" class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
+                                        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 6h4"/></svg>
+                                        по филиалам
+                                    </span>
+                                    <template x-for="f in specialFlags" :key="f.key">
+                                        <span x-show="row.svc[f.key]" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium" :class="'bg-' + f.color + '-100 text-' + f.color + '-700'" x-text="f.label"></span>
+                                    </template>
+                                </div>
                             </td>
                             <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="row.svc.sphere || '—'"></td>
                             <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="row.svc.service_group || '—'"></td>
@@ -191,12 +206,13 @@ $servicesJson = $services->map(fn($s) => array_merge([
                             <tr @click="selectedRowId = (selectedRowId === 'c' + child.id ? null : 'c' + child.id)"
                                 @dblclick="openServiceModal(child)"
                                 :class="selectedRowId === 'c' + child.id ? 'bg-indigo-100/70 ring-1 ring-inset ring-indigo-200' : 'bg-slate-50/50 hover:bg-slate-50'"
-                                class="cursor-pointer select-none">
-                                <td class="pl-10 pr-4 py-2.5 text-sm text-slate-600 whitespace-nowrap">
-                                    <div class="flex items-center gap-1.5">
+                                class="group cursor-pointer select-none">
+                                <td class="pl-10 pr-4 py-2.5 text-sm text-slate-600 sticky left-0 z-10 border-r border-slate-200"
+                                    :class="selectedRowId === 'c' + child.id ? 'bg-indigo-100' : 'bg-slate-50'">
+                                    <div class="flex items-center gap-1.5 w-56">
                                         <svg class="w-3 h-3 text-slate-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                                        <span x-text="child.name"></span>
-                                        <span x-show="child.allows_quantity" class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">кол-во</span>
+                                        <span class="truncate" :title="child.name" x-text="child.name"></span>
+                                        <span x-show="child.allows_quantity" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 flex-shrink-0">кол-во</span>
                                     </div>
                                 </td>
                                 <td class="px-4 py-2.5 text-sm text-slate-300">—</td>

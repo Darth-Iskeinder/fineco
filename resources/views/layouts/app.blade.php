@@ -227,8 +227,11 @@
             </div>
         </aside>
 
-        <!-- Main Content -->
-        <div class="flex-1 ml-72 flex flex-col">
+        {{-- Main Content.
+             min-w-0 обязателен: без него флекс-колонка не может стать уже своего содержимого,
+             и широкая таблица (например, справочник БП) распирает страницу целиком — вбок
+             уезжает вся вёрстка вместе с меню. С ним прокручивается только сам широкий блок. --}}
+        <div class="flex-1 min-w-0 ml-72 flex flex-col">
             <!-- Header -->
             <header class="h-16 bg-white/80 backdrop-blur-xl border-b border-slate-200/50 flex items-center justify-between px-6 sticky top-0 z-10">
                 <div>
