@@ -19,19 +19,36 @@ class BuhSmetaController extends Controller
         // компании, где они ответственные. Правило то же, что в задачнике: своё — это своё.
         // Следствие: компания без ответственного не попадает никому, кроме админа
         // и руководителя, — так и договорились.
+        // Кто видит несколько ответственных сразу — только им нужен фильтр по ответственному.
+        // У главбуха/бухгалтера в списке и так только свои компании: селект с одним человеком — шум.
+        $seesEveryone = $employee->isAdmin() || $employee->isManager();
+
         $clients = Client::active()
             ->has('estimates')
-            ->when(
-                !$employee->isAdmin() && !$employee->isManager(),
-                fn ($q) => $q->where('responsible_employee_id', $employee->id),
-            )
+            ->when(!$seesEveryone, fn ($q) => $q->where('responsible_employee_id', $employee->id))
             ->with(['taxSystem', 'tariff', 'responsibleEmployee', 'estimate'])
             ->orderBy('name')
             ->get();
 
+        // Варианты фильтров собираем из того, что реально есть в списке: пустые пункты
+        // в селекте только мешают.
+        $responsibleOptions = $clients
+            ->map(fn ($c) => $c->responsibleEmployee)
+            ->filter()->unique('id')->sortBy('full_name')
+            ->map(fn ($e) => ['id' => $e->id, 'name' => $e->full_name])
+            ->values();
+
+        $taxSystemOptions = $clients
+            ->map(fn ($c) => $c->taxSystem)
+            ->filter()->unique('id')->sortBy('name')
+            ->map(fn ($t) => ['id' => $t->id, 'name' => $t->name])
+            ->values();
+
         return view('buhsmeta.index', [
-            'clients'        => $clients,
-            'ownershipForms' => Client::$ownershipForms,
+            'clients'            => $clients,
+            'canFilterByPerson'  => $seesEveryone,
+            'responsibleOptions' => $responsibleOptions,
+            'taxSystemOptions'   => $taxSystemOptions,
         ]);
     }
 

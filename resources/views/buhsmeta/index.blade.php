@@ -10,25 +10,44 @@
         'id' => $c->id,
         'name' => $c->name,
         'inn' => $c->inn,
-        'ownership_form_label' => $c->ownership_form_label,
+        'tax_system_id' => $c->tax_system_id,
         'tax_system_name' => $c->taxSystem?->name ?? '—',
         'tariff_name' => $c->tariff?->name ?? '—',
+        'responsible_employee_id' => $c->responsible_employee_id,
         'responsible' => $c->responsibleEmployee?->full_name ?? '—',
         'total' => (float) ($c->estimate?->total ?? 0),
     ])),
+    responsibleOptions: @js($responsibleOptions),
+    taxSystemOptions: @js($taxSystemOptions),
     searchQuery: '',
+
+    // Фильтры. '' — «все». Список грузится целиком, поэтому отбираем на месте,
+    // без похода на сервер.
+    filters: { responsible: '', tax_system: '' },
+
+    get isFiltered() {
+        return this.searchQuery.length > 0 || Object.values(this.filters).some(v => v !== '');
+    },
+
+    resetFilters() {
+        this.searchQuery = '';
+        Object.keys(this.filters).forEach(k => { this.filters[k] = ''; });
+    },
 
     formatTotal(value) {
         return new Intl.NumberFormat('ru-RU').format(value) + ' сом';
     },
 
     get filteredClients() {
-        if (!this.searchQuery) return this.clients;
         const query = this.searchQuery.toLowerCase();
-        return this.clients.filter(c =>
-            c.name.toLowerCase().includes(query) ||
-            c.inn.includes(query)
-        );
+        const f = this.filters;
+
+        return this.clients.filter(c => {
+            if (query && !c.name.toLowerCase().includes(query) && !c.inn.includes(query)) return false;
+            if (f.responsible && String(c.responsible_employee_id) !== f.responsible) return false;
+            if (f.tax_system && String(c.tax_system_id) !== f.tax_system) return false;
+            return true;
+        });
     },
 }">
     <!-- Поиск -->
@@ -57,11 +76,40 @@
                         </button>
                     </div>
                 </div>
-                <div class="mt-4 sm:mt-0">
-                    <span x-show="searchQuery.length > 0" class="text-sm text-slate-500">
+                <div class="mt-4 sm:mt-0 flex items-center gap-3">
+                    <span x-show="isFiltered" class="text-sm text-slate-500">
                         Найдено: <span class="font-medium text-slate-700" x-text="filteredClients.length"></span>
+                        из {{ $clients->count() }}
                     </span>
+                    <button type="button" x-show="isFiltered" @click="resetFilters()"
+                            class="text-xs font-medium text-slate-500 hover:text-slate-700 underline underline-offset-2">
+                        Сбросить
+                    </button>
                 </div>
+            </div>
+
+            {{-- Фильтры. Подсветка активного селекта — чтобы не вчитываться, включён он или нет. --}}
+            <div class="mt-4 flex flex-wrap items-center gap-2">
+                @if($canFilterByPerson)
+                <select x-model="filters.responsible"
+                        :class="filters.responsible ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-slate-50/50 text-slate-600'"
+                        class="px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 transition-colors">
+                    <option value="">Ответственный: все</option>
+                    <template x-for="e in responsibleOptions" :key="e.id">
+                        <option :value="e.id" x-text="e.name"></option>
+                    </template>
+                </select>
+                @endif
+
+                <select x-model="filters.tax_system"
+                        :class="filters.tax_system ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-slate-50/50 text-slate-600'"
+                        class="px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 transition-colors">
+                    <option value="">СНО: все</option>
+                    <template x-for="t in taxSystemOptions" :key="t.id">
+                        <option :value="t.id" x-text="t.name"></option>
+                    </template>
+                </select>
+
             </div>
         </div>
     </div>
@@ -118,7 +166,11 @@
             </svg>
         </div>
         <h3 class="text-sm font-medium text-slate-800 mb-1">Компании не найдены</h3>
-        <p class="text-sm text-slate-500" x-text="searchQuery ? 'Попробуйте изменить параметры поиска' : 'Нет активных клиентов'"></p>
+        <p class="text-sm text-slate-500 mb-4" x-text="isFiltered ? 'Попробуйте изменить поиск или снять фильтры' : 'Нет активных клиентов со сметой'"></p>
+        <button type="button" x-show="isFiltered" @click="resetFilters()"
+                class="inline-flex items-center px-5 py-2.5 bg-white text-slate-600 text-sm font-medium rounded-xl border border-slate-200 hover:bg-slate-50 hover:text-slate-800 transition-all duration-200">
+            Сбросить фильтры
+        </button>
     </div>
 </div>
 @endsection
