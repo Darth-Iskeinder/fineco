@@ -126,6 +126,14 @@
                                         </button>
                                     </div>
                                     <p class="text-xs text-slate-400 mt-0.5" x-show="extra.periodicity" x-text="extra.periodicity"></p>
+
+                                    {{-- Постоянная доп. услуга = обычная строка сметы: срок и исполнитель
+                                         как у тарифных БП. У временной («только этот месяц») их нет. --}}
+                                    <template x-if="extra.type === 'recurring'">
+                                        <div>
+                                            @include('clients.partials.estimate-schedule-assignee', ['row' => 'extra', 'assigneeShow' => 'extra.schedule'])
+                                        </div>
+                                    </template>
                                 </div>
 
                                 <template x-if="extra.allows_quantity">
@@ -664,6 +672,11 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
                 cost:            svc.cost,
                 quantity:        1,
                 allows_quantity: svc.allows_quantity,
+                // Копия, а не ссылка: правка расписания у одной строки не должна
+                // молча менять подписи у других строк того же БП в каталоге.
+                schedule:        svc.schedule ? { ...svc.schedule } : null,
+                assignee_id:     svc.assignee_id,
+                assignee_name:   svc.assignee_name,
                 children:        [],
             });
             this.showExtraModal = false;
@@ -679,6 +692,10 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
                 cost:            this.customForm.cost,
                 quantity:        1,
                 allows_quantity: this.customForm.allows_quantity,
+                // Своя услуга не привязана к БП — расписания у неё нет (срок не показываем)
+                schedule:        null,
+                assignee_id:     null,
+                assignee_name:   null,
                 children:        [],
             });
             this.customForm = { name: '', cost: 0, periodicity: '', allows_quantity: false };
@@ -731,15 +748,24 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
         set dayOfMonth(v) { this.scheduleForm.start_day = v ? [parseInt(v)] : []; },
         onSchedulePeriodicityChange() { this.scheduleForm.start_month = []; this.scheduleForm.start_day = []; },
 
+        // Расписание хранится на паре (клиент, БП), поэтому обновляем ВСЕ строки этого БП:
+        // филиальные копии и доп. услугу из того же каталога — иначе у них останется
+        // старая подпись срока до перезагрузки страницы.
         applyScheduleResponse(data) {
             if (!this.scheduleBp) return;
-            this.scheduleBp.schedule = {
+            const serviceId = this.scheduleBp.service_id;
+            const schedule = {
                 is_custom:   data.is_custom,
                 periodicity: data.schedule.periodicity || '',
                 start_month: data.schedule.start_month || [],
                 start_day:   data.schedule.start_day || [],
                 labels:      data.labels || [],
             };
+            [...this.tariffBPs, ...this.extras].forEach(row => {
+                if (row.service_id === serviceId && row.schedule) {
+                    row.schedule = { ...schedule };
+                }
+            });
         },
 
         async saveSchedule() {

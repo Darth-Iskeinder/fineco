@@ -42,15 +42,12 @@ class EstimateController extends Controller
 
         $estimate->load(['rootItems.children']);
 
-        $tariffItems   = $estimate->rootItems->filter(fn($i) => $i->type === 'recurring' && $i->service_id !== null);
-        $tariffItemIds = $tariffItems->pluck('id');
-        $isFirstLoad   = $tariffItems->isEmpty();
+        // Первая загрузка = смету ещё ни разу не сохраняли. Только тогда действуют дефолты
+        // тумблеров (рекомендательные выключены, подпункты выключены); дальше побеждает
+        // сохранённое состояние — даже если все тарифные БП сняли, а остались только доп. услуги.
+        $isFirstLoad = $estimate->rootItems->isEmpty();
 
         $estimateHasItems = $estimate->items()->exists();
-
-        // Сохранённые позиции тарифа. Ключ = service_id + НО (для филиального размножения
-        // у одного service_id может быть несколько строк — по одной на каждый НО).
-        $savedByKey = $tariffItems->keyBy(fn($i) => $i->service_id . ':' . ($i->tax_office_code ?? ''));
 
         // Налоговые органы клиента для филиальных БП: основной + филиалы.
         // Название филиала берём из справочника по коду НО (единый источник с карточкой клиента),
@@ -73,7 +70,7 @@ class EstimateController extends Controller
 
         // Реальные исполнители сохранённых позиций + ответственный: имена нужны для честного
         // отображения «на ком стоит задача» (в т.ч. read-only для тех, кто не может назначать).
-        $savedAssigneeIds = $tariffItems->pluck('assignee_id')->filter()->unique()->values();
+        $savedAssigneeIds = $estimate->rootItems->pluck('assignee_id')->filter()->unique()->values();
         $assigneeNames = Employee::whereIn(
             'id',
             $savedAssigneeIds->concat([$responsibleId])->filter()->unique()
@@ -82,12 +79,27 @@ class EstimateController extends Controller
         // Индивидуальные расписания БП этого клиента (override дефолтов), keyed by service_id
         $overrides = $client->serviceSchedules()->get()->keyBy('service_id');
 
+        // Расписание строки сметы: эффективное (дефолт БП или индивидуальное) + готовые
+        // подписи срока. Одинаково для тарифных БП и для доп. услуг из каталога.
+        $scheduleData = function (Service $svc) use ($overrides) {
+            $override = $overrides->get($svc->id);
+            $resolved = $svc->resolveForClient($override);
+
+            return [
+                'is_custom'   => $override !== null,
+                'periodicity' => $resolved['periodicity'] ?? '',
+                'start_month' => $resolved['months'],
+                'start_day'   => $resolved['days'],
+                'labels'      => $svc->deadlineLabelsForClient($override),
+            ];
+        };
+
         $tariffBPs = [];
 
         // Сборка структуры БП с состоянием тоглов.
         // $savedItem — сохранённая строка сметы для этого БП и НО (или null);
         // $taxOfficeCode/$branchLabel заданы только для филиальных копий.
-        $buildBpData = function ($bp, $savedItem, $taxOfficeCode = null, $branchLabel = null) use ($isFirstLoad, $flagKeys, $overrides, $pricing, $responsibleId, $assigneeNames) {
+        $buildBpData = function ($bp, $savedItem, $taxOfficeCode = null, $branchLabel = null) use ($isFirstLoad, $flagKeys, $scheduleData, $pricing, $responsibleId, $assigneeNames) {
             $assigneeId = $savedItem?->assignee_id ?? $responsibleId;
             $bpData = [
                 'service_id'      => $bp->id,
@@ -116,15 +128,7 @@ class EstimateController extends Controller
             }
 
             // Индивидуальное расписание клиента (или дефолт БП, если override нет)
-            $override = $overrides->get($bp->id);
-            $resolved = $bp->resolveForClient($override);
-            $bpData['schedule'] = [
-                'is_custom'   => $override !== null,
-                'periodicity' => $resolved['periodicity'] ?? '',
-                'start_month' => $resolved['months'],
-                'start_day'   => $resolved['days'],
-                'labels'      => $bp->deadlineLabelsForClient($override),
-            ];
+            $bpData['schedule'] = $scheduleData($bp);
 
             $savedChildren = $savedItem ? $savedItem->children->keyBy('service_id') : collect();
             foreach ($bp->children as $child) {
@@ -144,16 +148,17 @@ class EstimateController extends Controller
             return $bpData;
         };
 
-        // Добавить БП в список: филиальный (splits_by_branch) с филиалами — размножаем по НО,
-        // иначе одна строка.
-        $pushBp = function ($bp) use (&$tariffBPs, $buildBpData, $savedByKey, $clientHasBranches, $branchTargets) {
+        // Наметить строку тарифа: филиальный БП (splits_by_branch) с филиалами — размножаем
+        // по НО, иначе одна строка. Сами строки собираются ниже, когда известен полный
+        // список подтянутых БП: только по нему отличаем тарифные позиции от доп. услуг.
+        $bpPlans = [];
+        $pushBp = function ($bp) use (&$bpPlans, $clientHasBranches, $branchTargets) {
             if ($bp->splits_by_branch && $clientHasBranches) {
                 foreach ($branchTargets as $t) {
-                    $key = $bp->id . ':' . ($t['code'] ?? '');
-                    $tariffBPs[] = $buildBpData($bp, $savedByKey->get($key), $t['code'], $t['label']);
+                    $bpPlans[] = [$bp, $t['code'], $t['label']];
                 }
             } else {
-                $tariffBPs[] = $buildBpData($bp, $savedByKey->get($bp->id . ':'), null, null);
+                $bpPlans[] = [$bp, null, null];
             }
         };
 
@@ -217,8 +222,44 @@ class EstimateController extends Controller
             $includedServiceIds[$bp->id] = true;
         }
 
-        // Extra items = всё что не относится к тарифным (recurring с service_id)
-        $extraItems = $estimate->rootItems->filter(fn($i) => !$tariffItemIds->contains($i->id));
+        // Тарифная позиция — только та, чей БП реально подтянулся клиенту в этот раз
+        // (ключ = service_id + НО: у филиальных БП на один service_id несколько строк).
+        // Раньше тарифной считалась любая строка «recurring + service_id», и доп. услуга
+        // из каталога с типом «Постоянная» после сохранения либо всплывала в блоке тарифа,
+        // либо пропадала с экрана (оставаясь в базе и порождая задачи), а следующим
+        // сохранением удалялась вместе со своими логами задач.
+        $tariffKeys = collect($bpPlans)
+            ->map(fn($p) => $p[0]->id . ':' . ($p[1] ?? ''))
+            ->flip();
+
+        // На один ключ приходится ровно одна тарифная строка (строки идут по sort_order,
+        // тарифные сохраняются первыми). Вторая строка того же БП — это доп. услуга,
+        // добавленная вручную: показываем её в блоке доп. услуг, а не теряем.
+        $savedByKey  = collect();
+        $extraItems  = collect();
+        foreach ($estimate->rootItems as $item) {
+            $key = $item->service_id . ':' . ($item->tax_office_code ?? '');
+            $isTariffRow = $item->type === 'recurring'
+                && $item->service_id !== null
+                && $tariffKeys->has($key)
+                && !$savedByKey->has($key);
+
+            if ($isTariffRow) {
+                $savedByKey[$key] = $item;
+            } else {
+                $extraItems->push($item);
+            }
+        }
+
+        foreach ($bpPlans as [$bp, $taxOfficeCode, $branchLabel]) {
+            $tariffBPs[] = $buildBpData(
+                $bp,
+                $savedByKey->get($bp->id . ':' . ($taxOfficeCode ?? '')),
+                $taxOfficeCode,
+                $branchLabel,
+            );
+        }
+
         $extraServiceIds = $extraItems
             ->flatMap(fn($i) => collect([$i->service_id])->merge($i->children->pluck('service_id')))
             ->filter()->unique()->values()->toArray();
@@ -226,27 +267,38 @@ class EstimateController extends Controller
             ? Service::with('rate')->whereIn('id', $extraServiceIds)->get()->keyBy('id')
             : collect();
 
+        // Доп. услуга из каталога — такая же строка сметы, как тарифная: у неё есть срок
+        // (расписание её БП с учётом override клиента) и исполнитель. У своей услуги
+        // (без service_id) расписания нет — блок срока для неё не показывается.
         $extras = $extraItems
-            ->map(fn($item) => [
-                'service_id'      => $item->service_id,
-                'type'            => $item->type,
-                'name'            => $item->name,
-                'periodicity'     => $item->periodicity ?? '',
-                'cost'            => (float) $item->cost,
-                'unit'            => $extraServicesById->get($item->service_id)?->rate?->unit,
-                'quantity'        => (int) $item->quantity,
-                'allows_quantity' => (bool) ($extraServicesById->get($item->service_id)?->allows_quantity ?? false),
-                'children'        => $item->children->map(fn($c) => [
-                    'service_id'     => $c->service_id,
-                    'type'           => $c->type,
-                    'name'           => $c->name,
-                    'periodicity'    => $c->periodicity ?? '',
-                    'cost'           => (float) $c->cost,
-                    'quantity'       => (int) $c->quantity,
-                    'allows_quantity'=> (bool) ($extraServicesById->get($c->service_id)?->allows_quantity ?? false),
-                    'enabled'        => true,
-                ])->values()->toArray(),
-            ])->values()->toArray();
+            ->map(function ($item) use ($extraServicesById, $scheduleData, $responsibleId, $assigneeNames) {
+                $svc        = $item->service_id ? $extraServicesById->get($item->service_id) : null;
+                $assigneeId = $svc ? ($item->assignee_id ?? $responsibleId) : null;
+
+                return [
+                    'service_id'      => $item->service_id,
+                    'type'            => $item->type,
+                    'name'            => $item->name,
+                    'periodicity'     => $item->periodicity ?? '',
+                    'cost'            => (float) $item->cost,
+                    'unit'            => $svc?->rate?->unit,
+                    'quantity'        => (int) $item->quantity,
+                    'allows_quantity' => (bool) ($svc?->allows_quantity ?? false),
+                    'schedule'        => $svc ? $scheduleData($svc) : null,
+                    'assignee_id'     => $assigneeId,
+                    'assignee_name'   => $assigneeId ? $assigneeNames->get($assigneeId) : null,
+                    'children'        => $item->children->map(fn($c) => [
+                        'service_id'     => $c->service_id,
+                        'type'           => $c->type,
+                        'name'           => $c->name,
+                        'periodicity'    => $c->periodicity ?? '',
+                        'cost'           => (float) $c->cost,
+                        'quantity'       => (int) $c->quantity,
+                        'allows_quantity'=> (bool) ($extraServicesById->get($c->service_id)?->allows_quantity ?? false),
+                        'enabled'        => true,
+                    ])->values()->toArray(),
+                ];
+            })->values()->toArray();
 
         // All catalog BPs for "add extra" modal (root only, with children)
         $allServices = Service::with(['children.rate', 'rate'])
@@ -261,6 +313,11 @@ class EstimateController extends Controller
                 'cost'           => $pricing->unitPrice($s),
                 'unit'           => $s->rate?->unit,
                 'allows_quantity'=> $s->allows_quantity,
+                // Срок и исполнитель по умолчанию: чтобы у только что добавленной
+                // доп. услуги они были видны сразу, а не после сохранения.
+                'schedule'       => $scheduleData($s),
+                'assignee_id'    => $responsibleId,
+                'assignee_name'  => $responsibleId ? $assigneeNames->get($responsibleId) : null,
                 'children'       => $s->children->map(fn($c) => [
                     'id'             => $c->id,
                     'name'           => $c->name,
@@ -350,6 +407,7 @@ class EstimateController extends Controller
             'extras.*.name'                        => 'required|string|max:255',
             'extras.*.cost'                        => 'nullable|numeric|min:0',
             'extras.*.quantity'                    => 'nullable|integer|min:1',
+            'extras.*.assignee_id'                 => 'nullable|integer|exists:employees,id',
         ]);
 
         return DB::transaction(function () use ($request, $client) {
@@ -362,10 +420,14 @@ class EstimateController extends Controller
             // ОБНОВЛЯЕМ на месте (id сохраняется → логи задач buh_task_logs целы, в т.ч. «на проверке»),
             // недостающие создаём, реально исчезнувшие удаляем в конце (их логи уходят каскадом — БП убрали).
             // Это чинит потерю истории при любом сохранении сметы, включая переназначение исполнителя.
-            $existingRoots = $estimate->items()->whereNull('parent_id')->with('children')->get();
+            // На один ключ может приходиться несколько строк: тот же БП добавили и в тариф,
+            // и вручную в доп. услуги. Держим очередь и разбираем по порядку (тарифные
+            // обрабатываются первыми) — иначе строки перетасовываются между сохранениями
+            // и теряют id вместе с логами задач.
+            $existingRoots = $estimate->items()->whereNull('parent_id')->with('children')->orderBy('sort_order')->get();
             $rootByKey = [];
             foreach ($existingRoots as $r) {
-                $rootByKey[$this->itemKey($r->service_id, $r->tax_office_code, $r->branch_label, $r->name, $r->type)] = $r;
+                $rootByKey[$this->itemKey($r->service_id, $r->tax_office_code, $r->branch_label, $r->name, $r->type)][] = $r;
             }
 
             $canAssign = $this->canAssign($client);
@@ -386,8 +448,8 @@ class EstimateController extends Controller
                 $children = collect($bpData['children'] ?? [])->filter(fn($c) => !empty($c['enabled']));
 
                 $key      = $this->itemKey($service->id, $bpData['tax_office_code'] ?? null, $bpData['branch_label'] ?? null, $service->name, 'recurring');
-                $existing = $rootByKey[$key] ?? null;
-                unset($rootByKey[$key]); // строка «использована» — не сматчить дважды
+                // Забираем строку из очереди — «использована», второй раз не сматчится
+                $existing = !empty($rootByKey[$key]) ? array_shift($rootByKey[$key]) : null;
 
                 // Исполнитель БП. Главбух может задать явно (payload); иначе сохраняем прежнего
                 // (при обновлении на месте он уже стоит), по умолчанию — ответственный клиента.
@@ -482,14 +544,29 @@ class EstimateController extends Controller
                     ? $extraData['type'] : 'one_time';
 
                 $key      = $this->itemKey($extraData['service_id'] ?? null, null, null, $extraData['name'], $extraType);
-                $existing = $rootByKey[$key] ?? null;
-                unset($rootByKey[$key]);
+                $existing = !empty($rootByKey[$key]) ? array_shift($rootByKey[$key]) : null;
+
+                // Доп. услуга из каталога — полноценная позиция сметы: периодичность и день
+                // срока берём из её БП (как у тарифных), а не из присланных данных.
+                $extraService = !empty($extraData['service_id'])
+                    ? Service::find($extraData['service_id'])
+                    : null;
+
+                // Исполнителя может задать только главбух клиента/админ; иначе оставляем
+                // прежнего. Пусто — задача уйдёт ответственному (см. BuhTasksController).
+                if ($canAssign && !empty($extraData['assignee_id'])) {
+                    $extraAssigneeId = (int) $extraData['assignee_id'];
+                } else {
+                    $extraAssigneeId = $existing?->assignee_id;
+                }
 
                 $attrs = [
                     'service_id'  => $extraData['service_id'] ?? null,
+                    'assignee_id' => $extraAssigneeId,
                     'type'        => $extraType,
                     'name'        => $extraData['name'],
-                    'periodicity' => $extraData['periodicity'] ?? null,
+                    'periodicity' => $extraService?->periodicity ?? ($extraData['periodicity'] ?? null),
+                    'due_day'     => $extraService?->due_day,
                     'cost'        => $cost,
                     'quantity'    => $qty,
                     'total'       => $rowTotal,
