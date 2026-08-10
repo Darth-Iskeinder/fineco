@@ -128,6 +128,15 @@
 
     {{-- Фильтры (только на вкладке «Список») --}}
     <div x-show="viewMode === 'list'" class="flex items-center gap-3 flex-wrap mb-4">
+        {{-- Поиск: быстрее двух селектов, когда знаешь, что ищешь. Клавиша «/» ставит сюда курсор. --}}
+        <div class="relative flex-1 min-w-[16rem] max-w-sm">
+            <svg class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"/></svg>
+            <input type="search" x-model="listSearch" x-ref="listSearch"
+                   @keydown.escape="listSearch = ''; $event.target.blur()"
+                   placeholder="Поиск по задаче, компании…   /"
+                   class="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+        </div>
+
         {{-- Компания (показываем всегда, чтобы выбранная компания оставалась видна в фильтре) --}}
         <select x-model="clientFilter"
                 class="px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
@@ -137,13 +146,22 @@
             </template>
         </select>
 
-        {{-- Срок: воронка по горизонту (просрочка всегда попадает внутрь). --}}
-        <select x-model="dueFilter"
-                class="px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-            <option value="all">Все сроки</option>
-            <option value="d3">Ближайшие 3 дня</option>
-            <option value="d7">Ближайшая неделя</option>
-        </select>
+        {{-- Срок: два переключателя «что горит». Повторное нажатие снимает фильтр, поэтому
+             отдельная кнопка «Все» не нужна. Видны всегда, даже с нулём: «Сегодня 0» — это
+             тоже ответ. С нулём кнопка не нажимается: незачем уводить на пустой экран.
+             Счётчики считаются без учёта самого фильтра по сроку, иначе цифра меняла бы сама себя. --}}
+        <div class="flex items-center gap-2">
+            <template x-for="c in dueChips" :key="c.v">
+                <button type="button"
+                        @click="dueFilter = (dueFilter === c.v ? 'all' : c.v)"
+                        :disabled="c.count === 0 && dueFilter !== c.v"
+                        :class="dueFilter === c.v ? c.activeClass : (c.count === 0 ? c.emptyClass : c.idleClass)"
+                        class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-sm font-medium transition-colors disabled:cursor-default whitespace-nowrap">
+                    <span x-text="c.label"></span>
+                    <span class="text-xs opacity-80" x-text="c.count"></span>
+                </button>
+            </template>
+        </div>
 
         {{-- Действие: фильтр по состоянию из колонки «Действия» (не начаты / на паузе и т.д.). --}}
         <select x-model="statusFilter"
@@ -156,11 +174,14 @@
             <option value="rework" x-text="'На доработку (' + statusCounts.rework + ')'"></option>
         </select>
 
-        <button x-show="clientFilter !== 'all' || dueFilter !== 'all' || statusFilter !== 'all'"
-                @click="clientFilter = 'all'; dueFilter = 'all'; statusFilter = 'all'"
+        <button x-show="listFiltersActive" @click="resetListFilters()"
                 class="text-xs text-slate-400 hover:text-slate-600 underline">Сбросить</button>
 
-        <span class="ml-auto text-sm text-slate-500 font-medium" x-text="visibleCount + ' задач'"></span>
+        {{-- Просрочку выносим в счётчик отдельно: это первое, что нужно знать о своём списке --}}
+        <span class="ml-auto text-sm text-slate-500 font-medium">
+            <span x-text="visibleCount + ' задач'"></span>
+            <span x-show="dueCounts.overdue > 0" class="text-red-600" x-text="' · ' + dueCounts.overdue + ' просрочено'"></span>
+        </span>
     </div>
 
     {{-- Подсказка про горизонт показа — только там, где виден активный набор задач.
@@ -168,7 +189,7 @@
          и у неё своя шапка), поэтому скрыта. --}}
     <div x-show="viewMode !== 'completed'" class="flex items-center gap-1.5 mb-6 text-xs text-slate-400">
         <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-        <span>Показаны задачи текущего месяца и все просроченные. Выполненные исчезают из списка на следующий день — их история во вкладке «Выполненные».</span>
+        <span>Показаны задачи текущего месяца и все просроченные. Выполненные исчезают из списка — их история во вкладке «Выполненные».</span>
     </div>
 
     {{-- Фильтры вкладки «Выполненные»: поиск + компания + период + исполнитель.
@@ -297,8 +318,19 @@
                         <th class="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Действия</th>
                     </tr>
                 </thead>
-                    <template x-for="({ task, idx }) in visibleTasks" :key="task.uid">
+                    {{-- Группы: сверху то, что горит. Заголовки появляются, только когда есть
+                         просрочка или задачи на сегодня — в спокойный день список остаётся плоским. --}}
+                    <template x-for="group in groupedTasks" :key="group.key">
                         <tbody class="divide-y divide-slate-100">
+                        <template x-if="group.label">
+                            <tr :class="group.headClass">
+                                <td colspan="7" class="px-4 py-2 text-xs font-semibold uppercase tracking-wider">
+                                    <span x-text="group.label"></span>
+                                    <span class="opacity-70" x-text="'(' + group.total + ')'"></span>
+                                </td>
+                            </tr>
+                        </template>
+                        <template x-for="({ task, idx }) in group.items" :key="task.uid">
                         <tr :class="{
                                 'bg-emerald-50/30': task.status === 'completed',
                                 'bg-sky-50/40': task.status === 'review',
@@ -489,6 +521,7 @@
 
                             </td>
                         </tr>
+                        </template>
                         </tbody>
                     </template>
             </table>
@@ -1766,7 +1799,8 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         teamMembers: teamMembers || [],
         teamFilter: 'all', // фильтр по бухгалтеру: 'all' | employee_id
         todayStr: new Date().toLocaleDateString('en-CA'), // YYYY-MM-DD в локальной зоне (подсветка просрочки)
-        dueFilter: 'all', // воронка по сроку: 'all' | 'today' | 'd3' | 'd7' | 'd30' (только вкладка «Список»)
+        listSearch: '', // поиск по активному списку: название, компания, филиал, отчётный период
+        dueFilter: 'all', // срок: 'all' | 'overdue' | 'today' (только вкладка «Список»)
         statusFilter: 'all', // фильтр колонки «Действия»: 'all' | 'pending' | 'paused' | 'running' | 'rework'
         sortBy: null, // null | 'due' (срок/периодичность) | 'period' (отчётный период)
         sortDir: null, // null = исходный порядок | 'asc' | 'desc'
@@ -1816,14 +1850,97 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             return this.clientFilter === 'all' || String(task.client_id) === String(this.clientFilter);
         },
 
-        // Воронка по сроку (только «Список»): показываем задачи со сроком до выбранного горизонта.
-        // Просрочка всегда попадает внутрь (diff < 0). Задачи без срока — только в режиме «Все».
+        // Фильтр по сроку (только «Список»): 'all' | 'overdue' | 'today'.
+        // Считаем ровно через urgency() — то же правило, по которому строка красится и
+        // получает бейдж, и по которому она попадает в группу. Иначе кнопка «Просрочено»
+        // подмешивала бы задачи на проверке (дата в прошлом, но у бухгалтера их уже нет),
+        // и они падали бы в группу «Остальные» — выглядело как «показывает не только просроченные».
         matchesDue(task) {
             if (this.dueFilter === 'all') return true;
-            if (task.due_date == null) return false;
-            const horizon = { today: 0, d3: 3, d7: 7, d30: 30 }[this.dueFilter];
-            const diff = this.dueDiffDays(task); // дней до срока; отрицательное = просрочено
-            return diff !== null && diff <= horizon;
+            return this.urgency(task) === this.dueFilter;
+        },
+
+        // Поиск по списку. Ищем в том, что человек видит в строке: название, компания,
+        // филиал и отчётный период — этого хватает, чтобы найти задачу за пару букв.
+        matchesSearch(task) {
+            const q = this.listSearch.trim().toLowerCase();
+            if (!q) return true;
+            return (task.name || '').toLowerCase().includes(q)
+                || (task.client_name || '').toLowerCase().includes(q)
+                || (task.branch_label || '').toLowerCase().includes(q)
+                || (task.reporting_period || '').toLowerCase().includes(q);
+        },
+
+        get listFiltersActive() {
+            return this.clientFilter !== 'all' || this.dueFilter !== 'all'
+                || this.statusFilter !== 'all' || this.listSearch !== '';
+        },
+
+        resetListFilters() {
+            this.clientFilter = 'all';
+            this.dueFilter = 'all';
+            this.statusFilter = 'all';
+            this.listSearch = '';
+        },
+
+        // Счётчики срочности: для кнопок фильтра и заголовков групп. Считаем по активным
+        // задачам с учётом остальных фильтров, но БЕЗ фильтра по сроку — иначе цифра на
+        // кнопке зависела бы от неё самой и обнулялась после нажатия.
+        get dueCounts() {
+            const c = { all: 0, overdue: 0, today: 0, rest: 0 };
+            for (const t of this.tasks) {
+                if (t.status === 'completed') continue;
+                if (!this.matchesFilter(t) || !this.matchesStatus(t) || !this.matchesSearch(t)) continue;
+                c.all++;
+                const u = this.urgency(t);
+                if (u === 'overdue') c.overdue++;
+                else if (u === 'today') c.today++;
+                else c.rest++;
+            }
+            return c;
+        },
+
+        get dueChips() {
+            const c = this.dueCounts;
+            return [
+                {
+                    v: 'overdue', label: 'Просрочено', count: c.overdue,
+                    activeClass: 'bg-red-600 text-white border-red-600',
+                    idleClass:   'bg-white text-red-600 border-red-200 hover:bg-red-50',
+                    emptyClass:  'bg-white text-slate-400 border-slate-200',
+                },
+                {
+                    v: 'today', label: 'Сегодня', count: c.today,
+                    activeClass: 'bg-orange-500 text-white border-orange-500',
+                    idleClass:   'bg-white text-orange-600 border-orange-200 hover:bg-orange-50',
+                    emptyClass:  'bg-white text-slate-400 border-slate-200',
+                },
+            ];
+        },
+
+        // Группировка списка: просрочка и «сегодня» выносятся наверх отдельными пачками,
+        // остальное идёт следом одним куском. Считаем поверх уже отобранного среза
+        // (visibleTasks), чтобы не потерять подгрузку по 20 строк.
+        get groupedTasks() {
+            const overdue = [], today = [], rest = [];
+            for (const row of this.visibleTasks) {
+                const u = this.urgency(row.task);
+                if (u === 'overdue') overdue.push(row);
+                else if (u === 'today') today.push(row);
+                else rest.push(row);
+            }
+
+            const counts = this.dueCounts;
+            const groups = [];
+            if (overdue.length) groups.push({ key: 'overdue', label: 'Просрочено', total: counts.overdue, headClass: 'bg-red-50/70 text-red-700', items: overdue });
+            if (today.length)   groups.push({ key: 'today',   label: 'Сегодня',    total: counts.today,   headClass: 'bg-orange-50/70 text-orange-700', items: today });
+            if (rest.length) {
+                // Заголовок «Остальные» нужен только как граница после горящего;
+                // если ничего не горит — список остаётся плоским, без лишнего шума.
+                const hot = overdue.length > 0 || today.length > 0;
+                groups.push({ key: 'rest', label: hot ? 'Остальные' : null, total: counts.rest, headClass: 'bg-slate-50 text-slate-500', items: rest });
+            }
+            return groups;
         },
 
         // Фильтр по состоянию из колонки «Действия»: не начаты, на паузе, в работе, на доработку.
@@ -1837,7 +1954,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             const c = { pending: 0, paused: 0, running: 0, review: 0, rework: 0 };
             for (const t of this.tasks) {
                 if (t.status === 'completed') continue;
-                if (!this.matchesFilter(t) || !this.matchesDue(t)) continue;
+                if (!this.matchesFilter(t) || !this.matchesDue(t) || !this.matchesSearch(t)) continue;
                 if (c[t.status] !== undefined) c[t.status]++;
             }
             return c;
@@ -2133,7 +2250,8 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         get visibleCount() {
             // Считаем только активные строки (без выполненных) — как их и рисует visibleTasks,
             // иначе сентинел бесконечной прокрутки не «догрузит» до реального конца списка.
-            return this.tasks.filter(t => t.status !== 'completed' && this.matchesFilter(t) && this.matchesDue(t) && this.matchesStatus(t)).length;
+            return this.tasks.filter(t => t.status !== 'completed' && this.matchesFilter(t)
+                && this.matchesDue(t) && this.matchesStatus(t) && this.matchesSearch(t)).length;
         },
 
         // Окно бесконечной прокрутки: первые visibleLimit задач, прошедших фильтр,
@@ -2144,17 +2262,38 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         get visibleTasks() {
             // _taskVer в ключе: при закрытии задачи (status → completed) она сразу пропадает
             // из активного списка и уходит во вкладку «Выполненные» — кэш пересобирается.
-            const key = this.clientFilter + '|' + this.dueFilter + '|' + this.statusFilter + '|' + this.visibleLimit + '|' + this.sortBy + '|' + this.sortDir + '|' + this.tasks.length + '|' + this._taskVer;
+            const key = this.clientFilter + '|' + this.dueFilter + '|' + this.statusFilter + '|' + this.listSearch + '|' + this.visibleLimit + '|' + this.sortBy + '|' + this.sortDir + '|' + this.tasks.length + '|' + this._taskVer;
             if (visibleCache.key !== key) {
-                const list = [];
+                const idxs = [];
                 for (let i = 0; i < this.tasks.length; i++) {
                     const task = this.tasks[i];
                     if (task.status === 'completed') continue; // выполненные — только во вкладке «Выполненные»
-                    if (!this.matchesFilter(task) || !this.matchesDue(task) || !this.matchesStatus(task)) continue;
-                    if (list.length >= this.visibleLimit) break;
-                    list.push({ task, idx: i });
+                    if (!this.matchesFilter(task) || !this.matchesDue(task) || !this.matchesStatus(task) || !this.matchesSearch(task)) continue;
+                    idxs.push(i);
                 }
-                visibleCache = { key, list };
+
+                // Порядок по умолчанию — горящее наверх. Без этого группы «Просрочено» и
+                // «Сегодня» собирали бы только то, что случайно попало в первые 20 строк:
+                // с сервера задачи приходят по компаниям, и просрочка может лежать в конце.
+                // Свою сортировку (клик по заголовку) не трогаем — this.tasks уже отсортирован.
+                if (!this.sortBy) {
+                    const rank = (t) => { const u = this.urgency(t); return u === 'overdue' ? 0 : u === 'today' ? 1 : 2; };
+                    idxs.sort((a, b) => {
+                        const ta = this.tasks[a], tb = this.tasks[b];
+                        const diff = rank(ta) - rank(tb);
+                        if (diff !== 0) return diff;
+                        // Внутри горящего — по сроку; остальное остаётся в исходном порядке.
+                        if (rank(ta) < 2 && ta.due_date !== tb.due_date) {
+                            return (ta.due_date || '') < (tb.due_date || '') ? -1 : 1;
+                        }
+                        return a - b;
+                    });
+                }
+
+                visibleCache = {
+                    key,
+                    list: idxs.slice(0, this.visibleLimit).map(i => ({ task: this.tasks[i], idx: i })),
+                };
             }
             return visibleCache.list;
         },
@@ -2411,8 +2550,25 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             this.$watch('clientFilter', () => { this.visibleLimit = 20; });
             this.$watch('dueFilter', () => { this.visibleLimit = 20; });
             this.$watch('statusFilter', () => { this.visibleLimit = 20; });
+            this.$watch('listSearch', () => { this.visibleLimit = 20; });
             this.$watch('sortDir', () => { this.visibleLimit = 20; });
             this.$watch('sortBy', () => { this.visibleLimit = 20; });
+
+            this._restoreListFilters();
+            ['clientFilter', 'dueFilter', 'statusFilter']
+                .forEach(f => this.$watch(f, () => this._saveListFilters()));
+
+            // «/» ставит курсор в поиск, Esc его чистит (обработчик на самом поле).
+            // Не перехватываем клавишу, когда человек уже печатает в поле или в модалке.
+            this._onKey = (e) => {
+                if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+                if (this.viewMode !== 'list') return;
+                const el = document.activeElement;
+                if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+                e.preventDefault();
+                this.$refs.listSearch?.focus();
+            };
+            window.addEventListener('keydown', this._onKey);
 
             // Смена любого фильтра «Выполненных» возвращает на первую страницу — иначе
             // при сузившемся списке пользователь оказывается на пустой странице.
@@ -2424,6 +2580,43 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         destroy() {
             clearInterval(this.ticker);
             this._io?.disconnect();
+            if (this._onKey) window.removeEventListener('keydown', this._onKey);
+        },
+
+        // Память фильтров списка: у каждого свой привычный срез, и выставлять его заново
+        // после каждой перезагрузки — лишняя работа. Поиск НЕ запоминаем: забытая строка
+        // поиска выглядит как «задачи пропали». Ключ с id сотрудника — общий компьютер.
+        _listFiltersKey() { return 'buhTasks.listFilters.' + this.currentEmployeeId; },
+
+        _saveListFilters() {
+            try {
+                localStorage.setItem(this._listFiltersKey(), JSON.stringify({
+                    clientFilter: this.clientFilter,
+                    dueFilter: this.dueFilter,
+                    statusFilter: this.statusFilter,
+                }));
+            } catch (e) { /* приватный режим — просто не запоминаем */ }
+        },
+
+        _restoreListFilters() {
+            let saved;
+            try {
+                saved = JSON.parse(localStorage.getItem(this._listFiltersKey()) || 'null');
+            } catch (e) { return; }
+            if (!saved) return;
+
+            // Компания могла уйти из списка (задачи закрыты, клиента передали) — тогда
+            // сохранённый фильтр показал бы пустой экран. Проверяем и откатываем на «все».
+            if (saved.clientFilter && saved.clientFilter !== 'all'
+                && this.clientOptions.some(c => String(c.id) === String(saved.clientFilter))) {
+                this.clientFilter = saved.clientFilter;
+            }
+            if (['overdue', 'today'].includes(saved.dueFilter)) {
+                this.dueFilter = saved.dueFilter;
+            }
+            if (['pending', 'paused', 'running', 'review', 'rework'].includes(saved.statusFilter)) {
+                this.statusFilter = saved.statusFilter;
+            }
         },
 
         getElapsed(task) {
