@@ -1862,13 +1862,19 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
 
         // Поиск по списку. Ищем в том, что человек видит в строке: название, компания,
         // филиал и отчётный период — этого хватает, чтобы найти задачу за пару букв.
+        //
+        // Слова ищутся по отдельности и по всем полям сразу: «ромашка ндс» находит задачу
+        // по НДС у Ромашки, хотя эти слова лежат в разных колонках. Порядок не важен,
+        // лишние пробелы не мешают. Плата — точную фразу с пробелом искать нельзя
+        // («отчёт по» = «отчёт» И «по»), но для этого списка так удобнее.
         matchesSearch(task) {
-            const q = this.listSearch.trim().toLowerCase();
-            if (!q) return true;
-            return (task.name || '').toLowerCase().includes(q)
-                || (task.client_name || '').toLowerCase().includes(q)
-                || (task.branch_label || '').toLowerCase().includes(q)
-                || (task.reporting_period || '').toLowerCase().includes(q);
+            const words = this.listSearch.toLowerCase().split(/\s+/).filter(Boolean);
+            if (words.length === 0) return true;
+
+            const haystack = [task.name, task.client_name, task.branch_label, task.reporting_period]
+                .filter(Boolean).join(' ').toLowerCase();
+
+            return words.every(w => haystack.includes(w));
         },
 
         get listFiltersActive() {
