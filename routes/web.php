@@ -14,6 +14,7 @@ use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\EstimateController;
 use App\Http\Controllers\RegisterController;
 use App\Http\Controllers\SettingsController;
+use App\Http\Controllers\TaskAlertController;
 use App\Http\Controllers\Vendor\VendorAuthController;
 use App\Http\Controllers\Vendor\VendorPanelController;
 use Illuminate\Support\Facades\Route;
@@ -84,6 +85,11 @@ Route::middleware('auth:employee')->group(function () {
     // Логотип своей фирмы: нужен в шапке на каждой странице, поэтому вне
     // настроек — видеть его должны все сотрудники, а не только допущенные туда.
     Route::get('/company/logo', [CompanyProfileController::class, 'logo'])->name('company.logo');
+
+    // Уведомления о задачах — карточка живёт в общем макете, поэтому запрашиваются
+    // с любой страницы ERP и вне системы модулей (доступ проверяет сам контроллер).
+    Route::get('/task-alerts', [TaskAlertController::class, 'index'])->name('task-alerts.index');
+    Route::post('/task-alerts/seen', [TaskAlertController::class, 'seen'])->name('task-alerts.seen');
 
     // Страница руководителя (только роль manager, вне системы модулей)
     Route::prefix('dashboard')->name('dashboard.')->middleware('manager')->group(function () {

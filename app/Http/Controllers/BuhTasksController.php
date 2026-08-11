@@ -22,6 +22,14 @@ class BuhTasksController extends Controller
     private const COMPLETED_HISTORY_DAYS = 90;
 
     /**
+     * Сколько дней выполненное поручение висит во вкладке «Я поручил».
+     * Вкладка — про контроль текущего, а не архив: закрытое нужно лишь для того,
+     * чтобы поручивший успел заметить, что работа сделана. Срок написан на самой
+     * вкладке, менять число — только вместе с подписью в шаблоне.
+     */
+    private const ASSIGNED_DONE_DAYS = 30;
+
+    /**
      * Насколько «далеко» ушла задача — для выбора победителя среди логов одного слота.
      * Дубли остались от переназначения БП: прежний исполнитель закрыл период, новому
      * завёлся свой лог (до того, как отметка стала общей, см. logsForSlots()).
@@ -213,7 +221,7 @@ class BuhTasksController extends Controller
 
         // Все внеплановые задачи сотрудника (невыполненные висят, пока не закроют)
         $adhocs = BuhAdhocTask::where('employee_id', $employee->id)
-            ->with('client', 'documents')
+            ->with('client', 'documents', 'creator:id,full_name')
             ->get();
 
         // === Задачи бухгалтеров (этап 1): вкладка главбуха ===
@@ -426,6 +434,8 @@ class BuhTasksController extends Controller
                 'type'            => 'adhoc',
                 'is_custom'       => true,
                 'adhoc_id'        => $adhoc->id,
+                // Кто поручил — показываем, только когда задачу завёл кто-то другой
+                'assigned_by_name' => $adhoc->isAssignment() ? $adhoc->creator?->full_name : null,
                 'client_id'       => $adhoc->client_id,
                 'client_name'     => $adhoc->client?->name,
                 'year'            => $adhoc->year,
@@ -543,46 +553,58 @@ class BuhTasksController extends Controller
                     'children'        => [],
                 ];
             }
+        }
 
-            $reviewAdhoc = BuhAdhocTask::where('status', 'review')
+        // Внеплановые задачи на проверке — тем же блоком, но охват шире, чем «мои клиенты»:
+        // поручение принимает тот, кто поручил, даже если клиент чужой или не указан вовсе.
+        // Поэтому берём кандидатов (мои клиенты + мои поручения) и оставляем те, где
+        // проверяющий — действительно я, иначе показали бы кнопки, упирающиеся в 403.
+        $reviewAdhoc = BuhAdhocTask::where('status', 'review')
+            ->where('employee_id', '!=', $employee->id)
+            ->where(fn ($q) => $q
                 ->whereIn('client_id', $myClientIds)
-                ->where('employee_id', '!=', $employee->id)
-                ->with(['client:id,name', 'employee:id,full_name', 'documents'])
-                ->get();
-            foreach ($reviewAdhoc as $a) {
-                $tasks[] = [
-                    'uid'             => 'review_adhoc_' . $a->id,
-                    'type'            => 'adhoc',
-                    'is_custom'       => true,
-                    'adhoc_id'        => $a->id,
-                    'review_for_head' => true,
-                    'doer_name'       => $a->employee?->full_name,
-                    'client_id'       => $a->client_id,
-                    'client_name'     => $a->client?->name,
-                    'year'            => $a->year,
-                    'month'           => $a->month,
-                    'name'            => $a->name,
-                    'service_group'   => null,
-                    'cost'            => (float) $a->cost,
-                    'periodicity'     => null,
-                    'reporting_period' => null,
-                    'due_day'         => $a->due_day,
-                    'due_date'        => null,
-                    'comment'         => null,
-                    'description'     => $a->description,
-                    'requires_review' => $a->requires_review,
-                    'status'          => 'review',
-                    'elapsed_seconds' => $this->calcElapsed($a),
-                    'review_comment'  => $a->review_comment,
-                    'employee_comment' => $a->employee_comment,
-                    'quantity'        => 1,
-                    'allows_quantity' => false,
-                    'actual_quantity' => null,
-                    'requires_document' => false,
-                    'documents'       => $this->docs($a),
-                    'children'        => [],
-                ];
-            }
+                ->orWhere('created_by', $employee->id))
+            ->with(['client:id,name,responsible_employee_id', 'employee:id,full_name', 'creator:id,status', 'documents'])
+            ->get()
+            ->filter(fn ($a) => $this->reviewerForAdhoc($a) === $employee->id);
+
+        foreach ($reviewAdhoc as $a) {
+            $adhocDate = $a->due_day
+                ? CarbonImmutable::create($a->year, $a->month, min((int) $a->due_day, CarbonImmutable::create($a->year, $a->month, 1)->daysInMonth))
+                : null;
+            $tasks[] = [
+                'uid'             => 'review_adhoc_' . $a->id,
+                'type'            => 'adhoc',
+                'is_custom'       => true,
+                'adhoc_id'        => $a->id,
+                'review_for_head' => true,
+                'assigned_by_me'  => (int) $a->created_by === $employee->id, // «я поручил» — подпись в карточке
+                'doer_name'       => $a->employee?->full_name,
+                'client_id'       => $a->client_id,
+                'client_name'     => $a->client?->name,
+                'year'            => $a->year,
+                'month'           => $a->month,
+                'name'            => $a->name,
+                'service_group'   => null,
+                'cost'            => (float) $a->cost,
+                'periodicity'     => null,
+                'reporting_period' => null,
+                'due_day'         => $a->due_day,
+                'due_date'        => $adhocDate?->toDateString(),
+                'comment'         => null,
+                'description'     => $a->description,
+                'requires_review' => $a->requires_review,
+                'status'          => 'review',
+                'elapsed_seconds' => $this->calcElapsed($a),
+                'review_comment'  => $a->review_comment,
+                'employee_comment' => $a->employee_comment,
+                'quantity'        => 1,
+                'allows_quantity' => false,
+                'actual_quantity' => null,
+                'requires_document' => false,
+                'documents'       => $this->docs($a),
+                'children'        => [],
+            ];
         }
 
         // Вкладка «Выполненные» — история за последние 90 дней (read-only): плановые + внеплановые.
@@ -788,6 +810,35 @@ class BuhTasksController extends Controller
 
         $completedDays = self::COMPLETED_HISTORY_DAYS;
 
+        // === Вкладка «Я поручил» ===
+        // Задачи, которые сотрудник завёл ДРУГОМУ. Раньше они после создания исчезали
+        // с его экрана: свой список показывает только собственные задачи, а «Задачи
+        // бухгалтеров» — только по своим клиентам. Незакрытые висят все, выполненные —
+        // ещё ASSIGNED_DONE_DAYS дней, чтобы поручивший успел увидеть результат.
+        $assignedDoneFrom = $today->subDays(self::ASSIGNED_DONE_DAYS)->startOfDay();
+
+        $assignedTasks = BuhAdhocTask::where('created_by', $employee->id)
+            ->where('employee_id', '!=', $employee->id)
+            ->where(fn ($q) => $q
+                ->where('status', '!=', 'completed')
+                ->orWhere('completed_at', '>=', $assignedDoneFrom))
+            ->with(['client:id,name', 'employee:id,full_name'])
+            ->get()
+            ->map(fn (BuhAdhocTask $a) => $this->assignedRow($a, $todayStr))
+            ->sortBy([
+                fn ($a, $b) => ($a['status'] === 'completed' ? 1 : 0) <=> ($b['status'] === 'completed' ? 1 : 0), // закрытые вниз
+                fn ($a, $b) => ($a['due_date'] ?? '9999') <=> ($b['due_date'] ?? '9999'),                        // ближний срок выше
+            ])
+            ->values()
+            ->all();
+
+        // Сигнал на самой вкладке: работа, за которой нужно проследить.
+        $assignedAlertCount = collect($assignedTasks)
+            ->filter(fn ($t) => $t['is_overdue'] || $t['status'] === 'pending')
+            ->count();
+
+        $assignedDoneDays = self::ASSIGNED_DONE_DAYS;
+
         // Активные сотрудники — для назначения произвольной задачи (по умолчанию текущий)
         $employees = Employee::where('status', 'active')
             ->orderBy('full_name')
@@ -798,7 +849,7 @@ class BuhTasksController extends Controller
             ->map(fn ($s) => ['id' => $s->id, 'name' => $s->name])
             ->values()->toArray();
 
-        return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'reminders', 'reminderCounts', 'completed', 'completedDays', 'employees', 'catalog', 'teamTasks', 'teamMembers'));
+        return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'reminders', 'reminderCounts', 'completed', 'completedDays', 'employees', 'catalog', 'teamTasks', 'teamMembers', 'assignedTasks', 'assignedAlertCount', 'assignedDoneDays'));
     }
 
     // =============================================
@@ -1168,6 +1219,10 @@ class BuhTasksController extends Controller
 
         $adhoc = BuhAdhocTask::create([
             'employee_id'     => $assignee->id,
+            'created_by'      => $author->id, // поручение: попадёт во вкладку «Я поручил», ему же на проверку
+            // Задачу себе сотрудник и так только что видел — уведомляем лишь того, кому поручили
+            'assign_seen_at'  => $assignee->id === $author->id ? now() : null,
+            'rework_seen_at'  => now(),
             'client_id'       => $validated['client_id'] ?? null,
             'service_id'      => $validated['service_id'] ?? null,
             'name'            => $name,
@@ -1196,6 +1251,11 @@ class BuhTasksController extends Controller
             // Добавлять в текущий список — только если назначено себе
             'mine'    => $assignee->id === $author->id,
             'assignee_name' => $assignee->full_name,
+            // Поручение другому сотруднику — строка для вкладки «Я поручил»: она появляется
+            // там сразу, иначе задача пропадала бы с экрана до перезагрузки страницы.
+            'assigned' => $assignee->id === $author->id
+                ? null
+                : $this->assignedRow($adhoc->load('client:id,name', 'employee:id,full_name'), CarbonImmutable::now()->toDateString()),
             'task' => [
                 'uid'             => 'adhoc_' . $adhoc->id,
                 'type'            => 'adhoc',
@@ -1274,11 +1334,9 @@ class BuhTasksController extends Controller
             $task->paused_seconds += max(0, $now->timestamp - $task->resumed_at->timestamp);
         }
 
-        // Задача с проверкой уходит на ревью (3-дневный срок), НО если её выполнил сам главбух
-        // клиента — проверять некому, закрываем сразу (шаг 7.3).
-        $responsibleId = Client::whereKey($task->client_id)->value('responsible_employee_id');
-        $needsReview = $task->requires_review
-            && (int) $task->employee_id !== (int) $responsibleId;
+        // Задача с проверкой уходит на ревью (3-дневный срок), НО если принимать её некому
+        // (сам главбух клиента её и выполнил, клиент не указан) — закрываем сразу.
+        $needsReview = $task->requires_review && $this->reviewerForAdhoc($task) !== null;
 
         if ($needsReview) {
             $task->status            = 'review';
@@ -1303,6 +1361,61 @@ class BuhTasksController extends Controller
         $me = auth('employee')->user();
         abort_unless(
             $me->isAdmin() || Client::whereKey($clientId)->where('responsible_employee_id', $me->id)->exists(),
+            403,
+            'Нет прав на проверку этой задачи'
+        );
+    }
+
+    /**
+     * Кому уходит внеплановая задача на проверку.
+     *
+     * Поручение принимает тот, кто поручил: попросил — сам и прими. Если автор
+     * неизвестен (задачи до появления поля), уже не работает или завёл задачу себе —
+     * возвращаемся к прежнему адресату, главбуху клиента.
+     *
+     * NULL означает «принимать некому» — тогда галочка «с проверкой» ни к чему не ведёт
+     * и задача закрывается сразу. Так бывает, когда её выполнил сам главбух клиента или
+     * когда клиент вообще не указан (раньше такая задача зависала в статусе review
+     * без единого сотрудника, который мог бы её принять).
+     */
+    private function reviewerForAdhoc(BuhAdhocTask $task): ?int
+    {
+        if ($task->isAssignment()) {
+            $author = $task->creator;
+            if ($author && $author->status === 'active') {
+                return (int) $author->id;
+            }
+        }
+
+        if (!$task->client_id) {
+            return null;
+        }
+
+        $responsible = (int) ($task->client?->responsible_employee_id ?? 0);
+
+        return $responsible && $responsible !== (int) $task->employee_id ? $responsible : null;
+    }
+
+    /**
+     * Принять/вернуть внеплановую задачу может её проверяющий (см. reviewerForAdhoc) или admin.
+     *
+     * Отдельный случай — задача уже висит на проверке, а адресата у неё нет: так бывает,
+     * когда её выполнил сам главбух клиента (по нынешним правилам она бы закрылась сразу,
+     * но записи от прежних правил остались). Разгрести такую даём главбуху клиента —
+     * иначе она застрянет в review навсегда.
+     */
+    private function authorizeReviewAdhoc(BuhAdhocTask $task): void
+    {
+        $me       = auth('employee')->user();
+        $reviewer = $this->reviewerForAdhoc($task);
+
+        if ($me->isAdmin() || $reviewer === (int) $me->id) {
+            return;
+        }
+
+        abort_unless(
+            $reviewer === null && $task->client_id
+                && Client::whereKey($task->client_id)->where('responsible_employee_id', $me->id)->exists(),
             403,
             'Нет прав на проверку этой задачи'
         );
@@ -1339,6 +1452,7 @@ class BuhTasksController extends Controller
             'rework_count'   => $log->rework_count + 1,
             'reviewed_at'    => now(),
             'reviewed_by'    => auth('employee')->id(),
+            'rework_seen_at' => null, // новый возврат — уведомление исполнителю всплывает снова
         ]);
 
         return response()->json(['success' => true]);
@@ -1347,7 +1461,7 @@ class BuhTasksController extends Controller
     public function approveReviewAdhoc(BuhAdhocTask $task)
     {
         abort_if($task->status !== 'review', 422, 'Задача не на проверке');
-        $this->authorizeReview((int) $task->client_id);
+        $this->authorizeReviewAdhoc($task);
 
         $task->update([
             'status'       => 'completed',
@@ -1362,7 +1476,7 @@ class BuhTasksController extends Controller
     public function rejectReviewAdhoc(Request $request, BuhAdhocTask $task)
     {
         abort_if($task->status !== 'review', 422, 'Задача не на проверке');
-        $this->authorizeReview((int) $task->client_id);
+        $this->authorizeReviewAdhoc($task);
 
         $validated = $request->validate(
             ['comment' => ['required', 'string', 'max:2000']],
@@ -1375,6 +1489,7 @@ class BuhTasksController extends Controller
             'rework_count'   => $task->rework_count + 1,
             'reviewed_at'    => now(),
             'reviewed_by'    => auth('employee')->id(),
+            'rework_seen_at' => null, // новый возврат — уведомление исполнителю всплывает снова
         ]);
 
         return response()->json(['success' => true]);
@@ -1473,10 +1588,19 @@ class BuhTasksController extends Controller
      * Удаление произвольной (внеплановой) задачи. Плановые задачи из сметы удалять
      * нельзя — они генерируются расписанием; удаляем только BuhAdhocTask, созданную
      * вручную. Доступно исполнителю задачи (тому, в чьём списке она висит).
+     *
+     * Поручивший тоже может убрать задачу — но лишь пока к ней не приступили: после
+     * «Начать» удаление стёрло бы чужую работу вместе с таймером и документами.
      */
     public function destroyAdhoc(BuhAdhocTask $task)
     {
-        $this->authorizeAdhoc($task);
+        $me = auth('employee')->user();
+
+        if ((int) $task->created_by === (int) $me->id && $task->isAssignment()) {
+            abort_unless($task->status === 'pending', 422, 'Задачу уже взяли в работу — отозвать нельзя');
+        } else {
+            $this->authorizeAdhoc($task);
+        }
 
         // Файлы: и новые (documents), и оставшийся от старой схемы одиночный
         foreach ($task->documents as $doc) {
@@ -1569,6 +1693,32 @@ class BuhTasksController extends Controller
             'documents'       => $this->docs($log->load('documents')),
             'force_closed'        => (bool) $log->force_closed,
             'force_close_comment' => $log->force_close_comment,
+        ];
+    }
+
+    /** Строка вкладки «Я поручил». Одна форма для первой отрисовки и для только что созданной задачи. */
+    private function assignedRow(BuhAdhocTask $a, string $todayStr): array
+    {
+        $dueDate = $a->due_day
+            ? CarbonImmutable::create($a->year, $a->month, min((int) $a->due_day, CarbonImmutable::create($a->year, $a->month, 1)->daysInMonth))->toDateString()
+            : null;
+
+        return [
+            'adhoc_id'         => $a->id,
+            'name'             => $a->name,
+            'client_name'      => $a->client?->name,
+            'doer_name'        => $a->employee?->full_name,
+            'due_date'         => $dueDate,
+            'status'           => $a->status,
+            'requires_review'  => (bool) $a->requires_review,
+            'employee_comment' => $a->employee_comment,
+            'review_comment'   => $a->review_comment,
+            'completed_at'     => $a->completed_at?->toDateString(),
+            // Просрочка — только у незакрытых: у выполненной задержка уже неважна.
+            'is_overdue'       => $dueDate !== null && $dueDate < $todayStr
+                && !in_array($a->status, ['completed', 'review'], true),
+            // Отозвать можно, пока к работе не приступили — иначе сделанное пропадёт.
+            'can_revoke'       => $a->status === 'pending',
         ];
     }
 

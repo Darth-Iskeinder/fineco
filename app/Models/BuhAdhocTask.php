@@ -12,10 +12,11 @@ class BuhAdhocTask extends Model
     use BelongsToTenant;
 
     protected $fillable = [
-        'employee_id', 'client_id', 'service_id', 'name', 'description', 'cost',
+        'employee_id', 'created_by', 'client_id', 'service_id', 'name', 'description', 'cost',
         'year', 'month', 'due_day', 'status', 'requires_review',
         'started_at', 'resumed_at', 'paused_seconds', 'completed_at',
         'review_comment', 'rework_count', 'employee_comment', 'review_started_at', 'reviewed_at', 'reviewed_by',
+        'assign_seen_at', 'rework_seen_at',
         'document_path', 'document_name',
     ];
 
@@ -28,6 +29,8 @@ class BuhAdhocTask extends Model
         'completed_at'      => 'datetime',
         'review_started_at' => 'datetime',
         'reviewed_at'       => 'datetime',
+        'assign_seen_at'    => 'datetime',
+        'rework_seen_at'    => 'datetime',
         'paused_seconds'    => 'integer',
         'rework_count'      => 'integer',
     ];
@@ -50,6 +53,19 @@ class BuhAdhocTask extends Model
     public function reviewer(): BelongsTo
     {
         return $this->belongsTo(Employee::class, 'reviewed_by');
+    }
+
+    /** Кто поручил задачу. NULL у задач, созданных до появления поля. */
+    public function creator(): BelongsTo
+    {
+        return $this->belongsTo(Employee::class, 'created_by');
+    }
+
+    /** Поручение: задачу завёл один сотрудник, а делает другой. */
+    public function isAssignment(): bool
+    {
+        return $this->created_by !== null
+            && (int) $this->created_by !== (int) $this->employee_id;
     }
 
     public function documents(): MorphMany

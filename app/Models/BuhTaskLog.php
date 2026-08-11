@@ -13,7 +13,7 @@ class BuhTaskLog extends Model
 
     protected $fillable = [
         'employee_id', 'client_id', 'estimate_item_id',
-        'year', 'month', 'due_date', 'status', 'review_comment', 'rework_count', 'employee_comment',
+        'year', 'month', 'due_date', 'status', 'review_comment', 'rework_count', 'employee_comment', 'rework_seen_at',
         'force_closed', 'force_close_comment',
         'started_at', 'resumed_at', 'paused_seconds', 'completed_at',
         'reviewed_at', 'reviewed_by', 'review_started_at', 'actual_quantity',
@@ -27,6 +27,7 @@ class BuhTaskLog extends Model
         'completed_at' => 'datetime',
         'reviewed_at'  => 'datetime',
         'review_started_at' => 'datetime',
+        'rework_seen_at' => 'datetime',
         'paused_seconds' => 'integer',
         'actual_quantity' => 'integer',
         'rework_count' => 'integer',

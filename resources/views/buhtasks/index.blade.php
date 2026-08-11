@@ -72,7 +72,7 @@
     </template>
 </div>
 
-<div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($completed) }}, {{ json_encode($employees) }}, {{ $employee->id }}, {{ json_encode($catalog) }}, {{ json_encode($teamTasks) }}, {{ json_encode($teamMembers) }})" x-cloak>
+<div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($completed) }}, {{ json_encode($employees) }}, {{ $employee->id }}, {{ json_encode($catalog) }}, {{ json_encode($teamTasks) }}, {{ json_encode($teamMembers) }}, {{ json_encode($assignedTasks) }}, {{ (int) $assignedAlertCount }}, {{ (int) $assignedDoneDays }})" x-cloak>
 
     {{-- Шапка --}}
     <div class="flex items-center justify-between mb-2">
@@ -122,6 +122,19 @@
                               x-text="teamTasks.length"></span>
                     </button>
                 </template>
+                {{-- Вкладка «Я поручил»: задачи, заведённые другим сотрудникам. Видна тем, кто поручал. --}}
+                <template x-if="assignedTasks.length > 0">
+                    <button @click="viewMode = 'assigned'"
+                            :class="viewMode === 'assigned' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'"
+                            class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"/></svg>
+                        Я поручил
+                        {{-- Цифра — только то, за чем нужно проследить: просрочено или ещё не начато --}}
+                        <span x-show="assignedAlertCount > 0"
+                              class="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-semibold bg-rose-100 text-rose-600"
+                              x-text="assignedAlertCount"></span>
+                    </button>
+                </template>
             </div>
         </div>
     </div>
@@ -161,6 +174,22 @@
                     <span class="text-xs opacity-80" x-text="c.count"></span>
                 </button>
             </template>
+
+            {{-- «Поручено мне» — рядом со срочностью, тем же поведением: повторное нажатие
+                 снимает фильтр. Появляется только когда такие задачи есть: у большинства
+                 сотрудников их нет, и пустая кнопка только занимала бы место. --}}
+            <button type="button" x-show="assignedToMeCount > 0"
+                    @click="assignedOnly = !assignedOnly"
+                    {{-- Цвет свой, не как у срочности: красный и оранжевый уже заняты
+                         просрочкой и «сегодня», а это про происхождение задачи, не про срок. --}}
+                    :class="assignedOnly
+                        ? 'bg-indigo-600 text-white border-indigo-600'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'"
+                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-sm font-medium transition-colors whitespace-nowrap">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                <span>Поручено мне</span>
+                <span class="text-xs opacity-80" x-text="assignedToMeCount"></span>
+            </button>
         </div>
 
         {{-- Действие: фильтр по состоянию из колонки «Действия» (не начаты / на паузе и т.д.). --}}
@@ -267,7 +296,7 @@
     </div>
 
     {{-- Нет задач --}}
-    <div x-show="viewMode !== 'completed' && viewMode !== 'team' && tasks.length === 0"
+    <div x-show="viewMode !== 'completed' && viewMode !== 'team' && viewMode !== 'assigned' && tasks.length === 0"
          class="bg-white rounded-2xl border border-slate-200/50 shadow-sm px-6 py-16 text-center">
         <div class="w-14 h-14 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg class="w-7 h-7 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
@@ -281,7 +310,7 @@
         Нет задач по выбранным фильтрам.
     </div>
 
-    <div x-show="viewMode === 'completed' || viewMode === 'team' || (viewMode === 'checklist' && tasks.length > 0) || (viewMode === 'list' && visibleCount > 0)"
+    <div x-show="viewMode === 'completed' || viewMode === 'team' || viewMode === 'assigned' || (viewMode === 'checklist' && tasks.length > 0) || (viewMode === 'list' && visibleCount > 0)"
          class="bg-white rounded-2xl border border-slate-200/50 shadow-sm overflow-hidden">
 
         {{-- ===== РЕЖИМ СПИСОК ===== --}}
@@ -385,6 +414,12 @@
                                     </span>
                                     <span x-show="task.status === 'rework'"
                                           class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-rose-100 text-rose-700">на доработку</span>
+                                    {{-- Задачу завёл не сам исполнитель, а кто-то другой — видно, с кого спрос --}}
+                                    <span x-show="task.assigned_by_name"
+                                          class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                                        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                                        <span x-text="'поручил: ' + task.assigned_by_name"></span>
+                                    </span>
                                 </div>
                             </td>
 
@@ -803,6 +838,105 @@
         </div>
         </template>
 
+        {{-- ===== РЕЖИМ «Я ПОРУЧИЛ» ===== --}}
+        {{-- Задачи, заведённые другим сотрудникам. Поручивший видит стадию работы, принимает
+             её (если ставил галочку «с проверкой») и может отозвать, пока к ней не приступили. --}}
+        <template x-if="viewMode === 'assigned'">
+        <div>
+            <div class="px-6 py-3 border-b border-slate-100 flex items-center gap-2 text-sm text-slate-500 bg-slate-50/60">
+                <svg class="w-4 h-4 flex-shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <span>
+                    Задачи, которые вы поручили другим сотрудникам.
+                    Выполненные хранятся здесь <span x-text="assignedDoneDays"></span> дней, затем скрываются.
+                </span>
+            </div>
+            <template x-if="assignedTasks.length === 0">
+                <div class="px-6 py-10 text-center text-sm text-slate-400">Поручений нет.</div>
+            </template>
+            <div class="divide-y divide-slate-100">
+                <template x-for="t in assignedTasks" :key="t.adhoc_id">
+                    <div class="flex items-center gap-3 px-6 py-3" :class="t.status === 'completed' ? 'opacity-60' : ''">
+                        {{-- Статус-иконка --}}
+                        <span class="flex-shrink-0 w-8 h-8 inline-flex items-center justify-center rounded-full"
+                              :class="{
+                                  'bg-slate-100 text-slate-400':     t.status === 'pending' && !t.is_overdue,
+                                  'bg-rose-50 text-rose-500':        t.is_overdue || t.status === 'rework',
+                                  'bg-emerald-50 text-emerald-500':  t.status === 'running' || t.status === 'completed',
+                                  'bg-amber-50 text-amber-500':      t.status === 'paused',
+                                  'bg-sky-50 text-sky-500':          t.status === 'review',
+                              }">
+                            <svg x-show="t.status !== 'completed'" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                            <svg x-show="t.status === 'completed'" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                        </span>
+
+                        <div class="flex-1 min-w-0">
+                            <p class="text-sm font-medium text-slate-700" x-text="t.name"></p>
+                            <p class="text-xs text-slate-400 truncate">
+                                <span x-text="t.client_name || 'Без компании'"></span>
+                                <span x-show="t.employee_comment" x-text="' · ' + t.employee_comment"></span>
+                            </p>
+                        </div>
+
+                        {{-- Исполнитель --}}
+                        <span class="hidden sm:inline-flex items-center gap-1.5 text-xs text-slate-500 whitespace-nowrap">
+                            <svg class="w-3.5 h-3.5 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                            <span x-text="t.doer_name || '—'"></span>
+                        </span>
+
+                        {{-- Срок --}}
+                        <span class="text-xs whitespace-nowrap"
+                              :class="t.is_overdue ? 'text-rose-500 font-medium' : 'text-slate-400'"
+                              x-text="t.due_date ? 'до ' + fmtDue(t.due_date) : 'без срока'"></span>
+
+                        {{-- Статус --}}
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap"
+                              :class="t.is_overdue ? 'bg-rose-100 text-rose-700' : {
+                                  'bg-slate-100 text-slate-500':     t.status === 'pending',
+                                  'bg-emerald-100 text-emerald-700': t.status === 'running',
+                                  'bg-amber-100 text-amber-700':     t.status === 'paused',
+                                  'bg-sky-100 text-sky-700':         t.status === 'review',
+                                  'bg-rose-100 text-rose-700':       t.status === 'rework',
+                                  'bg-emerald-50 text-emerald-600':  t.status === 'completed',
+                              }"
+                              x-text="t.is_overdue
+                                  ? 'Просрочена'
+                                  : ({pending: 'Не начата', running: 'В работе', paused: 'Пауза', review: 'На проверке', rework: 'На доработке', completed: 'Выполнено'}[t.status] || t.status)"></span>
+
+                        {{-- Действия --}}
+                        <span class="inline-flex items-center gap-1.5">
+                            {{-- Проверка: принять / вернуть. Только у задач с галочкой «с проверкой» --}}
+                            <template x-if="t.status === 'review'">
+                                <span class="inline-flex items-center gap-1.5">
+                                    <button @click.prevent="approveAssigned(t)"
+                                            :disabled="t.loading"
+                                            class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors">
+                                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                                        Принять
+                                    </button>
+                                    <button @click.prevent="openAssignedReject(t)"
+                                            :disabled="t.loading"
+                                            class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 text-rose-600 border border-rose-200 text-xs font-medium rounded-lg hover:bg-rose-100 disabled:opacity-50 transition-colors">
+                                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a5 5 0 015 5v2M3 10l4-4M3 10l4 4"/></svg>
+                                        Вернуть
+                                    </button>
+                                </span>
+                            </template>
+
+                            {{-- Отозвать — пока задачу не взяли в работу --}}
+                            <button x-show="t.can_revoke" @click.prevent="askRevokeAssigned(t)"
+                                    :disabled="t.loading"
+                                    class="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-slate-400 hover:text-rose-600 text-xs font-medium rounded-lg hover:bg-rose-50 disabled:opacity-50 transition-colors"
+                                    title="Отозвать поручение">
+                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3"/></svg>
+                                Отозвать
+                            </button>
+                        </span>
+                    </div>
+                </template>
+            </div>
+        </div>
+        </template>
+
     </div>
 
     {{-- ===== МОДАЛ СОЗДАНИЯ ЗАДАЧИ ===== --}}
@@ -1019,6 +1153,84 @@
                         :disabled="!reviewReject.comment.trim()"
                         class="flex-1 py-2.5 px-4 bg-rose-600 text-white text-sm font-medium rounded-xl hover:bg-rose-700 disabled:opacity-50 transition-colors">
                     Вернуть
+                </button>
+            </div>
+        </div>
+    </div>
+
+    {{-- ===== МОДАЛ ВОЗВРАТА ПОРУЧЕНИЯ (вкладка «Я поручил») ===== --}}
+    <div x-show="assignedReject.show"
+         x-transition:enter="ease-out duration-200"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="ease-in duration-150"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         class="fixed inset-0 z-[60] flex items-center justify-center bg-black/40"
+         @click.self="assignedReject = { show: false, task: null, comment: '' }"
+         @keydown.escape.window="assignedReject = { show: false, task: null, comment: '' }"
+         style="display:none">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+            <div class="flex items-start gap-4">
+                <div class="flex-shrink-0 w-11 h-11 rounded-full bg-rose-100 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-rose-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a5 5 0 015 5v2M3 10l4-4M3 10l4 4"/></svg>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <h3 class="text-base font-semibold text-slate-800">Вернуть на доработку</h3>
+                    <p class="mt-1 text-sm text-slate-500">
+                        Задача вернётся исполнителю
+                        <span class="font-medium text-slate-700" x-text="assignedReject.task?.doer_name || ''"></span>
+                        со статусом «на доработку». Напишите, что нужно исправить.
+                    </p>
+                </div>
+            </div>
+            <textarea x-model="assignedReject.comment"
+                      rows="3"
+                      placeholder="Что исправить…"
+                      class="mt-4 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-rose-200 focus:border-rose-300"></textarea>
+            <div class="flex gap-3 mt-5">
+                <button @click="assignedReject = { show: false, task: null, comment: '' }"
+                        class="flex-1 py-2.5 px-4 border border-slate-200 text-slate-600 text-sm font-medium rounded-xl hover:bg-slate-50 transition-colors">
+                    Отмена
+                </button>
+                <button @click="confirmAssignedReject()"
+                        :disabled="!assignedReject.comment.trim()"
+                        class="flex-1 py-2.5 px-4 bg-rose-600 text-white text-sm font-medium rounded-xl hover:bg-rose-700 disabled:opacity-50 transition-colors">
+                    Вернуть
+                </button>
+            </div>
+        </div>
+    </div>
+
+    {{-- ===== МОДАЛ ОТЗЫВА ПОРУЧЕНИЯ ===== --}}
+    <div x-show="assignedRevoke.show"
+         x-transition:enter="ease-out duration-200"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="ease-in duration-150"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         class="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4"
+         @click.self="assignedRevoke = { show: false, task: null }"
+         @keydown.escape.window="assignedRevoke = { show: false, task: null }"
+         style="display:none">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">
+            <h3 class="text-base font-semibold text-slate-800">Отозвать поручение?</h3>
+            <p class="text-sm text-slate-500 mt-1.5">
+                Задача
+                <span class="font-medium text-slate-700" x-text="assignedRevoke.task?.name || ''"></span>
+                исчезнет из списка исполнителя
+                <span class="font-medium text-slate-700" x-text="assignedRevoke.task?.doer_name || ''"></span>.
+                Восстановить её будет нельзя.
+            </p>
+            <div class="mt-5 flex justify-end gap-2">
+                <button @click="assignedRevoke = { show: false, task: null }"
+                        class="px-4 py-2 text-sm text-slate-600 font-medium rounded-lg hover:bg-slate-100 transition-colors">
+                    Отмена
+                </button>
+                <button @click="confirmRevokeAssigned()"
+                        class="inline-flex items-center gap-1.5 px-4 py-2 bg-rose-600 text-white text-sm font-medium rounded-lg hover:bg-rose-700 transition-colors">
+                    Отозвать
                 </button>
             </div>
         </div>
@@ -1748,7 +1960,7 @@
 </div>
 
 <script>
-function buhTasks(initialTasks, year, month, allClients, completed, employees, currentEmployeeId, catalog, teamTasks, teamMembers) {
+function buhTasks(initialTasks, year, month, allClients, completed, employees, currentEmployeeId, catalog, teamTasks, teamMembers, assignedTasks, assignedAlertCount, assignedDoneDays) {
     // File-объекты держим вне реактивного state — Alpine оборачивает объекты в Proxy,
     // что ломает внутренние методы File/Blob при передаче в FormData
     const pendingFiles = new Map();
@@ -1798,10 +2010,17 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         teamTasks: teamTasks || [],
         teamMembers: teamMembers || [],
         teamFilter: 'all', // фильтр по бухгалтеру: 'all' | employee_id
+        // Вкладка «Я поручил»: задачи, заведённые другим сотрудникам
+        assignedTasks: assignedTasks || [],
+        assignedAlertCount: assignedAlertCount || 0,
+        assignedDoneDays: assignedDoneDays || 30,
+        assignedReject: { show: false, task: null, comment: '' },
+        assignedRevoke: { show: false, task: null },
         todayStr: new Date().toLocaleDateString('en-CA'), // YYYY-MM-DD в локальной зоне (подсветка просрочки)
         listSearch: '', // поиск по активному списку: название, компания, филиал, отчётный период
         dueFilter: 'all', // срок: 'all' | 'overdue' | 'today' (только вкладка «Список»)
         statusFilter: 'all', // фильтр колонки «Действия»: 'all' | 'pending' | 'paused' | 'running' | 'rework'
+        assignedOnly: false, // «Поручено мне»: только задачи, заведённые другим сотрудником
         sortBy: null, // null | 'due' (срок/периодичность) | 'period' (отчётный период)
         sortDir: null, // null = исходный порядок | 'asc' | 'desc'
         visibleLimit: 20, // бесконечная прокрутка списка: сколько строк отрисовано (по 20)
@@ -1867,6 +2086,13 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         // по НДС у Ромашки, хотя эти слова лежат в разных колонках. Порядок не важен,
         // лишние пробелы не мешают. Плата — точную фразу с пробелом искать нельзя
         // («отчёт по» = «отчёт» И «по»), но для этого списка так удобнее.
+        // Фильтр «Поручено мне»: задачи, которые завёл не сам исполнитель. Их легко
+        // не заметить среди плановых, поэтому им отдельная кнопка, а не пункт в списке
+        // состояний — там про стадию работы, а это про происхождение задачи.
+        matchesAssigned(task) {
+            return !this.assignedOnly || !!task.assigned_by_name;
+        },
+
         matchesSearch(task) {
             const words = this.listSearch.toLowerCase().split(/\s+/).filter(Boolean);
             if (words.length === 0) return true;
@@ -1879,7 +2105,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
 
         get listFiltersActive() {
             return this.clientFilter !== 'all' || this.dueFilter !== 'all'
-                || this.statusFilter !== 'all' || this.listSearch !== '';
+                || this.statusFilter !== 'all' || this.listSearch !== '' || this.assignedOnly;
         },
 
         resetListFilters() {
@@ -1887,6 +2113,12 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             this.dueFilter = 'all';
             this.statusFilter = 'all';
             this.listSearch = '';
+            this.assignedOnly = false;
+        },
+
+        /** Сколько активных задач мне поручили — цифра на кнопке фильтра. */
+        get assignedToMeCount() {
+            return this.tasks.filter(t => t.status !== 'completed' && t.assigned_by_name).length;
         },
 
         // Счётчики срочности: для кнопок фильтра и заголовков групп. Считаем по активным
@@ -1896,7 +2128,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             const c = { all: 0, overdue: 0, today: 0, rest: 0 };
             for (const t of this.tasks) {
                 if (t.status === 'completed') continue;
-                if (!this.matchesFilter(t) || !this.matchesStatus(t) || !this.matchesSearch(t)) continue;
+                if (!this.matchesFilter(t) || !this.matchesStatus(t) || !this.matchesSearch(t) || !this.matchesAssigned(t)) continue;
                 c.all++;
                 const u = this.urgency(t);
                 if (u === 'overdue') c.overdue++;
@@ -1962,7 +2194,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             const c = { pending: 0, paused: 0, running: 0, review: 0, rework: 0 };
             for (const t of this.tasks) {
                 if (t.status === 'completed') continue;
-                if (!this.matchesFilter(t) || !this.matchesDue(t) || !this.matchesSearch(t)) continue;
+                if (!this.matchesFilter(t) || !this.matchesDue(t) || !this.matchesSearch(t) || !this.matchesAssigned(t)) continue;
                 if (c[t.status] !== undefined) c[t.status]++;
             }
             return c;
@@ -2259,7 +2491,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             // Считаем только активные строки (без выполненных) — как их и рисует visibleTasks,
             // иначе сентинел бесконечной прокрутки не «догрузит» до реального конца списка.
             return this.tasks.filter(t => t.status !== 'completed' && this.matchesFilter(t)
-                && this.matchesDue(t) && this.matchesStatus(t) && this.matchesSearch(t)).length;
+                && this.matchesDue(t) && this.matchesStatus(t) && this.matchesSearch(t) && this.matchesAssigned(t)).length;
         },
 
         // Окно бесконечной прокрутки: первые visibleLimit задач, прошедших фильтр,
@@ -2270,13 +2502,13 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         get visibleTasks() {
             // _taskVer в ключе: при закрытии задачи (status → completed) она сразу пропадает
             // из активного списка и уходит во вкладку «Выполненные» — кэш пересобирается.
-            const key = this.clientFilter + '|' + this.dueFilter + '|' + this.statusFilter + '|' + this.listSearch + '|' + this.visibleLimit + '|' + this.sortBy + '|' + this.sortDir + '|' + this.tasks.length + '|' + this._taskVer;
+            const key = this.clientFilter + '|' + this.dueFilter + '|' + this.statusFilter + '|' + this.listSearch + '|' + this.assignedOnly + '|' + this.visibleLimit + '|' + this.sortBy + '|' + this.sortDir + '|' + this.tasks.length + '|' + this._taskVer;
             if (visibleCache.key !== key) {
                 const idxs = [];
                 for (let i = 0; i < this.tasks.length; i++) {
                     const task = this.tasks[i];
                     if (task.status === 'completed') continue; // выполненные — только во вкладке «Выполненные»
-                    if (!this.matchesFilter(task) || !this.matchesDue(task) || !this.matchesStatus(task) || !this.matchesSearch(task)) continue;
+                    if (!this.matchesFilter(task) || !this.matchesDue(task) || !this.matchesStatus(task) || !this.matchesSearch(task) || !this.matchesAssigned(task)) continue;
                     idxs.push(i);
                 }
 
@@ -2822,6 +3054,76 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             this._taskVer++; // состав задач изменился → кэши списка/чеклиста пересчитаются
         },
 
+        // ===== Вкладка «Я поручил» =====
+        // Поручение с галочкой «с проверкой» приходит на проверку сюда же, поэтому «Принять»
+        // и «Вернуть» доступны прямо на вкладке. Та же задача видна и в основном списке
+        // (строка review_for_head) — после действия убираем её оттуда, чтобы списки не разошлись.
+        async approveAssigned(t) {
+            if (t.loading) return;
+            t.loading = true;
+            const data = await this.post(`/buhtasks/adhoc/${t.adhoc_id}/review-approve`);
+            t.loading = false;
+            if (!data.success) return;
+
+            t.status = 'completed';
+            t.is_overdue = false;
+            t.can_revoke = false;
+            this.dropAssignedFromList(t.adhoc_id);
+            this.recalcAssignedAlert();
+        },
+        openAssignedReject(t) {
+            this.assignedReject = { show: true, task: t, comment: '' };
+        },
+        async confirmAssignedReject() {
+            const comment = (this.assignedReject.comment || '').trim();
+            if (!comment) return;
+            const t = this.assignedReject.task;
+            t.loading = true;
+            const data = await this.post(`/buhtasks/adhoc/${t.adhoc_id}/review-reject`, { comment });
+            t.loading = false;
+            this.assignedReject = { show: false, task: null, comment: '' };
+            if (!data.success) return;
+
+            t.status = 'rework';
+            t.review_comment = comment;
+            this.dropAssignedFromList(t.adhoc_id);
+            this.recalcAssignedAlert();
+        },
+
+        askRevokeAssigned(t) {
+            this.assignedRevoke = { show: true, task: t };
+        },
+        async confirmRevokeAssigned() {
+            const t = this.assignedRevoke.task;
+            this.assignedRevoke = { show: false, task: null };
+            if (!t || t.loading) return;
+            t.loading = true;
+            const data = await this.post(`/buhtasks/adhoc/${t.adhoc_id}/delete`);
+            t.loading = false;
+            if (!data.success) return;
+
+            this.assignedTasks = this.assignedTasks.filter(x => x.adhoc_id !== t.adhoc_id);
+            this.recalcAssignedAlert();
+            // Отозвали последнее поручение — вкладка исчезает, уводим со ставшего пустым экрана
+            if (this.assignedTasks.length === 0) this.viewMode = 'list';
+        },
+
+        /** Убирает строку задачи из основного списка (она попадала туда как «на проверке»). */
+        dropAssignedFromList(adhocId) {
+            const uid = 'review_adhoc_' + adhocId;
+            if (!this.tasks.some(x => x.uid === uid)) return;
+            const row = this.tasks.find(x => x.uid === uid);
+            if (this.taskModalIdx !== null && this.tasks[this.taskModalIdx] === row) this.taskModalIdx = null;
+            this.tasks = this.tasks.filter(x => x.uid !== uid);
+            this._taskVer++;
+        },
+
+        /** Цифра на вкладке: просроченные и ещё не начатые. */
+        recalcAssignedAlert() {
+            this.assignedAlertCount = this.assignedTasks
+                .filter(t => t.is_overdue || t.status === 'pending').length;
+        },
+
         // Удаление произвольной (внеплановой) задачи. Доступно только для is_custom —
         // кнопка в модалке показывается лишь у таких задач.
         async deleteTask() {
@@ -3047,6 +3349,11 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                     // unshift (в начало), чтобы созданная задача сразу попадала в видимое окно пагинации.
                     if (data.mine === undefined || data.mine) {
                         this.tasks.unshift(data.task);
+                    }
+                    // Поручение другому — сразу во вкладку «Я поручил», чтобы оно не пропало из виду
+                    if (data.assigned) {
+                        this.assignedTasks.unshift(data.assigned);
+                        this.recalcAssignedAlert();
                     }
                     this.resetNewTask();
                     this.showCreateModal = false;

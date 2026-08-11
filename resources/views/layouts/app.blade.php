@@ -371,6 +371,136 @@
         </div>
     </div>
 
+    {{-- ===== УВЕДОМЛЕНИЯ О ЗАДАЧАХ =====
+         Карточка снизу справа на любой странице ERP: сотруднику поручили задачу или
+         вернули работу на доработку. Такое легко пропустить — поручённая задача просто
+         появляется среди прочих, а возврат виден, только если открыть список.
+         Висит, пока не нажать «Понятно»; отметка о просмотре хранится на сервере,
+         поэтому с другого компьютера уведомление заново не всплывёт. --}}
+    {{-- style="display:none" (а не x-cloak): у проекта нет правила [x-cloak], а Alpine
+         тянется с CDN — глобальное правило прятало бы содержимое страниц, не дождавшись его. --}}
+    <div x-data="taskAlerts()" x-init="init()" x-show="items.length > 0" style="display:none"
+         class="fixed bottom-4 right-4 z-[70] w-full max-w-sm"
+         x-transition:enter="ease-out duration-300"
+         x-transition:enter-start="opacity-0 translate-y-4"
+         x-transition:enter-end="opacity-100 translate-y-0">
+        <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+            <div class="flex items-start gap-3 px-5 pt-4 pb-3">
+                <span class="flex-shrink-0 w-9 h-9 rounded-full bg-indigo-100 text-indigo-600 inline-flex items-center justify-center">
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1h6z"/></svg>
+                </span>
+                <div class="flex-1 min-w-0">
+                    <p class="text-sm font-semibold text-slate-800" x-text="headline"></p>
+                    <p class="text-xs text-slate-400 mt-0.5">Появится снова, пока не нажмёте «Понятно»</p>
+                </div>
+                <button @click="dismiss()" class="text-slate-300 hover:text-slate-500 transition-colors" title="Понятно">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+
+            {{-- Список: не больше пяти строк, остальное свёрнуто в «и ещё N» --}}
+            <div class="px-5 pb-1 max-h-64 overflow-y-auto divide-y divide-slate-100">
+                <template x-for="a in items.slice(0, 5)" :key="a.key">
+                    <div class="py-2.5">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium"
+                                  :class="a.kind === 'rework' ? 'bg-rose-100 text-rose-700' : 'bg-indigo-100 text-indigo-700'"
+                                  x-text="a.kind === 'rework' ? 'на доработку' : 'поручено'"></span>
+                            <span class="text-sm font-medium text-slate-700" x-text="a.name"></span>
+                        </div>
+                        <p class="text-xs text-slate-400 mt-0.5">
+                            <span x-text="a.client_name || 'Без компании'"></span>
+                            <span x-show="a.due_date" x-text="' · до ' + fmt(a.due_date)"></span>
+                            <span x-show="a.from_name" x-text="' · ' + (a.kind === 'rework' ? 'вернул: ' : 'поручил: ') + a.from_name"></span>
+                        </p>
+                        {{-- Что именно исправить — главное в возврате, показываем сразу --}}
+                        <p x-show="a.comment" class="text-xs text-rose-600 mt-1 line-clamp-2" x-text="a.comment"></p>
+                    </div>
+                </template>
+                <p x-show="items.length > 5" class="py-2 text-xs text-slate-400"
+                   x-text="'и ещё ' + (items.length - 5)"></p>
+            </div>
+
+            <div class="flex gap-2 px-5 py-3 bg-slate-50/70 border-t border-slate-100">
+                <a href="{{ route('buhtasks.index') }}" @click="dismiss()"
+                   class="flex-1 text-center py-2 px-3 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 transition-colors">
+                    Открыть задачи
+                </a>
+                <button @click="dismiss()"
+                        class="flex-1 py-2 px-3 border border-slate-200 text-slate-600 text-sm font-medium rounded-xl hover:bg-white transition-colors">
+                    Понятно
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function taskAlerts() {
+            return {
+                items: [],
+
+                init() {
+                    this.load();
+                    // Тихий опрос: иначе сидящий весь день на одной странице узнает о задаче
+                    // только после перезагрузки. Две минуты — незаметно для сервера.
+                    setInterval(() => this.load(), 120000);
+                },
+
+                get headline() {
+                    const n = this.items.length;
+                    if (n === 0) return '';
+                    if (n === 1) {
+                        return this.items[0].kind === 'rework'
+                            ? 'Задачу вернули на доработку'
+                            : 'Вам поручили задачу';
+                    }
+                    // Больше одной — поводы не перечисляем, они видны в списке ниже.
+                    // Единственное число сюда не попадает (n === 1 обработан выше), а больше
+                    // MAX_ITEMS сервер не отдаёт, так что вариантов склонения ровно два.
+                    const word = [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? 'задачи' : 'задач';
+                    return `${n} ${word} требуют внимания`;
+                },
+
+                fmt(date) {
+                    const [y, m, d] = date.split('-');
+                    return `${d}.${m}`;
+                },
+
+                async load() {
+                    try {
+                        const r = await fetch('{{ route('task-alerts.index') }}', {
+                            headers: { 'Accept': 'application/json' },
+                        });
+                        if (!r.ok) return;
+                        const data = await r.json();
+                        this.items = data.items || [];
+                    } catch (e) {
+                        // Сеть отвалилась — молча ждём следующего опроса
+                    }
+                },
+
+                async dismiss() {
+                    const keys = this.items.map(a => a.key);
+                    if (keys.length === 0) return;
+                    this.items = []; // прячем сразу, не дожидаясь ответа
+                    try {
+                        await fetch('{{ route('task-alerts.seen') }}', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Accept': 'application/json',
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+                            },
+                            body: JSON.stringify({ keys }),
+                        });
+                    } catch (e) {
+                        // Не дошло — уведомление вернётся при следующем опросе, это и нужно
+                    }
+                },
+            };
+        }
+    </script>
+
     <!-- Alpine.js for dropdown -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </body>
