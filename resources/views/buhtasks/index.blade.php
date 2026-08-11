@@ -950,7 +950,9 @@
          class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
          @click.self="showCreateModal = false"
          style="display:none">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+        {{-- max-h + прокрутка: описание из каталога бывает длинным, без этого форма
+             вырастала за пределы экрана и кнопки сохранения уезжали из виду. --}}
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 max-h-[85vh] overflow-y-auto">
             <div class="flex items-center justify-between mb-5">
                 <h3 class="text-lg font-semibold text-slate-800">Добавить задачу</h3>
                 <button @click="showCreateModal = false" class="text-slate-400 hover:text-slate-600 transition-colors">
@@ -1024,7 +1026,9 @@
                         {{-- Описание услуги: правится в каталоге, здесь только показывается --}}
                         <div>
                             <label class="block text-sm font-medium text-slate-700 mb-1.5">Описание из каталога</label>
-                            <div class="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm whitespace-pre-line"
+                            {{-- Своя прокрутка у плашки: длинное описание не должно
+                                 оттеснять поля формы, а длинное слово — распирать её вширь --}}
+                            <div class="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm whitespace-pre-line break-words max-h-32 overflow-y-auto"
                                  :class="pickedService.description ? 'text-slate-600' : 'text-slate-400 italic'"
                                  x-text="pickedService.description || 'У этой услуги описание не заполнено'"></div>
                         </div>
@@ -1036,11 +1040,11 @@
                                     Подпункты
                                     <span class="text-slate-400 font-normal" x-text="'(' + pickedService.items.length + ')'"></span>
                                 </label>
-                                <ul class="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-600 space-y-1">
+                                <ul class="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-600 space-y-1 max-h-40 overflow-y-auto">
                                     <template x-for="(item, i) in pickedService.items" :key="i">
                                         <li class="flex items-start gap-2">
                                             <span class="mt-1.5 w-1 h-1 rounded-full bg-slate-400 flex-shrink-0"></span>
-                                            <span x-text="item"></span>
+                                            <span class="break-words min-w-0" x-text="item"></span>
                                         </li>
                                     </template>
                                 </ul>
