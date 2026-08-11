@@ -995,7 +995,7 @@
                                 <option :value="s.id" x-text="s.name"></option>
                             </template>
                         </select>
-                        <p class="text-xs text-slate-400 mt-1">Из каталога берётся только название — остальное настраивается ниже.</p>
+                        <p class="text-xs text-slate-400 mt-1">Название, описание и подпункты возьмутся из услуги.</p>
                     </div>
 
                     {{-- Своя: произвольное название --}}
@@ -1008,8 +1008,9 @@
                     </div>
                 </div>
 
-                {{-- Описание (необязательно) --}}
-                <div>
+                {{-- Описание. Своя задача — обычное поле; из каталога — текст услуги
+                     только для чтения, а своё автор дописывает в «Уточнении». --}}
+                <div x-show="newTask.source === 'custom'">
                     <label class="block text-sm font-medium text-slate-700 mb-1.5">
                         Описание <span class="text-slate-400 font-normal">(необязательно)</span>
                     </label>
@@ -1017,6 +1018,47 @@
                               placeholder="Детали задачи для сотрудника"
                               class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50"></textarea>
                 </div>
+
+                <template x-if="newTask.source === 'catalog' && pickedService">
+                    <div class="space-y-3">
+                        {{-- Описание услуги: правится в каталоге, здесь только показывается --}}
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1.5">Описание из каталога</label>
+                            <div class="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm whitespace-pre-line"
+                                 :class="pickedService.description ? 'text-slate-600' : 'text-slate-400 italic'"
+                                 x-text="pickedService.description || 'У этой услуги описание не заполнено'"></div>
+                        </div>
+
+                        {{-- Подпункты: сразу видно, что задачу не закрыть, пока их не отметят --}}
+                        <template x-if="pickedService.items && pickedService.items.length > 0">
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-1.5">
+                                    Подпункты
+                                    <span class="text-slate-400 font-normal" x-text="'(' + pickedService.items.length + ')'"></span>
+                                </label>
+                                <ul class="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-600 space-y-1">
+                                    <template x-for="(item, i) in pickedService.items" :key="i">
+                                        <li class="flex items-start gap-2">
+                                            <span class="mt-1.5 w-1 h-1 rounded-full bg-slate-400 flex-shrink-0"></span>
+                                            <span x-text="item"></span>
+                                        </li>
+                                    </template>
+                                </ul>
+                                <p class="text-xs text-slate-400 mt-1">Задачу нельзя будет завершить, пока не отмечены все подпункты.</p>
+                            </div>
+                        </template>
+
+                        {{-- Уточнение автора: описание из каталога общее, а деталь бывает разовой --}}
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 mb-1.5">
+                                Уточнение <span class="text-slate-400 font-normal">(необязательно)</span>
+                            </label>
+                            <textarea x-model="newTask.clarification" rows="2"
+                                      placeholder="Что важно именно в этот раз — период, срочность, нюанс"
+                                      class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50"></textarea>
+                        </div>
+                    </div>
+                </template>
 
                 {{-- На проверку — тогл как в попапе БП --}}
                 <div class="flex items-center justify-between gap-3">
@@ -1502,6 +1544,13 @@
                             <p class="text-sm text-slate-600 whitespace-pre-line" x-text="tasks[taskModalIdx].description"></p>
                         </div>
                     </template>
+                    {{-- Что автор задачи дописал к описанию из каталога — про этот конкретный раз --}}
+                    <template x-if="tasks[taskModalIdx].clarification">
+                        <div>
+                            <p class="text-xs font-semibold text-amber-600 uppercase tracking-wider mb-0.5">Уточнение</p>
+                            <p class="text-sm text-slate-700 whitespace-pre-line" x-text="tasks[taskModalIdx].clarification"></p>
+                        </div>
+                    </template>
                     <template x-if="tasks[taskModalIdx].comment">
                         <div>
                             <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Комментарий</p>
@@ -1514,7 +1563,7 @@
                             <p class="text-sm text-rose-700 whitespace-pre-line" x-text="tasks[taskModalIdx].review_comment"></p>
                         </div>
                     </template>
-                    <template x-if="!tasks[taskModalIdx].description && !tasks[taskModalIdx].comment && !tasks[taskModalIdx].review_comment">
+                    <template x-if="!tasks[taskModalIdx].description && !tasks[taskModalIdx].clarification && !tasks[taskModalIdx].comment && !tasks[taskModalIdx].review_comment">
                         <p class="text-sm text-slate-400 italic">Описание и комментарий не заполнены</p>
                     </template>
                 </div>
@@ -1792,6 +1841,12 @@
                             <p class="text-sm text-slate-600 whitespace-pre-line" x-text="completedItem.description"></p>
                         </div>
                     </template>
+                    <template x-if="completedItem.clarification">
+                        <div>
+                            <p class="text-xs font-semibold text-amber-600 uppercase tracking-wider mb-0.5">Уточнение</p>
+                            <p class="text-sm text-slate-700 whitespace-pre-line" x-text="completedItem.clarification"></p>
+                        </div>
+                    </template>
                     <template x-if="completedItem.comment">
                         <div>
                             <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Комментарий</p>
@@ -2038,7 +2093,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         newTask: {
             source: 'custom',       // 'custom' | 'catalog'
             service_id: '',         // выбранная услуга из каталога (берём только имя)
-            client_id: '', name: '', description: '', requires_review: false,
+            client_id: '', name: '', description: '', clarification: '', requires_review: false,
             employee_id: currentEmployeeId, due_date: '',
         },
         newTaskFileName: null,      // имя выбранного документа (сам File — в pendingFiles)
@@ -2300,6 +2355,20 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             if (child.loading || child.status === 'review') return;
 
             task.children[cidx] = { ...child, loading: true };
+
+            // У внеплановых подпункт — просто галочка в самой задаче: ни лога, ни таймера,
+            // ни документа. Поэтому отдельный запрос, а не цепочка ensureLog/start/complete.
+            if (task.type === 'adhoc') {
+                const data = await this.post(`/buhtasks/adhoc/${task.adhoc_id}/checklist`, {
+                    index: cidx,
+                    done:  child.status !== 'completed',
+                });
+                task.children = data.success
+                    ? data.children.map(c => ({ ...c, loading: false }))
+                    : task.children.map((c, i) => (i === cidx ? { ...c, loading: false } : c));
+                this._taskVer++;
+                return;
+            }
 
             if (child.status === 'completed') {
                 const data = await this.post(`/buhtasks/logs/${child.log_id}/reset`);
@@ -2946,6 +3015,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                     : '/buhtasks/adhoc/' + task.adhoc_id + '/comment',
                 elapsed_seconds: task.elapsed_seconds,
                 description: task.description ?? null,
+                clarification: task.clarification ?? null,
                 comment: task.comment ?? null,
                 periodicity: task.periodicity ?? null,
                 // Отчётный период — как отдаёт контроллер при следующем заходе. У внеплановых
@@ -3289,7 +3359,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         resetNewTask() {
             this.newTask = {
                 source: 'custom', service_id: '',
-                client_id: '', name: '', description: '', requires_review: false,
+                client_id: '', name: '', description: '', clarification: '', requires_review: false,
                 employee_id: this.currentEmployeeId, due_date: '',
             };
             pendingFiles.delete('create');
@@ -3300,6 +3370,13 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         onCatalogPick() {
             const svc = this.catalog.find(s => String(s.id) === String(this.newTask.service_id));
             if (svc) this.newTask.name = svc.name;
+        },
+
+        // Услуга, выбранная в форме: из неё показываем описание и подпункты — то же,
+        // что уедет в задачу снимком при сохранении.
+        get pickedService() {
+            if (!this.newTask.service_id) return null;
+            return this.catalog.find(s => String(s.id) === String(this.newTask.service_id)) || null;
         },
 
         // Необязательный документ к новой задаче (File держим вне реактивного state).
@@ -3331,6 +3408,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 }
                 fd.append('name', this.newTask.name.trim());
                 if (this.newTask.description.trim()) fd.append('description', this.newTask.description.trim());
+                if (this.newTask.clarification.trim()) fd.append('clarification', this.newTask.clarification.trim());
                 fd.append('requires_review', this.newTask.requires_review ? '1' : '0');
                 fd.append('due_date', this.newTask.due_date);
                 const file = pendingFiles.get('create');

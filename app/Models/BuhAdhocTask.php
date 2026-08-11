@@ -12,7 +12,7 @@ class BuhAdhocTask extends Model
     use BelongsToTenant;
 
     protected $fillable = [
-        'employee_id', 'created_by', 'client_id', 'service_id', 'name', 'description', 'cost',
+        'employee_id', 'created_by', 'client_id', 'service_id', 'name', 'description', 'clarification', 'checklist', 'cost',
         'year', 'month', 'due_day', 'status', 'requires_review',
         'started_at', 'resumed_at', 'paused_seconds', 'completed_at',
         'review_comment', 'rework_count', 'employee_comment', 'review_started_at', 'reviewed_at', 'reviewed_by',
@@ -22,6 +22,7 @@ class BuhAdhocTask extends Model
 
     protected $casts = [
         'cost'              => 'decimal:2',
+        'checklist'         => 'array',
         'due_day'           => 'integer',
         'requires_review'   => 'boolean',
         'started_at'        => 'datetime',
@@ -59,6 +60,31 @@ class BuhAdhocTask extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(Employee::class, 'created_by');
+    }
+
+    /**
+     * Подпункты для фронта — в том же виде, что и у плановых задач, чтобы карточка
+     * задачи рисовала их одной и той же разметкой. Ключ — позиция в снимке: список
+     * после создания не меняется, поэтому индекс стабилен.
+     *
+     * @return array<int, array{id:int, name:string, status:string}>
+     */
+    public function checklistForView(): array
+    {
+        return collect($this->checklist ?? [])
+            ->values()
+            ->map(fn (array $item, int $i) => [
+                'id'     => $i,
+                'name'   => $item['name'] ?? '',
+                'status' => !empty($item['done']) ? 'completed' : 'pending',
+            ])
+            ->all();
+    }
+
+    /** Остались неотмеченные подпункты — задачу закрывать рано. */
+    public function hasUncheckedItems(): bool
+    {
+        return collect($this->checklist ?? [])->contains(fn (array $item) => empty($item['done']));
     }
 
     /** Поручение: задачу завёл один сотрудник, а делает другой. */

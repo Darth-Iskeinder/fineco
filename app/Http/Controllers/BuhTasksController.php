@@ -459,7 +459,10 @@ class BuhTasksController extends Controller
                 'actual_quantity' => null,
                 'requires_document' => false, // документ всегда опционален для внеплановых
                 'documents'       => $this->docs($adhoc),
-                'children'        => [],
+                'clarification'   => $adhoc->clarification,
+                // Подпункты, снятые с услуги при создании: закрыть задачу можно
+                // только когда все отмечены — то же правило, что и у плановых
+                'children'        => $adhoc->checklistForView(),
             ];
         }
 
@@ -603,7 +606,8 @@ class BuhTasksController extends Controller
                 'actual_quantity' => null,
                 'requires_document' => false,
                 'documents'       => $this->docs($a),
-                'children'        => [],
+                'clarification'   => $a->clarification,
+                'children'        => $a->checklistForView(),
             ];
         }
 
@@ -686,7 +690,8 @@ class BuhTasksController extends Controller
                 'actual_quantity'  => null,
                 'requires_document' => false,
                 'documents'        => $this->docs($a),
-                'children'         => [],
+                'clarification'    => $a->clarification,
+                'children'         => $a->checklistForView(),
             ]);
         // Выполненные задачи бухгалтеров по моим клиентам (этап 2): попадают в ту же вкладку
         // «Выполненные» главбуха с пометкой исполнителя (doer_name). Заметка бухгалтера
@@ -779,7 +784,8 @@ class BuhTasksController extends Controller
                     'actual_quantity'  => null,
                     'requires_document' => false,
                     'documents'        => $this->docs($a),
-                    'children'         => [],
+                    'clarification'    => $a->clarification,
+                    'children'         => $a->checklistForView(),
                 ]);
         }
 
@@ -844,9 +850,17 @@ class BuhTasksController extends Controller
             ->orderBy('full_name')
             ->get(['id', 'full_name']);
 
-        // Каталог услуг для создания задачи «из каталога» — берём только id+name (имя переносится в задачу).
-        $catalog = Service::roots()->active()->ordered()->get(['id', 'name'])
-            ->map(fn ($s) => ['id' => $s->id, 'name' => $s->name])
+        // Каталог услуг для создания задачи «из каталога». Кроме названия отдаём описание
+        // и подпункты: форма показывает их сразу при выборе, а в задачу они уедут снимком.
+        $catalog = Service::roots()->active()->ordered()
+            ->with('children:id,parent_id,name,sort_order')
+            ->get(['id', 'name', 'description'])
+            ->map(fn ($s) => [
+                'id'          => $s->id,
+                'name'        => $s->name,
+                'description' => $s->description,
+                'items'       => $s->children->sortBy('sort_order')->pluck('name')->values()->all(),
+            ])
             ->values()->toArray();
 
         return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'reminders', 'reminderCounts', 'completed', 'completedDays', 'employees', 'catalog', 'teamTasks', 'teamMembers', 'assignedTasks', 'assignedAlertCount', 'assignedDoneDays'));
@@ -1194,9 +1208,10 @@ class BuhTasksController extends Controller
         $validated = $request->validate([
             'employee_id'     => 'required|exists:employees,id',
             'client_id'       => 'nullable|exists:clients,id',
-            'service_id'      => 'nullable|exists:services,id', // выбор из каталога — берём только имя
+            'service_id'      => 'nullable|exists:services,id', // выбор из каталога
             'name'            => 'required|string|max:255',
             'description'     => 'nullable|string|max:2000',
+            'clarification'   => 'nullable|string|max:2000', // что автор дописал к описанию из каталога
             'requires_review' => 'boolean',
             'due_date'        => 'required|date',
             'file'            => $this->documentFileRules(required: false), // необязательный документ
@@ -1211,10 +1226,27 @@ class BuhTasksController extends Controller
         $assignee = Employee::where('status', 'active')->findOrFail($validated['employee_id']);
         $due      = CarbonImmutable::parse($validated['due_date']);
 
-        // Из каталога переносим ТОЛЬКО название (по договорённости); описание/проверка — ручные.
-        $name = $validated['name'];
+        // Из каталога забираем название, описание и подпункты — СНИМКОМ, а не ссылкой:
+        // правка услуги задним числом не должна менять уже созданные и закрытые задачи.
+        // Описание в форме при этом закрыто для правки, поэтому присланное игнорируем;
+        // своё автор пишет отдельным полем «Уточнение».
+        $name        = $validated['name'];
+        $description = $validated['description'] ?? null;
+        $checklist   = null;
+
         if (!empty($validated['service_id'])) {
-            $name = Service::find($validated['service_id'])?->name ?? $name;
+            $service = Service::with('children:id,parent_id,name,sort_order')->find($validated['service_id']);
+
+            if ($service) {
+                $name        = $service->name;
+                $description = $service->description;
+                $items       = $service->children
+                    ->sortBy('sort_order')
+                    ->map(fn ($child) => ['name' => $child->name, 'done' => false])
+                    ->values();
+
+                $checklist = $items->isNotEmpty() ? $items->all() : null;
+            }
         }
 
         $adhoc = BuhAdhocTask::create([
@@ -1226,7 +1258,9 @@ class BuhTasksController extends Controller
             'client_id'       => $validated['client_id'] ?? null,
             'service_id'      => $validated['service_id'] ?? null,
             'name'            => $name,
-            'description'     => $validated['description'] ?? null,
+            'description'     => $description,
+            'clarification'   => $validated['clarification'] ?? null,
+            'checklist'       => $checklist,
             'requires_review' => (bool) ($validated['requires_review'] ?? false),
             'cost'            => 0,
             'year'            => $due->year,
@@ -1267,6 +1301,8 @@ class BuhTasksController extends Controller
                 'month'           => $adhoc->month,
                 'name'            => $adhoc->name,
                 'description'     => $adhoc->description,
+                'clarification'   => $adhoc->clarification,
+                'children'        => $adhoc->checklistForView(),
                 'requires_review' => $adhoc->requires_review,
                 'requires_document' => false, // документ всегда опционален для внеплановых
                 'documents'       => $this->docs($adhoc->load('documents')),
@@ -1332,6 +1368,17 @@ class BuhTasksController extends Controller
 
         if ($task->status === 'running' && $task->resumed_at) {
             $task->paused_seconds += max(0, $now->timestamp - $task->resumed_at->timestamp);
+        }
+
+        // Задачу с подпунктами нельзя закрыть, пока все не отмечены — как у плановых.
+        // Обхода (принудительного закрытия) у внеплановых нет: их никто не обязан
+        // сдавать в срок, поэтому и повода закрывать «как есть» не возникает.
+        if ($task->hasUncheckedItems()) {
+            return response()->json([
+                'success'            => false,
+                'requires_checklist' => true,
+                'message'            => 'Отметьте все подпункты, прежде чем завершить задачу',
+            ], 422);
         }
 
         // Задача с проверкой уходит на ревью (3-дневный срок), НО если принимать её некому
@@ -1493,6 +1540,39 @@ class BuhTasksController extends Controller
         ]);
 
         return response()->json(['success' => true]);
+    }
+
+    /**
+     * Отметка подпункта внеплановой задачи. Пункты — снимок в самой задаче, поэтому
+     * адресуемся позицией в списке: он после создания не меняется.
+     */
+    public function toggleChecklistAdhoc(Request $request, BuhAdhocTask $task)
+    {
+        $this->authorizeAdhoc($task);
+
+        $checklist = $task->checklist ?? [];
+
+        $validated = $request->validate([
+            'index' => ['required', 'integer', 'min:0', 'max:' . max(0, count($checklist) - 1)],
+            'done'  => ['required', 'boolean'],
+        ]);
+
+        // Закрытую задачу и ушедшую на проверку не перекраиваем: галочки уже приняты в работу.
+        if (in_array($task->status, ['completed', 'review'], true)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Нельзя менять подпункты у закрытой задачи или задачи на проверке',
+            ], 422);
+        }
+
+        $checklist[$validated['index']]['done'] = $validated['done'];
+        $task->checklist = $checklist;
+        $task->save();
+
+        return response()->json([
+            'success'  => true,
+            'children' => $task->checklistForView(),
+        ]);
     }
 
     public function updateCommentAdhoc(Request $request, BuhAdhocTask $task)
