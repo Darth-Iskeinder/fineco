@@ -922,14 +922,6 @@
                                 </span>
                             </template>
 
-                            {{-- Отозвать — пока задачу не взяли в работу --}}
-                            <button x-show="t.can_revoke" @click.prevent="askRevokeAssigned(t)"
-                                    :disabled="t.loading"
-                                    class="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-slate-400 hover:text-rose-600 text-xs font-medium rounded-lg hover:bg-rose-50 disabled:opacity-50 transition-colors"
-                                    title="Отозвать поручение">
-                                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3"/></svg>
-                                Отозвать
-                            </button>
                         </span>
                     </div>
                 </template>
@@ -1243,40 +1235,6 @@
                         :disabled="!assignedReject.comment.trim()"
                         class="flex-1 py-2.5 px-4 bg-rose-600 text-white text-sm font-medium rounded-xl hover:bg-rose-700 disabled:opacity-50 transition-colors">
                     Вернуть
-                </button>
-            </div>
-        </div>
-    </div>
-
-    {{-- ===== МОДАЛ ОТЗЫВА ПОРУЧЕНИЯ ===== --}}
-    <div x-show="assignedRevoke.show"
-         x-transition:enter="ease-out duration-200"
-         x-transition:enter-start="opacity-0"
-         x-transition:enter-end="opacity-100"
-         x-transition:leave="ease-in duration-150"
-         x-transition:leave-start="opacity-100"
-         x-transition:leave-end="opacity-0"
-         class="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4"
-         @click.self="assignedRevoke = { show: false, task: null }"
-         @keydown.escape.window="assignedRevoke = { show: false, task: null }"
-         style="display:none">
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">
-            <h3 class="text-base font-semibold text-slate-800">Отозвать поручение?</h3>
-            <p class="text-sm text-slate-500 mt-1.5">
-                Задача
-                <span class="font-medium text-slate-700" x-text="assignedRevoke.task?.name || ''"></span>
-                исчезнет из списка исполнителя
-                <span class="font-medium text-slate-700" x-text="assignedRevoke.task?.doer_name || ''"></span>.
-                Восстановить её будет нельзя.
-            </p>
-            <div class="mt-5 flex justify-end gap-2">
-                <button @click="assignedRevoke = { show: false, task: null }"
-                        class="px-4 py-2 text-sm text-slate-600 font-medium rounded-lg hover:bg-slate-100 transition-colors">
-                    Отмена
-                </button>
-                <button @click="confirmRevokeAssigned()"
-                        class="inline-flex items-center gap-1.5 px-4 py-2 bg-rose-600 text-white text-sm font-medium rounded-lg hover:bg-rose-700 transition-colors">
-                    Отозвать
                 </button>
             </div>
         </div>
@@ -2074,7 +2032,6 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         assignedAlertCount: assignedAlertCount || 0,
         assignedDoneDays: assignedDoneDays || 30,
         assignedReject: { show: false, task: null, comment: '' },
-        assignedRevoke: { show: false, task: null },
         todayStr: new Date().toLocaleDateString('en-CA'), // YYYY-MM-DD в локальной зоне (подсветка просрочки)
         listSearch: '', // поиск по активному списку: название, компания, филиал, отчётный период
         dueFilter: 'all', // срок: 'all' | 'overdue' | 'today' (только вкладка «Список»)
@@ -3141,7 +3098,6 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
 
             t.status = 'completed';
             t.is_overdue = false;
-            t.can_revoke = false;
             this.dropAssignedFromList(t.adhoc_id);
             this.recalcAssignedAlert();
         },
@@ -3162,24 +3118,6 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             t.review_comment = comment;
             this.dropAssignedFromList(t.adhoc_id);
             this.recalcAssignedAlert();
-        },
-
-        askRevokeAssigned(t) {
-            this.assignedRevoke = { show: true, task: t };
-        },
-        async confirmRevokeAssigned() {
-            const t = this.assignedRevoke.task;
-            this.assignedRevoke = { show: false, task: null };
-            if (!t || t.loading) return;
-            t.loading = true;
-            const data = await this.post(`/buhtasks/adhoc/${t.adhoc_id}/delete`);
-            t.loading = false;
-            if (!data.success) return;
-
-            this.assignedTasks = this.assignedTasks.filter(x => x.adhoc_id !== t.adhoc_id);
-            this.recalcAssignedAlert();
-            // Отозвали последнее поручение — вкладка исчезает, уводим со ставшего пустым экрана
-            if (this.assignedTasks.length === 0) this.viewMode = 'list';
         },
 
         /** Убирает строку задачи из основного списка (она попадала туда как «на проверке»). */

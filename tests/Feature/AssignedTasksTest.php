@@ -166,7 +166,6 @@ class AssignedTasksTest extends TestCase
         $response->assertJsonPath('mine', false);
         $response->assertJsonPath('assigned.name', 'Справка в банк');
         $response->assertJsonPath('assigned.doer_name', $this->doer->full_name);
-        $response->assertJsonPath('assigned.can_revoke', true);
 
         $this->assertSame($this->author->id, BuhAdhocTask::latest('id')->first()->created_by);
     }

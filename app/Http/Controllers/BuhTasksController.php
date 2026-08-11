@@ -1797,8 +1797,6 @@ class BuhTasksController extends Controller
             // Просрочка — только у незакрытых: у выполненной задержка уже неважна.
             'is_overdue'       => $dueDate !== null && $dueDate < $todayStr
                 && !in_array($a->status, ['completed', 'review'], true),
-            // Отозвать можно, пока к работе не приступили — иначе сделанное пропадёт.
-            'can_revoke'       => $a->status === 'pending',
         ];
     }
 

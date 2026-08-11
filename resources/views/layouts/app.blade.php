@@ -379,7 +379,9 @@
          поэтому с другого компьютера уведомление заново не всплывёт. --}}
     {{-- style="display:none" (а не x-cloak): у проекта нет правила [x-cloak], а Alpine
          тянется с CDN — глобальное правило прятало бы содержимое страниц, не дождавшись его. --}}
-    <div x-data="taskAlerts()" x-init="init()" x-show="items.length > 0" style="display:none"
+    {{-- init() вызывается Alpine сам: с x-init="init()" он срабатывал дважды и заводил
+         два опроса вместо одного. --}}
+    <div x-data="taskAlerts()" x-show="items.length > 0" style="display:none"
          class="fixed bottom-4 right-4 z-[70] w-full max-w-sm"
          x-transition:enter="ease-out duration-300"
          x-transition:enter-start="opacity-0 translate-y-4"
@@ -441,9 +443,19 @@
 
                 init() {
                     this.load();
+
                     // Тихий опрос: иначе сидящий весь день на одной странице узнает о задаче
-                    // только после перезагрузки. Две минуты — незаметно для сервера.
-                    setInterval(() => this.load(), 120000);
+                    // только после перезагрузки. 45 секунд — запрос лёгкий (пара выборок по
+                    // индексу), а две минуты на практике ощущаются как «не приходит вовсе».
+                    setInterval(() => this.load(), 45000);
+
+                    // Вернулся к вкладке или переключился в окно браузера — проверяем сразу,
+                    // не дожидаясь тика. Это и есть самый частый случай: человек уходил
+                    // в другую программу, вернулся — уведомление уже ждёт.
+                    document.addEventListener('visibilitychange', () => {
+                        if (!document.hidden) this.load();
+                    });
+                    window.addEventListener('focus', () => this.load());
                 },
 
                 get headline() {
