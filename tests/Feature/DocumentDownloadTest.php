@@ -172,6 +172,27 @@ class DocumentDownloadTest extends TestCase
             ->assertOk();
     }
 
+    /** История задач показывает PDF в окне — inline должен работать и по второму входу. */
+    public function test_manager_opens_task_pdf_inline_via_client_card(): void
+    {
+        [, $doc] = $this->makeTaskDocument();
+
+        $managerRole = Role::firstOrCreate(['name' => Role::MANAGER], ['display_name' => 'Руководитель']);
+        $manager = Employee::create([
+            'full_name' => 'Тест Руководитель', 'position' => 'Руководитель',
+            'email' => 'doc_mgr2_' . uniqid() . '@test.kg', 'password' => bcrypt('x'),
+            'role_id' => $managerRole->id, 'status' => Employee::STATUS_ACTIVE,
+        ]);
+        $manager->modules()->attach(Module::where('name', 'clients')->value('id'));
+
+        $response = $this->actingAs($manager, 'employee')
+            ->get(route('documents.task', $doc) . '?inline=1')
+            ->assertOk()
+            ->assertHeader('Content-Type', 'application/pdf');
+
+        $this->assertStringContainsString('inline', $response->headers->get('Content-Disposition'));
+    }
+
     /** Модуля клиентов мало: чужие задачи по-прежнему закрыты. */
     public function test_clients_module_alone_does_not_open_other_clients_task_document(): void
     {
