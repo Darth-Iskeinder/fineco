@@ -362,4 +362,58 @@ class TenantIsolationTest extends TestCase
         $this->assertNotNull(Client::find($this->myClient->id));
         $this->assertNotNull(Client::find($this->theirClient->id));
     }
+
+    /**
+     * История задач на карточке клиента — отдельные роуты, отдающие JSON, поэтому
+     * перегородку проверяем прямо на них: и список, и карточка одной задачи.
+     */
+    public function test_task_history_does_not_reach_other_tenants(): void
+    {
+        $this->actingAs($this->myEmployee, 'employee')
+            ->getJson('/clients/' . $this->theirClient->id . '/task-history')
+            ->assertNotFound();
+
+        $this->actingAs($this->myEmployee, 'employee')
+            ->getJson('/clients/' . $this->theirClient->id . '/task-history/planned/1')
+            ->assertNotFound();
+
+        $this->actingAs($this->myEmployee, 'employee')
+            ->getJson('/clients/' . $this->myClient->id . '/task-history')
+            ->assertOk()
+            ->assertJsonPath('total', 0);
+    }
+
+    /**
+     * Документ чужой задачи не отдаётся даже по прямой ссылке. У истории задач
+     * второй вход в DocumentController (модуль клиентов вместо задачника) —
+     * проверяем, что он не стал лазейкой между фирмами.
+     */
+    public function test_other_tenant_task_document_is_not_served(): void
+    {
+        $theirDoc = TenantContext::for($this->theirs, function () {
+            $service = Service::create([
+                'name' => 'Чужой БП ' . uniqid(), 'periodicity' => 'Ежемесячно',
+                'start_day' => [5], 'is_active' => true,
+            ]);
+            $estimate = \App\Models\Estimate::create(['client_id' => $this->theirClient->id, 'total' => 0]);
+            $item = $estimate->items()->create([
+                'service_id' => $service->id, 'type' => 'recurring', 'name' => $service->name,
+                'cost' => 0, 'quantity' => 1, 'total' => 0, 'sort_order' => 0,
+            ]);
+            $log = \App\Models\BuhTaskLog::create([
+                'employee_id'      => $this->myEmployee->id,
+                'client_id'        => $this->theirClient->id,
+                'estimate_item_id' => $item->id,
+                'year' => 2026, 'month' => 7, 'status' => 'completed',
+                'completed_at' => '2026-07-10 12:00:00',
+            ]);
+
+            return $log->documents()->create(['path' => 'buh_task_documents/x/чужой.pdf', 'name' => 'чужой.pdf']);
+        });
+
+        // Сотрудник другой фирмы: документа для него не существует.
+        $this->actingAs($this->myEmployee, 'employee')
+            ->get('/documents/task/' . $theirDoc->id)
+            ->assertNotFound();
+    }
 }

@@ -241,7 +241,8 @@ class ClientImportController extends Controller
     /** Файл с шапкой и примерами — с него начинают заполнение. */
     public function template(): StreamedResponse
     {
-        return $this->csv('clients-template.csv', ClientCsvTemplate::rows());
+        // Свои заголовки: в шаблоне колонок меньше, чем в выгрузке (см. ClientCsvTemplate).
+        return $this->csv('clients-template.csv', ClientCsvTemplate::rows(), ClientCsvTemplate::headers());
     }
 
     private function csv(string $filename, iterable $rows, ?array $headers = null): StreamedResponse

@@ -140,6 +140,42 @@ class ClientCsvExportTest extends TestCase
         $this->assertStringContainsString('ИП Иванов И.И.', $csv);
     }
 
+    /**
+     * В шаблоне колонок меньше, чем в выгрузке: ответственного назначают позже,
+     * код НО известен не всегда, а заполненный id молча превратил бы загрузку
+     * новых клиентов в перезапись существующих. В выгрузке все три обязаны
+     * остаться — иначе «выгрузил, поправил, залил обратно» терял бы данные.
+     */
+    public function test_template_drops_columns_that_cannot_be_filled_yet(): void
+    {
+        $csv = $this->actingAs($this->viewer(), 'employee')
+            ->get('/clients/import/template')
+            ->assertOk()
+            ->streamedContent();
+
+        $header = strtok($csv, "\n");
+
+        $this->assertStringNotContainsString('Ответственный', $header);
+        $this->assertStringNotContainsString('Код НО', $header);
+        $this->assertStringNotContainsString('id', $header);
+        $this->assertStringContainsString('Название', $header);
+        $this->assertStringContainsString('ИНН', $header);
+    }
+
+    public function test_export_keeps_the_columns_template_drops(): void
+    {
+        $csv = $this->actingAs($this->viewer(), 'employee')
+            ->get('/clients/export')
+            ->assertOk()
+            ->streamedContent();
+
+        $header = strtok($csv, "\n");
+
+        $this->assertStringContainsString('Ответственный', $header);
+        $this->assertStringContainsString('Код НО', $header);
+        $this->assertStringContainsString('id', $header);
+    }
+
     public function test_template_passes_the_import_check_it_is_meant_for(): void
     {
         $viewer = $this->viewer();
