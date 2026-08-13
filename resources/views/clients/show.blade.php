@@ -1763,9 +1763,392 @@
             </div>
         </div>
     </div>
+
+    {{-- ==================== ИСТОРИЯ ЗАДАЧ ====================
+         Отдельный Alpine-компонент, а не часть clientShow(): карточка и так большая,
+         а история — самостоятельный кусок, который грузится только по раскрытию.
+         Без права секции нет в разметке вообще (см. ClientController@show). --}}
+    @if($canSeeTaskHistory)
+    <div x-data="taskHistory({{ $client->id }})" class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden mt-6">
+        <button type="button" @click="toggle()"
+                class="w-full px-6 py-5 flex items-center justify-between gap-4 text-left hover:bg-slate-50/70 transition-colors">
+            <div class="flex items-center gap-4">
+                <div class="p-2.5 bg-emerald-100 rounded-xl">
+                    <svg class="w-5 h-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                    </svg>
+                </div>
+                <div>
+                    <h2 class="text-base font-semibold text-slate-800">История задач</h2>
+                    <p class="text-sm text-slate-500 mt-0.5">
+                        Выполненные задачи по этой компании — что сделано и какие документы приложены
+                    </p>
+                </div>
+            </div>
+            <svg class="w-5 h-5 text-slate-400 shrink-0 transition-transform duration-200"
+                 :class="open && 'rotate-180'" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 9l-7 7-7-7" />
+            </svg>
+        </button>
+
+        <div x-show="open" x-transition.opacity class="border-t border-slate-100" style="display:none">
+            <div class="px-6 py-4 flex items-center justify-between gap-4 flex-wrap">
+                <div class="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+                    <template x-for="opt in docFilters" :key="opt.key">
+                        <button type="button" @click="setDocs(opt.key)"
+                                class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors"
+                                :class="docs === opt.key ? 'bg-white shadow-sm text-slate-800' : 'text-slate-500 hover:text-slate-700'"
+                                x-text="opt.label"></button>
+                    </template>
+                </div>
+                <p class="text-sm text-slate-500" x-show="!loading && !error && total > 0">
+                    Всего: <span class="font-semibold text-slate-700" x-text="total"></span>
+                </p>
+            </div>
+
+            <div x-show="loading" class="px-6 py-10 text-center text-sm text-slate-400">Загружаем историю…</div>
+
+            <div x-show="error && !loading" class="px-6 pb-6" style="display:none">
+                <div class="rounded-xl bg-rose-50 border border-rose-200 px-4 py-3 flex items-center justify-between gap-4">
+                    <p class="text-sm text-rose-700" x-text="error"></p>
+                    <button type="button" @click="load()"
+                            class="px-3 py-1.5 text-sm font-medium text-rose-700 bg-white border border-rose-200 rounded-lg hover:bg-rose-50">
+                        Повторить
+                    </button>
+                </div>
+            </div>
+
+            <div x-show="!loading && !error && items.length === 0" class="px-6 py-10 text-center" style="display:none">
+                <p class="text-sm text-slate-500" x-text="emptyText()"></p>
+            </div>
+
+            <div x-show="!loading && !error && items.length > 0" class="overflow-x-auto" style="display:none">
+                <table class="min-w-full text-sm">
+                    <thead>
+                        <tr class="text-left text-xs font-medium uppercase tracking-wide text-slate-400 border-b border-slate-100">
+                            <th class="px-6 py-3 font-medium">Выполнена</th>
+                            <th class="px-4 py-3 font-medium">Задача</th>
+                            <th class="px-4 py-3 font-medium">Период</th>
+                            <th class="px-4 py-3 font-medium">Исполнитель</th>
+                            <th class="px-4 py-3 font-medium whitespace-nowrap">Документы</th>
+                            <th class="px-6 py-3 font-medium">Отметки</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        <template x-for="row in items" :key="row.uid">
+                            <tr @click="openTask(row)" tabindex="0" @keydown.enter="openTask(row)"
+                                title="Открыть карточку задачи"
+                                class="hover:bg-slate-50/70 focus:bg-slate-50 focus:outline-none cursor-pointer transition-colors">
+                                <td class="px-6 py-3 whitespace-nowrap text-slate-600" x-text="formatDate(row.completed_at)"></td>
+                                <td class="px-4 py-3">
+                                    <div class="font-medium text-slate-800" x-text="row.name"></div>
+                                    <div class="flex flex-wrap items-center gap-1.5 mt-1">
+                                        <span x-show="row.type === 'adhoc'"
+                                              class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-50 text-amber-700 border border-amber-200">
+                                            вне сметы
+                                        </span>
+                                        <span x-show="row.branch_label"
+                                              class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-slate-100 text-slate-600"
+                                              x-text="row.branch_label"></span>
+                                    </div>
+                                </td>
+                                <td class="px-4 py-3 text-slate-500 whitespace-nowrap" x-text="row.reporting_period || '—'"></td>
+                                <td class="px-4 py-3 text-slate-600" x-text="row.doer_name || '—'"></td>
+                                <td class="px-4 py-3 whitespace-nowrap">
+                                    <span x-show="row.documents_count > 0" class="inline-flex items-center gap-1 text-slate-700">
+                                        <svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                        </svg>
+                                        <span x-text="row.documents_count"></span>
+                                    </span>
+                                    <span x-show="row.documents_count === 0" class="text-slate-300">—</span>
+                                </td>
+                                <td class="px-6 py-3">
+                                    <div class="flex flex-wrap items-center gap-1.5">
+                                        <span x-show="row.force_closed"
+                                              class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-orange-50 text-orange-700 border border-orange-200">
+                                            закрыта принудительно
+                                        </span>
+                                        <span x-show="row.rework_count > 0"
+                                              class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-rose-50 text-rose-700 border border-rose-200">
+                                            доработок: <span class="ml-1" x-text="row.rework_count"></span>
+                                        </span>
+                                        <span x-show="!row.force_closed && !row.rework_count" class="text-slate-300">—</span>
+                                    </div>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+            </div>
+
+            <div x-show="!loading && !error && lastPage > 1" class="px-6 py-4 flex items-center justify-between gap-4 border-t border-slate-100" style="display:none">
+                <button type="button" @click="goTo(page - 1)" :disabled="page <= 1"
+                        class="px-3 py-1.5 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                    Назад
+                </button>
+                <span class="text-sm text-slate-500">
+                    Страница <span class="font-semibold text-slate-700" x-text="page"></span> из <span x-text="lastPage"></span>
+                </span>
+                <button type="button" @click="goTo(page + 1)" :disabled="page >= lastPage"
+                        class="px-3 py-1.5 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                    Вперёд
+                </button>
+            </div>
+        </div>
+
+        {{-- Карточка задачи. Своя, а не модалка задачника: та вварена в его Alpine-компонент
+             (таймеры, загрузка документов, права на редактирование) и здесь не нужна — тут только чтение. --}}
+        <div x-show="selected || detailLoading || detailError" x-transition.opacity
+             class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50"
+             @click.self="closeTask()" @keydown.escape.window="closeTask()" style="display:none">
+            <div class="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
+                    <div>
+                        <h3 class="text-base font-semibold text-slate-800" x-text="selected?.name || 'Задача'"></h3>
+                        <p class="text-sm text-slate-500 mt-0.5" x-show="selected">
+                            <span x-text="selected?.reporting_period || 'без отчётного периода'"></span>
+                            <span class="text-slate-300 mx-1.5">·</span>
+                            выполнена <span x-text="formatDate(selected?.completed_at)"></span>
+                        </p>
+                    </div>
+                    <button type="button" @click="closeTask()" class="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors">
+                        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="px-6 py-5 overflow-y-auto space-y-5">
+                    <p x-show="detailLoading" class="text-sm text-slate-400 text-center py-6">Загружаем карточку…</p>
+
+                    <div x-show="detailError && !detailLoading" class="rounded-xl bg-rose-50 border border-rose-200 px-4 py-3" style="display:none">
+                        <p class="text-sm text-rose-700" x-text="detailError"></p>
+                    </div>
+
+                    <template x-if="selected && !detailLoading">
+                        <div class="space-y-5">
+                            <div class="flex flex-wrap gap-1.5">
+                                <span x-show="selected.type === 'adhoc'"
+                                      class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-amber-50 text-amber-700 border border-amber-200">вне сметы</span>
+                                <span x-show="selected.branch_label"
+                                      class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-slate-100 text-slate-600" x-text="selected.branch_label"></span>
+                                <span x-show="selected.force_closed"
+                                      class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-orange-50 text-orange-700 border border-orange-200">закрыта принудительно</span>
+                                <span x-show="selected.rework_count > 0"
+                                      class="inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-md bg-rose-50 text-rose-700 border border-rose-200">
+                                    доработок: <span class="ml-1" x-text="selected.rework_count"></span>
+                                </span>
+                            </div>
+
+                            <dl class="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                                <div>
+                                    <dt class="text-slate-400 text-xs uppercase tracking-wide">Исполнитель</dt>
+                                    <dd class="text-slate-700 mt-0.5" x-text="selected.doer_name || '—'"></dd>
+                                </div>
+                                <div>
+                                    <dt class="text-slate-400 text-xs uppercase tracking-wide">Принял</dt>
+                                    <dd class="text-slate-700 mt-0.5" x-text="selected.reviewer_name || 'без проверки'"></dd>
+                                </div>
+                                <div x-show="selected.due_date">
+                                    <dt class="text-slate-400 text-xs uppercase tracking-wide">Срок</dt>
+                                    <dd class="text-slate-700 mt-0.5" x-text="formatDate(selected.due_date)"></dd>
+                                </div>
+                                <div x-show="selected.assigned_by_name">
+                                    <dt class="text-slate-400 text-xs uppercase tracking-wide">Поручил</dt>
+                                    <dd class="text-slate-700 mt-0.5" x-text="selected.assigned_by_name"></dd>
+                                </div>
+                            </dl>
+
+                            <template x-for="block in commentBlocks()" :key="block.label">
+                                <div>
+                                    <p class="text-slate-400 text-xs uppercase tracking-wide" x-text="block.label"></p>
+                                    <p class="text-sm text-slate-700 mt-1 whitespace-pre-line" x-text="block.text"></p>
+                                </div>
+                            </template>
+
+                            <div x-show="selected.children.length > 0">
+                                <p class="text-slate-400 text-xs uppercase tracking-wide mb-2">Подпункты</p>
+                                <ul class="space-y-1.5">
+                                    <template x-for="child in selected.children" :key="child.id">
+                                        <li class="flex items-start gap-2 text-sm">
+                                            <svg x-show="child.status === 'completed'" class="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                            </svg>
+                                            <svg x-show="child.status !== 'completed'" class="w-4 h-4 text-slate-300 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <circle cx="12" cy="12" r="8" stroke-width="1.5" />
+                                            </svg>
+                                            <div class="min-w-0">
+                                                <span class="text-slate-700" x-text="child.name"></span>
+                                                <template x-for="doc in child.documents" :key="doc.id">
+                                                    <a :href="doc.url" class="block text-xs text-indigo-600 hover:text-indigo-700 hover:underline truncate" x-text="doc.name"></a>
+                                                </template>
+                                            </div>
+                                        </li>
+                                    </template>
+                                </ul>
+                            </div>
+
+                            <div>
+                                <p class="text-slate-400 text-xs uppercase tracking-wide mb-2">Документы</p>
+                                <ul x-show="selected.documents.length > 0" class="space-y-1.5">
+                                    <template x-for="doc in selected.documents" :key="doc.id">
+                                        <li>
+                                            <a :href="doc.url"
+                                               class="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-700 hover:underline">
+                                                <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                                </svg>
+                                                <span x-text="doc.name"></span>
+                                            </a>
+                                        </li>
+                                    </template>
+                                </ul>
+                                <p x-show="selected.documents.length === 0" class="text-sm"
+                                   :class="selected.requires_document ? 'text-orange-600' : 'text-slate-400'"
+                                   x-text="selected.requires_document ? 'Документ по этому БП требуется, но не приложен' : 'Документов нет'"></p>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+    </div>
+    @endif
 </div>
 
 <script>
+/**
+ * История выполненных задач клиента. Данные не грузятся вместе с карточкой —
+ * только при первом раскрытии секции, дальше фильтр и страницы ходят тем же запросом.
+ */
+function taskHistory(clientId) {
+    return {
+        clientId,
+        open: false,
+        loaded: false,
+        loading: false,
+        error: '',
+        items: [],
+        page: 1,
+        lastPage: 1,
+        total: 0,
+        docs: 'all',
+        docFilters: [
+            { key: 'all', label: 'Все' },
+            { key: 'with', label: 'С документами' },
+            { key: 'without', label: 'Без документов' },
+        ],
+
+        // Карточка задачи (попап): грузится по клику, в списке этих данных нет
+        selected: null,
+        detailLoading: false,
+        detailError: '',
+
+        toggle() {
+            this.open = !this.open;
+            if (this.open && !this.loaded) {
+                this.load();
+            }
+        },
+
+        setDocs(key) {
+            if (this.docs === key || this.loading) return;
+            this.docs = key;
+            this.page = 1;
+            this.load();
+        },
+
+        goTo(page) {
+            if (page < 1 || page > this.lastPage || this.loading) return;
+            this.page = page;
+            this.load();
+        },
+
+        async load() {
+            this.loading = true;
+            this.error = '';
+
+            try {
+                const params = new URLSearchParams({ docs: this.docs, page: this.page });
+                const response = await fetch(`/clients/${this.clientId}/task-history?${params}`, {
+                    headers: { 'Accept': 'application/json' },
+                });
+
+                if (!response.ok) {
+                    throw new Error('Не удалось загрузить историю задач');
+                }
+
+                const data = await response.json();
+                this.items = data.items;
+                this.page = data.page;
+                this.lastPage = data.last_page;
+                this.total = data.total;
+                this.loaded = true;
+            } catch (e) {
+                this.error = e.message || 'Не удалось загрузить историю задач';
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        // Пустой список значит разное в зависимости от фильтра — подсказываем, что именно.
+        emptyText() {
+            if (this.docs === 'with') return 'Нет выполненных задач с приложенными документами';
+            if (this.docs === 'without') return 'У всех выполненных задач есть документы';
+            return 'По этой компании ещё нет выполненных задач';
+        },
+
+        async openTask(row) {
+            this.selected = null;
+            this.detailError = '';
+            this.detailLoading = true;
+
+            try {
+                const response = await fetch(`/clients/${this.clientId}/task-history/${row.type}/${row.id}`, {
+                    headers: { 'Accept': 'application/json' },
+                });
+
+                if (!response.ok) {
+                    throw new Error('Не удалось открыть карточку задачи');
+                }
+
+                this.selected = await response.json();
+            } catch (e) {
+                this.detailError = e.message || 'Не удалось открыть карточку задачи';
+            } finally {
+                this.detailLoading = false;
+            }
+        },
+
+        closeTask() {
+            this.selected = null;
+            this.detailError = '';
+            this.detailLoading = false;
+        },
+
+        // Комментарии показываем только заполненные — пустые заголовки в карточке лишние.
+        commentBlocks() {
+            if (!this.selected) return [];
+
+            return [
+                { label: 'Описание', text: this.selected.description },
+                { label: 'Пояснение', text: this.selected.comment },
+                { label: 'Комментарий исполнителя', text: this.selected.employee_comment },
+                { label: 'Комментарий проверяющего', text: this.selected.review_comment },
+                { label: 'Причина принудительного закрытия', text: this.selected.force_close_comment },
+            ].filter(block => block.text);
+        },
+
+        formatDate(value) {
+            if (!value) return '—';
+            const date = new Date(value.replace(' ', 'T'));
+            if (isNaN(date)) return '—';
+
+            return date.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        },
+    };
+}
 function clientShow() {
     return {
         client: @json($client),

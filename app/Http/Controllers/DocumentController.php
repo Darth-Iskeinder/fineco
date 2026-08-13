@@ -3,7 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\BuhTaskDocument;
+use App\Models\Client;
 use App\Models\ClientDocument;
+use App\Models\Employee;
+use App\Services\ClientTaskHistory;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -17,8 +20,11 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  *
  * Права намеренно совпадают с видимостью списка: кто видит модуль задач, тот
  * видит и документы задач (главбух проверяет чужие задачи, руководитель и
- * аудитор смотрят закрытые). Разграничение до уровня конкретной задачи здесь
- * не вводится — это отдельное решение, а не побочный эффект переезда на диск.
+ * аудитор смотрят закрытые). Внутри модуля разграничения до конкретной задачи нет.
+ *
+ * У документов задач есть второй вход — история задач на карточке клиента: там
+ * ссылку видят и те, у кого модуля задачника нет. Для них доступ уже сужен до
+ * своих клиентов, см. `task()`.
  */
 class DocumentController extends Controller
 {
@@ -38,12 +44,52 @@ class DocumentController extends Controller
         );
     }
 
-    /** Документ задачи (плановой или внеплановой): модуль «БухЗадачник». */
-    public function task(Request $request, BuhTaskDocument $document): StreamedResponse
+    /**
+     * Документ задачи (плановой или внеплановой). Два входа:
+     *  - модуль «БухЗадачник» — те, кто эти задачи делает и проверяет;
+     *  - история задач на карточке клиента — те, кто и так видит там эту задачу
+     *    со ссылкой на документ (админ, руководитель, главбух своего клиента).
+     * Без второй ветки руководитель без модуля задачника получал бы 403 по ссылке,
+     * которую ему сама же система и показала.
+     */
+    public function task(Request $request, BuhTaskDocument $document, ClientTaskHistory $history): StreamedResponse
     {
-        $this->authorizeModule('buhtasks');
+        $employee = auth('employee')->user();
+
+        abort_unless(
+            $employee && (
+                $employee->hasAccessToModule('buhtasks')
+                || $this->visibleInClientHistory($employee, $document, $history)
+            ),
+            403,
+            'У вас нет доступа к этому документу',
+        );
 
         return $this->serve($request, $document->path, $document->name);
+    }
+
+    /**
+     * Виден ли документ через историю задач на карточке клиента. Клиента берём
+     * у самой задачи: у внеплановой его может не быть (внутреннее поручение) —
+     * тогда карточки, через которую документ был бы виден, не существует.
+     */
+    private function visibleInClientHistory(
+        Employee $employee,
+        BuhTaskDocument $document,
+        ClientTaskHistory $history,
+    ): bool {
+        if (!$employee->hasAccessToModule('clients')) {
+            return false;
+        }
+
+        $clientId = $document->documentable?->client_id;
+        if (!$clientId) {
+            return false;
+        }
+
+        $client = Client::find($clientId);
+
+        return $client !== null && $history->canView($employee, $client);
     }
 
     private function authorizeModule(string $module): void

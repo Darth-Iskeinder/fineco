@@ -8,6 +8,7 @@ use App\Models\ClientStatus;
 use App\Models\Employee;
 use App\Models\Tariff;
 use App\Models\TaxSystem;
+use App\Services\ClientTaskHistory;
 use App\Support\TenantContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -83,8 +84,14 @@ class ClientController extends Controller
             'documents',
         ]);
 
+        // Историю задач видят не все: без права секция не должна попадать в разметку
+        // вообще, а не прятаться стилями.
+        $canSeeTaskHistory = app(ClientTaskHistory::class)
+            ->canView(auth('employee')->user(), $client);
+
         return view('clients.show', [
-            'client' => $client,
+            'client'            => $client,
+            'canSeeTaskHistory' => $canSeeTaskHistory,
         ]);
     }
 

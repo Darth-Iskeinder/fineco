@@ -7,6 +7,7 @@ use App\Http\Controllers\BuhTasksController;
 use App\Http\Controllers\ClientController;
 use App\Http\Controllers\ClientImportController;
 use App\Http\Controllers\ClientServiceScheduleController;
+use App\Http\Controllers\ClientTaskHistoryController;
 use App\Http\Controllers\CompanyProfileController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentController;
@@ -128,6 +129,11 @@ Route::middleware('auth:employee')->group(function () {
         Route::delete('/{client}', [ClientController::class, 'destroy'])->name('destroy');
         Route::post('/{client}/documents', [ClientController::class, 'uploadDocument'])->name('documents.upload');
         Route::delete('/{client}/documents/{document}', [ClientController::class, 'deleteDocument'])->name('documents.delete');
+        // История выполненных задач клиента (секция внизу карточки, грузится ajax)
+        Route::get('/{client}/task-history', [ClientTaskHistoryController::class, 'index'])->name('task-history.index');
+        Route::get('/{client}/task-history/{type}/{id}', [ClientTaskHistoryController::class, 'show'])
+            ->whereIn('type', ['planned', 'adhoc'])->whereNumber('id')->name('task-history.show');
+
         Route::get('/{client}/estimate/edit', [EstimateController::class, 'edit'])->name('estimate.edit');
         Route::get('/{client}/estimate', [EstimateController::class, 'show'])->name('estimate.show');
         Route::post('/{client}/estimate', [EstimateController::class, 'save'])->name('estimate.save');

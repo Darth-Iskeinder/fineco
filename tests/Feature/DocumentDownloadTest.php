@@ -151,6 +151,45 @@ class DocumentDownloadTest extends TestCase
             ->assertForbidden();
     }
 
+    /**
+     * История задач на карточке клиента показывает ссылку на документ и тем, у кого
+     * модуля задачника нет (руководитель). Раз ссылку показали — она должна работать.
+     */
+    public function test_manager_without_tasks_module_downloads_via_client_card(): void
+    {
+        [, $doc] = $this->makeTaskDocument();
+
+        $managerRole = Role::firstOrCreate(['name' => Role::MANAGER], ['display_name' => 'Руководитель']);
+        $manager = Employee::create([
+            'full_name' => 'Тест Руководитель', 'position' => 'Руководитель',
+            'email' => 'doc_mgr_' . uniqid() . '@test.kg', 'password' => bcrypt('x'),
+            'role_id' => $managerRole->id, 'status' => Employee::STATUS_ACTIVE,
+        ]);
+        $manager->modules()->attach(Module::where('name', 'clients')->value('id'));
+
+        $this->actingAs($manager, 'employee')
+            ->get(route('documents.task', $doc))
+            ->assertOk();
+    }
+
+    /** Модуля клиентов мало: чужие задачи по-прежнему закрыты. */
+    public function test_clients_module_alone_does_not_open_other_clients_task_document(): void
+    {
+        [, $doc] = $this->makeTaskDocument();
+
+        $role = Role::firstOrCreate(['name' => Role::EMPLOYEE], ['display_name' => 'Сотрудник']);
+        $stranger = Employee::create([
+            'full_name' => 'Тест Посторонний', 'position' => 'Менеджер',
+            'email' => 'doc_str_' . uniqid() . '@test.kg', 'password' => bcrypt('x'),
+            'role_id' => $role->id, 'status' => Employee::STATUS_ACTIVE,
+        ]);
+        $stranger->modules()->attach(Module::where('name', 'clients')->value('id'));
+
+        $this->actingAs($stranger, 'employee')
+            ->get(route('documents.task', $doc))
+            ->assertForbidden();
+    }
+
     public function test_employee_with_module_downloads_file(): void
     {
         [, $doc] = $this->makeTaskDocument();
