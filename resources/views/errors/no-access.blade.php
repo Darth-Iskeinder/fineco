@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', 'Нет доступа - ERP')
+@section('title', 'Нет доступа - Kubik')
 @section('page-title', 'Нет доступа')
 
 @section('content')

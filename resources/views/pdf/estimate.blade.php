@@ -124,7 +124,7 @@
 @endif
 
 <div class="footer">
-    <span>ERP Fineco</span>
+    <span>Kubik</span>
     <span>{{ $periodLabel }}</span>
 </div>
 

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144 116" width="144" height="116">
+  <polygon points="72,8 96,22 72,36 48,22" fill="#B98CFF"/>
+  <polygon points="48,22 72,36 72,64 48,50" fill="#7C3AED"/>
+  <polygon points="96,22 96,50 72,64 72,36" fill="#4A1FB8"/>
+  <text x="72" y="108" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="40" font-weight="700" fill="#1A0B3D" letter-spacing="-0.5">Kubik</text>
+</svg>

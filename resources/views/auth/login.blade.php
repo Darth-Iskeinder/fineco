@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Вход в систему - ERP</title>
+    <title>Вход в систему - Kubik</title>
+    <link rel="icon" type="image/svg+xml" href="{{ asset('images/kubik-icon.svg') }}">
     @vite('resources/css/app.css')
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <style>[x-cloak] { display: none !important; }</style>
@@ -14,17 +15,8 @@
             {{-- Знак системы, а не какой-то одной фирмы: логотип загружает
                  сама фирма, и внутри системы он подставляется в меню. --}}
             <div class="flex justify-center mb-6">
-                <span class="h-16 w-16 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-500/25">
-                    <svg class="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 3l8 4-8 4-8-4 8-4z"/>
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M4 12l8 4 8-4"/>
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M4 17l8 4 8-4"/>
-                    </svg>
-                </span>
+                <img src="{{ asset('images/kubik-vertical.svg') }}" alt="Kubik" class="h-24 w-auto">
             </div>
-            <h2 class="text-3xl font-bold bg-gradient-to-r from-slate-800 to-slate-600 bg-clip-text text-transparent">
-                ERP
-            </h2>
             <p class="mt-2 text-sm text-slate-500">
                 Войдите в свой аккаунт
             </p>
@@ -103,7 +95,7 @@
         </div>
 
         <p class="text-center text-xs text-slate-400">
-            ERP &copy; {{ date('Y') }}
+            Kubik &copy; {{ date('Y') }}
         </p>
     </div>
 </body>

@@ -24,7 +24,7 @@ class MakeAdmin extends Command
     {
         $this->info('');
         $this->info('╔══════════════════════════════════════╗');
-        $this->info('║     Создание администратора ERP      ║');
+        $this->info('║    Создание администратора Kubik     ║');
         $this->info('╚══════════════════════════════════════╝');
         $this->info('');
 

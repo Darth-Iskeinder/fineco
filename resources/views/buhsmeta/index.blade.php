@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', 'БухСмета - ERP')
+@section('title', 'БухСмета - Kubik')
 @section('page-title', 'БухСмета')
 <style>[x-cloak]{display:none!important}</style>
 

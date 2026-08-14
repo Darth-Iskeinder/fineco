@@ -34,15 +34,20 @@
         </div>
     @endunless
 
-    {{-- Логотип --}}
+    {{-- ЛОГОТИП ФИРМЫ — временно убран из интерфейса.
+         В меню теперь знак системы (Kubik), а в сметы и акты логотип фирмы
+         никогда и не подставлялся, так что показывать его было негде.
+         Загрузку не удаляем: маршруты, контроллер и тесты живы, вернуть
+         раздел = снять комментарий с блока ниже.
+
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
         <div class="px-6 py-4 border-b border-slate-100">
             <h2 class="text-lg font-semibold text-slate-800">Логотип</h2>
             <p class="text-sm text-slate-500 mt-0.5">Появится в боковом меню и в шапке смет и актов для клиентов</p>
         </div>
         <div class="px-6 py-5 flex items-center gap-6">
-            {{-- Показываем ровно то, что видно сотрудникам в меню: либо логотип,
-                 либо значок с буквой, который система рисует вместо него. --}}
+            // Показываем ровно то, что видно сотрудникам в меню: либо логотип,
+            // либо значок с буквой, который система рисует вместо него.
             <div class="flex flex-col items-center gap-2 flex-shrink-0">
                 <div class="w-28 h-28 rounded-2xl border border-dashed border-slate-200 flex items-center justify-center bg-slate-50 overflow-hidden">
                     @if ($tenant->logoUrl())
@@ -87,6 +92,7 @@
             @endif
         </div>
     </div>
+    --}}
 
     <form action="{{ route('settings.profile.update') }}" method="POST" class="space-y-4">
         @csrf

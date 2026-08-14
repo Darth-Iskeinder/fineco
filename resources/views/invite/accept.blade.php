@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Активация аккаунта - ERP</title>
+    <title>Активация аккаунта - Kubik</title>
+    <link rel="icon" type="image/svg+xml" href="{{ asset('images/kubik-icon.svg') }}">
     @vite('resources/css/app.css')
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <style>[x-cloak] { display: none !important; }</style>
@@ -11,9 +12,9 @@
 <body class="bg-gray-100 min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
     <div class="max-w-md w-full space-y-8">
         <div>
-            <h2 class="mt-6 text-center text-3xl font-extrabold text-gray-900">
-                ERP
-            </h2>
+            <div class="mt-6 flex justify-center">
+                <img src="{{ asset('images/kubik-vertical.svg') }}" alt="Kubik" class="h-20 w-auto">
+            </div>
             <p class="mt-2 text-center text-sm text-gray-600">
                 Добро пожаловать, {{ $employee->full_name }}!
             </p>

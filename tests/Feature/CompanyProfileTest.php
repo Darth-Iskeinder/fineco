@@ -182,20 +182,25 @@ class CompanyProfileTest extends TestCase
     }
 
     /**
-     * Пока логотипа нет, в меню стоит значок с буквой фирмы, а не логотип
-     * какой-то одной компании: система многофирменная.
+     * Свой логотип фирма пока не ставит: раздел «Логотип» убран из настроек
+     * (закомментирован в settings/profile.blade.php). В меню — знак системы,
+     * рядом название своей фирмы, чтобы было понятно, в чьих данных сидишь.
      */
-    public function test_without_a_logo_the_firms_initial_is_shown(): void
+    public function test_logo_upload_is_hidden_and_the_menu_carries_the_system_mark(): void
     {
         $manager = $this->employee(Role::MANAGER);
-
-        $this->assertSame(mb_substr($this->tenant->name, 0, 1), $this->tenant->initial());
 
         $this->actingAs($manager, 'employee')
             ->get(route('settings.profile'))
             ->assertOk()
-            ->assertSee('Логотип не загружен')
-            ->assertDontSee('Fineco-logo.png');
+            ->assertDontSee('Логотип')
+            ->assertDontSee('name="logo"', false);
+
+        $this->actingAs($manager, 'employee')
+            ->get(route('employees.index'))
+            ->assertOk()
+            ->assertSee('images/kubik-vertical.svg', false)
+            ->assertSee($this->tenant->name, false);
     }
 
     public function test_logo_is_uploaded_and_served_from_a_closed_disk(): void

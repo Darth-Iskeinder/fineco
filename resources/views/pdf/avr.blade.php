@@ -98,7 +98,7 @@
     @endif
 
     <div class="footer">
-        <span>ERP Fineco</span>
+        <span>Kubik</span>
         <span>{{ $months[$month] }} {{ $year }}</span>
     </div>
 </body>

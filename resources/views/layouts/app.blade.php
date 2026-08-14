@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>@yield('title', 'ERP')</title>
+    <title>@yield('title', 'Kubik')</title>
+    <link rel="icon" type="image/svg+xml" href="{{ asset('images/kubik-icon.svg') }}">
     {{-- Скомпилированный Tailwind (Vite). НЕ возвращать Play CDN (cdn.tailwindcss.com):
          он компилит CSS в браузере и пересканирует DOM на каждый рендер Alpine — это давало ~7с LCP. --}}
     @vite('resources/css/app.css')
@@ -91,25 +92,24 @@
         <aside class="w-72 bg-white border-r border-slate-200/80 flex flex-col fixed h-full shadow-sm">
             <!-- Logo -->
             @php
-                // Название своей фирмы, а не системы: аккаунтов теперь несколько,
-                // и по одному логотипу не понять, в чьих данных находишься.
+                // Знак системы — общий для всех, название рядом — своей фирмы:
+                // аккаунтов много, и по одному логотипу Kubik не понять,
+                // в чьих данных находишься.
                 $currentTenant     = auth('employee')->user()?->tenant;
-                $currentTenantName = $currentTenant?->name ?? 'ERP';
-                // Логотип загружает сама фирма. Пока его нет — значок с её
-                // буквой: система многофирменная, и показывать здесь логотип
-                // одной из фирм остальным нельзя.
-                $currentTenantLogo = $currentTenant?->logoUrl();
+                $currentTenantName = $currentTenant?->name;
             @endphp
             <div class="h-16 flex items-center px-6 border-b border-slate-100">
-                <a href="{{ route('employees.index') }}" class="flex items-center space-x-3 group min-w-0">
-                    @if ($currentTenantLogo)
-                        <img src="{{ $currentTenantLogo }}" alt="{{ $currentTenantName }}" class="h-9 w-auto max-w-[3rem] object-contain flex-shrink-0 transition-transform duration-300 group-hover:scale-105">
-                    @else
-                        <span class="h-9 w-9 flex-shrink-0 rounded-xl bg-gradient-to-br from-violet-500 to-indigo-600 text-white flex items-center justify-center text-base font-semibold transition-transform duration-300 group-hover:scale-105">{{ $currentTenant?->initial() ?? 'E' }}</span>
+                <a href="{{ route('employees.index') }}" class="flex items-center gap-3 group min-w-0">
+                    {{-- Вертикальный знак: куб сверху, «Kubik» под ним. Выше h-12 не берём —
+                         шапка меню ровно 64px и должна совпадать по высоте с шапкой страницы справа. --}}
+                    <img src="{{ asset('images/kubik-vertical.svg') }}" alt="Kubik"
+                         class="h-12 w-auto flex-shrink-0 transition-transform duration-300 group-hover:scale-105">
+                    @if ($currentTenantName)
+                        <span class="h-6 w-px bg-slate-200 flex-shrink-0"></span>
+                        {{-- Длинное название не должно ломать колонку: обрезаем, полное — в подсказке --}}
+                        <span title="{{ $currentTenantName }}"
+                              class="text-sm text-slate-500 truncate">{{ $currentTenantName }}</span>
                     @endif
-                    {{-- Длинное название не должно ломать колонку: обрезаем, полное — в подсказке --}}
-                    <span title="{{ $currentTenantName }}"
-                          class="text-lg font-semibold bg-gradient-to-r from-slate-800 to-slate-600 bg-clip-text text-transparent truncate">{{ $currentTenantName }}</span>
                 </a>
             </div>
 
@@ -235,7 +235,7 @@
             <!-- Header -->
             <header class="h-16 bg-white/80 backdrop-blur-xl border-b border-slate-200/50 flex items-center justify-between px-6 sticky top-0 z-10">
                 <div>
-                    <h1 class="text-lg font-semibold text-slate-800">@yield('page-title', 'ERP')</h1>
+                    <h1 class="text-lg font-semibold text-slate-800">@yield('page-title', 'Kubik')</h1>
                 </div>
                 <div class="flex items-center space-x-4">
                     @auth('employee')
