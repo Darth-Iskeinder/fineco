@@ -890,6 +890,12 @@
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                                             </svg>
                                         </button>
+                                        <a x-show="isSheetDoc(doc)" :href="doc.url + '/sheet/view'" target="_blank"
+                                           class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" title="Открыть во вкладке">
+                                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                            </svg>
+                                        </a>
                                         <a :href="doc.url" target="_blank" download
                                            class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" title="Скачать">
                                             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1680,6 +1686,11 @@
                         </div>
                     </div>
                     <div class="flex items-center gap-2 flex-shrink-0 ml-4">
+                        <a x-show="isSheetDoc(previewDoc)" :href="previewDoc?.url + '/sheet/view'" target="_blank"
+                           class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
+                            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                            Во вкладке
+                        </a>
                         <a :href="previewDoc?.url" target="_blank" download
                            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
                             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
@@ -1992,11 +2003,19 @@
                                                 <span class="text-slate-700" x-text="child.name"></span>
                                                 <template x-for="doc in child.documents" :key="doc.id">
                                                     <div class="flex items-center gap-2">
-                                                        <button type="button" x-show="canPreviewDoc(doc)" @click="openDocViewer(doc)"
-                                                                class="text-xs text-indigo-600 hover:text-indigo-700 hover:underline truncate"
-                                                                x-text="doc.name"></button>
+                                                        {{-- Ссылка, а не кнопка: обычный клик открывает окно, Ctrl+клик и
+                                                             колёсико — новую вкладку силами самого браузера --}}
+                                                        <a x-show="canPreviewDoc(doc)" :href="docTabUrl(doc)" @click="openDocFromLink($event, doc)"
+                                                           class="text-xs text-indigo-600 hover:text-indigo-700 hover:underline truncate"
+                                                           x-text="doc.name"></a>
                                                         <a x-show="!canPreviewDoc(doc)" :href="doc.url"
                                                            class="text-xs text-indigo-600 hover:text-indigo-700 hover:underline truncate" x-text="doc.name"></a>
+                                                        <a x-show="isSheetDoc(doc)" :href="docTabUrl(doc)" target="_blank"
+                                                           title="Открыть во вкладке" class="text-slate-300 hover:text-slate-500 shrink-0">
+                                                            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                                            </svg>
+                                                        </a>
                                                         <a :href="doc.url" title="Скачать" class="text-slate-300 hover:text-slate-500 shrink-0">
                                                             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -2015,9 +2034,10 @@
                                 <ul x-show="selected.documents.length > 0" class="space-y-1.5">
                                     <template x-for="doc in selected.documents" :key="doc.id">
                                         <li class="flex items-center gap-2">
-                                            {{-- PDF, картинки и таблицы открываем прямо в окне, остальное браузер скачает --}}
-                                            <button type="button" x-show="canPreviewDoc(doc)" @click="openDocViewer(doc)"
-                                                    class="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-700 hover:underline min-w-0">
+                                            {{-- PDF, картинки и таблицы открываем прямо в окне, остальное браузер скачает.
+                                                 Ссылкой, а не кнопкой: Ctrl+клик и колёсико тогда откроют новую вкладку --}}
+                                            <a x-show="canPreviewDoc(doc)" :href="docTabUrl(doc)" @click="openDocFromLink($event, doc)"
+                                               class="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-700 hover:underline min-w-0">
                                                 <svg x-show="!isImageDoc(doc) && !isSheetDoc(doc)" class="w-4 h-4 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                                 </svg>
@@ -2028,13 +2048,19 @@
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                                                 </svg>
                                                 <span class="truncate" x-text="doc.name"></span>
-                                            </button>
+                                            </a>
                                             <a x-show="!canPreviewDoc(doc)" :href="doc.url"
                                                class="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-700 hover:underline min-w-0">
                                                 <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
                                                 </svg>
                                                 <span class="truncate" x-text="doc.name"></span>
+                                            </a>
+                                            <a x-show="isSheetDoc(doc)" :href="docTabUrl(doc)" target="_blank" title="Открыть во вкладке"
+                                               class="p-1 rounded-md text-slate-300 hover:text-slate-600 hover:bg-slate-100 shrink-0">
+                                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                                </svg>
                                             </a>
                                             <a :href="doc.url" title="Скачать" class="p-1 rounded-md text-slate-300 hover:text-slate-600 hover:bg-slate-100 shrink-0">
                                                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -2079,7 +2105,7 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                         </svg>
                     </a>
-                    <a x-show="!docViewer.sheet" :href="docViewer.url" target="_blank" title="Открыть в новой вкладке"
+                    <a :href="docViewer.tabUrl" target="_blank" title="Открыть в новой вкладке"
                        class="shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
                         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
@@ -2142,7 +2168,7 @@ function taskHistory(clientId) {
         // Просмотр документа прямо в окне: PDF и картинку DocumentController отдаёт
         // с ?inline=1 — дальше их рисует браузер (iframe и <img>). Excel — особый
         // случай: браузеру его не отдать, таблицу разбирает сервер.
-        docViewer: { show: false, name: '', url: '', image: false, sheet: false },
+        docViewer: { show: false, name: '', url: '', tabUrl: '', image: false, sheet: false },
         sheetView: sheetPreview(),
 
         toggle() {
@@ -2250,11 +2276,31 @@ function taskHistory(clientId) {
             return /\.pdf$/i.test(doc?.name || '') || this.isImageDoc(doc) || this.isSheetDoc(doc);
         },
 
+        /**
+         * Куда ведёт «открыть во вкладке». PDF и картинку рисует сам браузер, а
+         * таблице нужна наша страница: .xlsx во вкладке он просто скачает.
+         */
+        docTabUrl(doc) {
+            return this.isSheetDoc(doc) ? doc.url + '/sheet/view' : doc.url + '?inline=1';
+        },
+
+        /**
+         * Клик по имени документа. Ctrl/Cmd/Shift и средняя кнопка не перехватываем —
+         * пусть браузер откроет вкладку сам: ради этого имя и сделано ссылкой.
+         */
+        openDocFromLink(event, doc) {
+            if (event.ctrlKey || event.metaKey || event.shiftKey || event.button !== 0) return;
+
+            event.preventDefault();
+            this.openDocViewer(doc);
+        },
+
         openDocViewer(doc) {
             this.docViewer = {
                 show: true,
                 name: doc.name,
                 url: doc.url + '?inline=1',
+                tabUrl: this.docTabUrl(doc),
                 image: this.isImageDoc(doc),
                 sheet: this.isSheetDoc(doc),
             };
@@ -2265,7 +2311,7 @@ function taskHistory(clientId) {
         },
 
         closeDocViewer() {
-            this.docViewer = { show: false, name: '', url: '', image: false, sheet: false };
+            this.docViewer = { show: false, name: '', url: '', tabUrl: '', image: false, sheet: false };
             this.sheetView.reset();
         },
 

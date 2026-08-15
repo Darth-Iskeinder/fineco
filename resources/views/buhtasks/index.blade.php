@@ -1569,12 +1569,13 @@
                             <template x-for="doc in (tasks[taskModalIdx].documents || [])" :key="doc.id">
                                 <div class="flex items-center gap-2">
                                     <template x-if="canPreviewDoc(doc)">
-                                        <button type="button" @click="openDocViewer(doc)"
-                                                title="Посмотреть, не покидая страницу"
-                                                class="inline-flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 underline truncate max-w-[240px] min-w-0">
+                                        {{-- Ссылка, а не кнопка: Ctrl+клик и колёсико откроют вкладку сами --}}
+                                        <a :href="docTabUrl(doc)" @click="openDocFromLink($event, doc)"
+                                           title="Посмотреть, не покидая страницу"
+                                           class="inline-flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 underline truncate max-w-[240px] min-w-0">
                                             <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
                                             <span class="truncate" x-text="doc.name"></span>
-                                        </button>
+                                        </a>
                                     </template>
                                     <template x-if="!canPreviewDoc(doc)">
                                         <a :href="doc.url" target="_blank"
@@ -1583,6 +1584,10 @@
                                             <span x-text="doc.name"></span>
                                         </a>
                                     </template>
+                                    <a x-show="isSheetDoc(doc)" :href="docTabUrl(doc)" target="_blank" title="Открыть во вкладке"
+                                       class="flex-shrink-0 text-slate-300 hover:text-slate-500 transition-colors">
+                                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                                    </a>
                                     <a x-show="canPreviewDoc(doc)" :href="doc.url" title="Скачать"
                                        class="flex-shrink-0 text-slate-300 hover:text-slate-500 transition-colors">
                                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
@@ -1645,17 +1650,21 @@
                                             <template x-for="doc in (child.documents || [])" :key="doc.id">
                                                 <div class="flex items-center gap-1.5 py-0.5">
                                                     <template x-if="canPreviewDoc(doc)">
-                                                        <button type="button" @click="openDocViewer(doc)"
-                                                                title="Посмотреть, не покидая страницу"
-                                                                class="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 underline truncate max-w-[170px] min-w-0">
+                                                        <a :href="docTabUrl(doc)" @click="openDocFromLink($event, doc)"
+                                                           title="Посмотреть, не покидая страницу"
+                                                           class="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 underline truncate max-w-[170px] min-w-0">
                                                             <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
                                                             <span class="truncate" x-text="doc.name"></span>
-                                                        </button>
+                                                        </a>
                                                     </template>
                                                     <template x-if="!canPreviewDoc(doc)">
                                                         <a :href="doc.url" target="_blank"
                                                            class="text-indigo-600 hover:text-indigo-800 underline truncate max-w-[180px]" x-text="doc.name"></a>
                                                     </template>
+                                                    <a x-show="isSheetDoc(doc)" :href="docTabUrl(doc)" target="_blank" title="Открыть во вкладке"
+                                                       class="flex-shrink-0 text-slate-300 hover:text-slate-500 transition-colors">
+                                                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                                                    </a>
                                                     <a x-show="canPreviewDoc(doc)" :href="doc.url" title="Скачать"
                                                        class="flex-shrink-0 text-slate-300 hover:text-slate-500 transition-colors">
                                                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
@@ -1864,12 +1873,12 @@
                             <template x-for="doc in (completedItem.documents || [])" :key="doc.id">
                                 <div class="flex items-center gap-1.5 max-w-[340px]">
                                     <template x-if="canPreviewDoc(doc)">
-                                        <button type="button" @click="openDocViewer(doc)"
-                                                title="Посмотреть, не покидая страницу"
-                                                class="flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 underline truncate min-w-0">
+                                        <a :href="docTabUrl(doc)" @click="openDocFromLink($event, doc)"
+                                           title="Посмотреть, не покидая страницу"
+                                           class="flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 underline truncate min-w-0">
                                             <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
                                             <span class="truncate" x-text="doc.name"></span>
-                                        </button>
+                                        </a>
                                     </template>
                                     <template x-if="!canPreviewDoc(doc)">
                                         <a :href="doc.url" target="_blank"
@@ -1878,6 +1887,10 @@
                                             <span class="truncate" x-text="doc.name"></span>
                                         </a>
                                     </template>
+                                    <a x-show="isSheetDoc(doc)" :href="docTabUrl(doc)" target="_blank" title="Открыть во вкладке"
+                                       class="flex-shrink-0 text-slate-300 hover:text-slate-500 transition-colors">
+                                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                                    </a>
                                     <a x-show="canPreviewDoc(doc)" :href="doc.url" title="Скачать"
                                        class="flex-shrink-0 text-slate-300 hover:text-slate-500 transition-colors">
                                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
@@ -1914,12 +1927,12 @@
                                             <template x-for="doc in (child.documents || [])" :key="doc.id">
                                                 <div class="flex items-center gap-1 max-w-[280px]">
                                                     <template x-if="canPreviewDoc(doc)">
-                                                        <button type="button" @click="openDocViewer(doc)"
-                                                                title="Посмотреть, не покидая страницу"
-                                                                class="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 underline truncate min-w-0">
+                                                        <a :href="docTabUrl(doc)" @click="openDocFromLink($event, doc)"
+                                                           title="Посмотреть, не покидая страницу"
+                                                           class="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 underline truncate min-w-0">
                                                             <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
                                                             <span class="truncate" x-text="doc.name"></span>
-                                                        </button>
+                                                        </a>
                                                     </template>
                                                     <template x-if="!canPreviewDoc(doc)">
                                                         <a :href="doc.url" target="_blank"
@@ -1928,6 +1941,10 @@
                                                             <span class="truncate" x-text="doc.name"></span>
                                                         </a>
                                                     </template>
+                                                    <a x-show="isSheetDoc(doc)" :href="docTabUrl(doc)" target="_blank" title="Открыть во вкладке"
+                                                       class="flex-shrink-0 text-slate-300 hover:text-slate-500 transition-colors">
+                                                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                                                    </a>
                                                 </div>
                                             </template>
                                         </div>
@@ -1960,7 +1977,7 @@
                    class="flex-shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
                     <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                 </a>
-                <a x-show="!docViewer.sheet" :href="docViewer.url" target="_blank" title="Открыть в новой вкладке"
+                <a :href="docViewer.tabUrl" target="_blank" title="Открыть в новой вкладке"
                    class="flex-shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
                     <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                 </a>
@@ -2017,7 +2034,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         completedWithDoc: false,    // «Только с документом» — по умолчанию выключен, ничего не прячем
         // Просмотр документа прямо в окне: PDF отдаётся браузеру с ?inline=1,
         // дальше его рисует встроенный просмотрщик браузера в iframe.
-        docViewer: { show: false, name: '', url: '', sheet: false },
+        docViewer: { show: false, name: '', url: '', tabUrl: '', sheet: false },
         sheetView: sheetPreview(),
         year,
         month,
@@ -2725,6 +2742,23 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         canPreviewDoc(doc) {
             return this.isPdf(doc) || this.isSheetDoc(doc);
         },
+        /**
+         * Куда ведёт «открыть во вкладке». PDF браузер рисует сам, а таблице нужна
+         * наша страница: .xlsx во вкладке он просто скачает.
+         */
+        docTabUrl(doc) {
+            return this.isSheetDoc(doc) ? doc.url + '/sheet/view' : doc.url + '?inline=1';
+        },
+        /**
+         * Клик по имени документа. Ctrl/Cmd/Shift и среднюю кнопку не перехватываем —
+         * пусть браузер откроет вкладку сам: ради этого имя и сделано ссылкой.
+         */
+        openDocFromLink(event, doc) {
+            if (event.ctrlKey || event.metaKey || event.shiftKey || event.button !== 0) return;
+
+            event.preventDefault();
+            this.openDocViewer(doc);
+        },
         openDocViewer(doc) {
             // inline=1 — единственный режим, в котором контроллер отдаёт файл
             // с Content-Disposition: inline (и только для разрешённых типов).
@@ -2732,6 +2766,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 show: true,
                 name: doc.name,
                 url: doc.url + '?inline=1',
+                tabUrl: this.docTabUrl(doc),
                 sheet: this.isSheetDoc(doc),
             };
 
@@ -2740,7 +2775,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             }
         },
         closeDocViewer() {
-            this.docViewer = { show: false, name: '', url: '', sheet: false };
+            this.docViewer = { show: false, name: '', url: '', tabUrl: '', sheet: false };
             this.sheetView.reset();
         },
 

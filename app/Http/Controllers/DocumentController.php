@@ -8,6 +8,7 @@ use App\Models\ClientDocument;
 use App\Models\Employee;
 use App\Services\ClientTaskHistory;
 use App\Services\SpreadsheetPreview;
+use Illuminate\Contracts\View\View;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -84,6 +85,39 @@ class DocumentController extends Controller
         $this->authorizeTaskDocument($document, $history);
 
         return $this->sheet($preview, $document->path, $document->name);
+    }
+
+    /**
+     * Таблица клиента отдельной страницей. Нужна, чтобы открыть несколько файлов
+     * в разных вкладках и сверять цифры глазами: в окне поверх карточки так не
+     * получится, а сам .xlsx браузер не рисует.
+     */
+    public function clientSheetPage(ClientDocument $document, SpreadsheetPreview $preview): View
+    {
+        $this->authorizeModule('clients');
+
+        return $this->sheetPage(
+            $preview,
+            $document->path,
+            $document->original_name ?: $document->name,
+            route('documents.client', $document),
+        );
+    }
+
+    /** Таблица, приложенная к задаче, отдельной страницей. */
+    public function taskSheetPage(
+        BuhTaskDocument $document,
+        ClientTaskHistory $history,
+        SpreadsheetPreview $preview,
+    ): View {
+        $this->authorizeTaskDocument($document, $history);
+
+        return $this->sheetPage(
+            $preview,
+            $document->path,
+            $document->name,
+            route('documents.task', $document),
+        );
     }
 
     private function authorizeTaskDocument(BuhTaskDocument $document, ClientTaskHistory $history): void
@@ -191,6 +225,52 @@ class DocumentController extends Controller
         }
 
         return response()->json($data + ['name' => $name]);
+    }
+
+    /**
+     * Страница просмотра. Ошибку показываем на ней же: человек пришёл сюда по
+     * ссылке из списка документов, и пустая страница с 500 ему ничего не скажет.
+     */
+    private function sheetPage(
+        SpreadsheetPreview $preview,
+        string $path,
+        string $name,
+        string $downloadUrl,
+    ): View {
+        abort_if(str_contains($path, '..'), 404);
+        abort_unless($preview->supports($name), 415, 'Этот файл не таблица');
+
+        $disk = Storage::disk('local');
+
+        abort_unless($disk->exists($path), 404, 'Файл не найден');
+
+        $data = null;
+        $reason = null;
+
+        try {
+            $data = $preview->read(
+                $disk->path($path),
+                $name,
+                SpreadsheetPreview::PAGE_ROWS,
+                SpreadsheetPreview::PAGE_COLUMNS,
+            );
+        } catch (\Throwable $e) {
+            Log::error('Не удалось разобрать таблицу для просмотра', [
+                'file'  => $name,
+                'path'  => $path,
+                'error' => $e->getMessage(),
+            ]);
+
+            // Причину показываем только в отладке — на боевом она остаётся в логе.
+            $reason = config('app.debug') ? $e->getMessage() : null;
+        }
+
+        return view('documents.sheet', [
+            'name'        => $name,
+            'downloadUrl' => $downloadUrl,
+            'data'        => $data,
+            'reason'      => $reason,
+        ]);
     }
 
     /**

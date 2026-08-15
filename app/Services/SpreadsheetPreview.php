@@ -35,8 +35,16 @@ class SpreadsheetPreview
     /** Дальше парсер съедает слишком много памяти — такой файл проще скачать. */
     private const MAX_BYTES = 15 * 1024 * 1024;
 
-    private const MAX_ROWS = 300;
-    private const MAX_COLUMNS = 40;
+    /**
+     * Сколько показываем. В окне поверх карточки — только начало: туда заглядывают
+     * «глянуть, что приложили». На отдельной странице человек работает с таблицей
+     * (сверяет цифры, ищет по Ctrl+F), поэтому там лимит на порядок выше.
+     */
+    public const MODAL_ROWS = 300;
+    public const MODAL_COLUMNS = 40;
+    public const PAGE_ROWS = 2000;
+    public const PAGE_COLUMNS = 60;
+
     private const MAX_SHEETS = 20;
 
     public function supports(string $name): bool
@@ -51,8 +59,12 @@ class SpreadsheetPreview
     /**
      * @return array{sheets: list<array{name: string, rows: list<list<string>>, columns: int, truncated: bool}>, truncated: bool, limits: array{rows: int, columns: int}}
      */
-    public function read(string $absolutePath, string $name): array
-    {
+    public function read(
+        string $absolutePath,
+        string $name,
+        int $maxRows = self::MODAL_ROWS,
+        int $maxColumns = self::MODAL_COLUMNS,
+    ): array {
         if (!$this->supports($name)) {
             throw new RuntimeException('Этот файл не таблица');
         }
@@ -77,7 +89,7 @@ class SpreadsheetPreview
                     break;
                 }
 
-                $data = $this->readSheet($sheet);
+                $data = $this->readSheet($sheet, $maxRows, $maxColumns);
                 $sheets[] = $data;
                 $truncated = $truncated || $data['truncated'];
             }
@@ -90,7 +102,7 @@ class SpreadsheetPreview
         return [
             'sheets'    => $sheets,
             'truncated' => $truncated,
-            'limits'    => ['rows' => self::MAX_ROWS, 'columns' => self::MAX_COLUMNS],
+            'limits'    => ['rows' => $maxRows, 'columns' => $maxColumns],
         ];
     }
 
@@ -162,12 +174,12 @@ class SpreadsheetPreview
     /**
      * @return array{name: string, rows: list<list<string>>, columns: int, truncated: bool}
      */
-    private function readSheet(Worksheet $sheet): array
+    private function readSheet(Worksheet $sheet, int $maxRows, int $maxColumns): array
     {
-        $lastRow = min($sheet->getHighestDataRow(), self::MAX_ROWS);
+        $lastRow = min($sheet->getHighestDataRow(), $maxRows);
         $lastColumnIndex = min(
             Coordinate::columnIndexFromString($sheet->getHighestDataColumn()),
-            self::MAX_COLUMNS,
+            $maxColumns,
         );
 
         $rows = [];
@@ -192,8 +204,8 @@ class SpreadsheetPreview
             'name'      => $sheet->getTitle(),
             'rows'      => array_values($rows),
             'columns'   => $lastColumnIndex,
-            'truncated' => $sheet->getHighestDataRow() > self::MAX_ROWS
-                || Coordinate::columnIndexFromString($sheet->getHighestDataColumn()) > self::MAX_COLUMNS,
+            'truncated' => $sheet->getHighestDataRow() > $maxRows
+                || Coordinate::columnIndexFromString($sheet->getHighestDataColumn()) > $maxColumns,
         ];
     }
 

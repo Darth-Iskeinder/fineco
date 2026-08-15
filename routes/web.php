@@ -88,6 +88,11 @@ Route::middleware('auth:employee')->group(function () {
     Route::get('/documents/client/{document}/sheet', [DocumentController::class, 'clientSheet'])->name('documents.client.sheet');
     Route::get('/documents/task/{document}/sheet', [DocumentController::class, 'taskSheet'])->name('documents.task.sheet');
 
+    // Та же таблица, но отдельной страницей: её открывают во вкладке, чтобы
+    // разложить рядом несколько файлов и сверять цифры.
+    Route::get('/documents/client/{document}/sheet/view', [DocumentController::class, 'clientSheetPage'])->name('documents.client.sheet.view');
+    Route::get('/documents/task/{document}/sheet/view', [DocumentController::class, 'taskSheetPage'])->name('documents.task.sheet.view');
+
     // Логотип своей фирмы: нужен в шапке на каждой странице, поэтому вне
     // настроек — видеть его должны все сотрудники, а не только допущенные туда.
     Route::get('/company/logo', [CompanyProfileController::class, 'logo'])->name('company.logo');

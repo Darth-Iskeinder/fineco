@@ -11,6 +11,7 @@ use App\Models\Module;
 use App\Models\Periodicity;
 use App\Models\Role;
 use App\Models\Service;
+use App\Services\SpreadsheetPreview;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Storage;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
@@ -159,6 +160,19 @@ class DocumentDownloadTest extends TestCase
 
         $writer = $extension === 'xls' ? new XlsWriter($book) : new XlsxWriter($book);
         $writer->save($absolutePath);
+        $book->disconnectWorksheets();
+    }
+
+    private function writeLongSpreadsheet(string $absolutePath, int $rows): void
+    {
+        $book = new Spreadsheet();
+        $sheet = $book->getActiveSheet();
+
+        for ($row = 1; $row <= $rows; $row++) {
+            $sheet->setCellValue('A' . $row, 'строка ' . $row);
+        }
+
+        (new XlsxWriter($book))->save($absolutePath);
         $book->disconnectWorksheets();
     }
 
@@ -480,6 +494,100 @@ class DocumentDownloadTest extends TestCase
             ->getJson(route('documents.task.sheet', $doc))
             ->assertStatus(422)
             ->assertJsonStructure(['message']);
+    }
+
+    /**
+     * Отдельная страница просмотра: её открывают во вкладке, чтобы разложить
+     * рядом несколько файлов. Проверяем, что таблица нарисована прямо в HTML —
+     * иначе Ctrl+F по цифрам работать не будет.
+     */
+    public function test_task_spreadsheet_opens_as_page(): void
+    {
+        [, $doc] = $this->makeTaskSheetDocument();
+
+        $response = $this->actingAs($this->accountant, 'employee')
+            ->get(route('documents.task.sheet.view', $doc))
+            ->assertOk();
+
+        $response->assertSee('отчёт.xlsx');       // имя файла — заголовок вкладки
+        $response->assertSee('Контрагент');       // шапка таблицы
+        $response->assertSee('05.03.2026');       // дата осталась датой
+        $response->assertSee(route('documents.task', $doc));  // ссылка «Скачать»
+    }
+
+    /** Страница клиента открывается так же. */
+    public function test_client_spreadsheet_opens_as_page(): void
+    {
+        $path = 'clients/' . $this->client->id . '/реестр.xlsx';
+        Storage::disk('local')->put($path, 'placeholder');
+        $this->writeSpreadsheet(Storage::disk('local')->path($path), 'xlsx');
+
+        $doc = $this->client->documents()->create([
+            'name' => 'реестр.xlsx', 'original_name' => 'Реестр платежей.xlsx',
+            'path' => $path, 'mime_type' => 'application/zip', 'size' => 1,
+        ]);
+
+        $this->actingAs($this->accountant, 'employee')
+            ->get(route('documents.client.sheet.view', $doc))
+            ->assertOk()
+            ->assertSee('Реестр платежей.xlsx');
+    }
+
+    /** На странице лимит выше, чем в окне: с ней работают, а не заглядывают. */
+    public function test_page_shows_more_rows_than_modal(): void
+    {
+        [$log, ] = $this->makeTaskDocument();
+
+        $path = 'buh_task_documents/' . $log->id . '/длинный.xlsx';
+        Storage::disk('local')->put($path, 'placeholder');
+        $this->writeLongSpreadsheet(Storage::disk('local')->path($path), 500);
+        $doc = $log->documents()->create(['path' => $path, 'name' => 'длинный.xlsx']);
+
+        // В окне — только начало, и об этом честно сказано
+        $this->actingAs($this->accountant, 'employee')
+            ->getJson(route('documents.task.sheet', $doc))
+            ->assertOk()
+            ->assertJsonPath('truncated', true)
+            ->assertJsonCount(SpreadsheetPreview::MODAL_ROWS, 'sheets.0.rows');
+
+        // На странице видно всю пятисотую строку
+        $this->actingAs($this->accountant, 'employee')
+            ->get(route('documents.task.sheet.view', $doc))
+            ->assertOk()
+            ->assertSee('строка 500');
+    }
+
+    /** Права на страницу те же, что и на файл. */
+    public function test_page_is_closed_for_employee_without_module(): void
+    {
+        [, $doc] = $this->makeTaskSheetDocument();
+
+        $this->actingAs($this->outsider, 'employee')
+            ->get(route('documents.task.sheet.view', $doc))
+            ->assertForbidden();
+    }
+
+    public function test_guest_cannot_open_sheet_page(): void
+    {
+        [, $doc] = $this->makeTaskSheetDocument();
+
+        $this->get(route('documents.task.sheet.view', $doc))
+            ->assertRedirect('/login');
+    }
+
+    /** Битый файл — страница с объяснением, а не пятисотка. */
+    public function test_broken_spreadsheet_page_explains_itself(): void
+    {
+        [$log, ] = $this->makeTaskDocument();
+
+        $path = 'buh_task_documents/' . $log->id . '/битый.xlsx';
+        Storage::disk('local')->put($path, random_bytes(2048));
+        $doc = $log->documents()->create(['path' => $path, 'name' => 'битый.xlsx']);
+
+        $this->actingAs($this->accountant, 'employee')
+            ->get(route('documents.task.sheet.view', $doc))
+            ->assertOk()
+            ->assertSee('Не удалось показать таблицу', false);
     }
 
     /** Путь на диске наружу не отдаётся — во фронт уходит только ссылка. */
