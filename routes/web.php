@@ -83,6 +83,11 @@ Route::middleware('auth:employee')->group(function () {
     Route::get('/documents/client/{document}', [DocumentController::class, 'client'])->name('documents.client');
     Route::get('/documents/task/{document}', [DocumentController::class, 'task'])->name('documents.task');
 
+    // Excel браузер не рисует, поэтому таблицу разбираем на сервере и отдаём
+    // просмотрщику её содержимое. Права те же, что и у самого файла выше.
+    Route::get('/documents/client/{document}/sheet', [DocumentController::class, 'clientSheet'])->name('documents.client.sheet');
+    Route::get('/documents/task/{document}/sheet', [DocumentController::class, 'taskSheet'])->name('documents.task.sheet');
+
     // Логотип своей фирмы: нужен в шапке на каждой странице, поэтому вне
     // настроек — видеть его должны все сотрудники, а не только допущенные туда.
     Route::get('/company/logo', [CompanyProfileController::class, 'logo'])->name('company.logo');

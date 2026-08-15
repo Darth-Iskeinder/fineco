@@ -513,6 +513,9 @@
         }
     </script>
 
+    {{-- Общие Alpine-компоненты страниц: должны объявиться до старта Alpine ниже --}}
+    @stack('scripts')
+
     <!-- Alpine.js for dropdown -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </body>

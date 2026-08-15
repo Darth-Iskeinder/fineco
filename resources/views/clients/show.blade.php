@@ -882,7 +882,7 @@
                                     </div>
                                     <!-- Кнопки действий -->
                                     <div class="flex items-center gap-1 flex-shrink-0">
-                                        <button x-show="canPreview(doc.mime_type)"
+                                        <button x-show="canPreview(doc)"
                                                 @click="openPreview(doc)" type="button"
                                                 class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" title="Просмотр">
                                             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1711,6 +1711,13 @@
                         </div>
                     </template>
 
+                    <!-- Excel: показать нечем, поэтому таблицу разбирает сервер -->
+                    <template x-if="isSheetDoc(previewDoc)">
+                        <div class="w-full h-full flex flex-col">
+                            @include('partials.sheet-preview', ['state' => 'sheetView'])
+                        </div>
+                    </template>
+
                 </div>
             </div>
         </div>
@@ -2008,11 +2015,14 @@
                                 <ul x-show="selected.documents.length > 0" class="space-y-1.5">
                                     <template x-for="doc in selected.documents" :key="doc.id">
                                         <li class="flex items-center gap-2">
-                                            {{-- PDF и картинки открываем прямо в окне, остальное браузер скачает --}}
+                                            {{-- PDF, картинки и таблицы открываем прямо в окне, остальное браузер скачает --}}
                                             <button type="button" x-show="canPreviewDoc(doc)" @click="openDocViewer(doc)"
                                                     class="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-700 hover:underline min-w-0">
-                                                <svg x-show="!isImageDoc(doc)" class="w-4 h-4 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <svg x-show="!isImageDoc(doc) && !isSheetDoc(doc)" class="w-4 h-4 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                </svg>
+                                                <svg x-show="isSheetDoc(doc)" class="w-4 h-4 text-emerald-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                                                 </svg>
                                                 <svg x-show="isImageDoc(doc)" class="w-4 h-4 text-sky-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -2045,15 +2055,19 @@
         </div>
 
         {{-- Просмотрщик документа: поверх карточки задачи (z выше), чтобы, закрыв его,
-             вернуться к деталям. Ссылка одна и та же — с ?inline=1, различается только
-             чем рисуем: PDF отдаём встроенному просмотрщику браузера в iframe, картинку — <img>. --}}
+             вернуться к деталям. Чем рисуем — зависит от типа: PDF отдаём встроенному
+             просмотрщику браузера в iframe, картинку — <img>, а Excel браузер не умеет
+             вовсе, поэтому таблицу разбирает сервер и мы рисуем её сами. --}}
         <div x-show="docViewer.show" x-transition.opacity
              class="fixed inset-0 z-[60] flex flex-col bg-black/70 p-3 sm:p-6"
              @click.self="closeDocViewer()" @keydown.escape.window="closeDocViewer()" style="display:none">
             <div class="w-full max-w-5xl mx-auto flex flex-col flex-1 min-h-0 bg-white rounded-2xl shadow-2xl overflow-hidden">
                 <div class="flex items-center gap-3 px-4 py-3 border-b border-slate-100 shrink-0">
-                    <svg x-show="!docViewer.image" class="w-5 h-5 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg x-show="!docViewer.image && !docViewer.sheet" class="w-5 h-5 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <svg x-show="docViewer.sheet" class="w-5 h-5 text-emerald-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                     </svg>
                     <svg x-show="docViewer.image" class="w-5 h-5 text-sky-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
@@ -2065,7 +2079,7 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                         </svg>
                     </a>
-                    <a :href="docViewer.url" target="_blank" title="Открыть в новой вкладке"
+                    <a x-show="!docViewer.sheet" :href="docViewer.url" target="_blank" title="Открыть в новой вкладке"
                        class="shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
                         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
@@ -2079,7 +2093,7 @@
                     </button>
                 </div>
                 {{-- Содержимое создаём только когда просмотрщик открыт: иначе браузер тянет файл заранее --}}
-                <template x-if="docViewer.show && !docViewer.image">
+                <template x-if="docViewer.show && !docViewer.image && !docViewer.sheet">
                     <iframe :src="docViewer.url" :title="docViewer.name" class="flex-1 w-full min-h-0 border-0"></iframe>
                 </template>
                 <template x-if="docViewer.show && docViewer.image">
@@ -2087,6 +2101,9 @@
                         <img :src="docViewer.url" :alt="docViewer.name"
                              class="max-w-full max-h-full object-contain rounded-lg shadow-md select-none">
                     </div>
+                </template>
+                <template x-if="docViewer.show && docViewer.sheet">
+                    @include('partials.sheet-preview', ['state' => 'sheetView'])
                 </template>
             </div>
         </div>
@@ -2122,9 +2139,11 @@ function taskHistory(clientId) {
         detailLoading: false,
         detailError: '',
 
-        // Просмотр документа прямо в окне: DocumentController отдаёт файл с ?inline=1,
-        // дальше PDF рисует встроенный просмотрщик браузера в iframe, картинку — <img>.
-        docViewer: { show: false, name: '', url: '', image: false },
+        // Просмотр документа прямо в окне: PDF и картинку DocumentController отдаёт
+        // с ?inline=1 — дальше их рисует браузер (iframe и <img>). Excel — особый
+        // случай: браузеру его не отдать, таблицу разбирает сервер.
+        docViewer: { show: false, name: '', url: '', image: false, sheet: false },
+        sheetView: sheetPreview(),
 
         toggle() {
             this.open = !this.open;
@@ -2213,18 +2232,22 @@ function taskHistory(clientId) {
         },
 
         /**
-         * Показываем в окне PDF и растровые картинки — их рисует сам браузер.
-         * Остальное (в том числе SVG: это XML, внутри может быть скрипт) отдаём
-         * ссылкой на скачивание. Тип определяем по расширению — с сервера приходят
-         * только id, имя и ссылка. Контроллер всё равно перепроверяет реальный mime
-         * и отдаёт inline только то, что безопасно.
+         * В окне показываем PDF и растровые картинки (их рисует сам браузер) и
+         * таблицы Excel (их разбирает сервер). Остальное — ссылкой на скачивание;
+         * SVG исключён намеренно: это XML, внутри может быть скрипт. Тип определяем
+         * по расширению — с сервера приходят только id, имя и ссылка. Контроллер
+         * всё равно перепроверяет реальный mime и отдаёт inline только безопасное.
          */
         isImageDoc(doc) {
             return /\.(jpe?g|png|gif|webp|bmp)$/i.test(doc?.name || '');
         },
 
+        isSheetDoc(doc) {
+            return /\.(xlsx?|xlsm|ods)$/i.test(doc?.name || '');
+        },
+
         canPreviewDoc(doc) {
-            return /\.pdf$/i.test(doc?.name || '') || this.isImageDoc(doc);
+            return /\.pdf$/i.test(doc?.name || '') || this.isImageDoc(doc) || this.isSheetDoc(doc);
         },
 
         openDocViewer(doc) {
@@ -2233,11 +2256,17 @@ function taskHistory(clientId) {
                 name: doc.name,
                 url: doc.url + '?inline=1',
                 image: this.isImageDoc(doc),
+                sheet: this.isSheetDoc(doc),
             };
+
+            if (this.docViewer.sheet) {
+                this.sheetView.load(doc);
+            }
         },
 
         closeDocViewer() {
-            this.docViewer = { show: false, name: '', url: '', image: false };
+            this.docViewer = { show: false, name: '', url: '', image: false, sheet: false };
+            this.sheetView.reset();
         },
 
         /**
@@ -2325,6 +2354,7 @@ function clientShow() {
         uploadDragging: false,
         uploadingDocs: false,
         showPreview: false,
+        sheetView: sheetPreview(),
         previewDoc: null,
 
         editing: {
@@ -2587,19 +2617,35 @@ function clientShow() {
             return daysUntil > 0 && daysUntil <= 30;
         },
 
-        canPreview(mimeType) {
-            if (!mimeType) return false;
-            return mimeType === 'application/pdf' || mimeType.startsWith('image/');
+        /**
+         * Excel определяем по расширению, а не по mime: браузеры присылают .xlsx то
+         * как таблицу, то как zip, и у старых загрузок в базе лежит что попало.
+         */
+        isSheetDoc(doc) {
+            return /\.(xlsx?|xlsm|ods)$/i.test(doc?.original_name || doc?.name || '');
+        },
+
+        canPreview(doc) {
+            const mimeType = doc?.mime_type;
+
+            return this.isSheetDoc(doc)
+                || mimeType === 'application/pdf'
+                || !!mimeType?.startsWith('image/');
         },
 
         openPreview(doc) {
             this.previewDoc = doc;
             this.showPreview = true;
+
+            if (this.isSheetDoc(doc)) {
+                this.sheetView.load(doc);
+            }
         },
 
         closePreview() {
             this.showPreview = false;
             this.previewDoc = null;
+            this.sheetView.reset();
         },
 
         contactTypeLabel(type) {

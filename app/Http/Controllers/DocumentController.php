@@ -7,6 +7,8 @@ use App\Models\Client;
 use App\Models\ClientDocument;
 use App\Models\Employee;
 use App\Services\ClientTaskHistory;
+use App\Services\SpreadsheetPreview;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -16,7 +18,9 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  *
  * Раньше файлы лежали на публичном диске и раздавались напрямую по /storage/...,
  * то есть без авторизации и по угадываемому пути. Теперь единственный вход —
- * эти два роута: сессия сотрудника (auth:employee) плюс доступ к модулю.
+ * роуты этого контроллера: сессия сотрудника (auth:employee) плюс доступ к модулю.
+ * Их два вида: сам файл (client/task) и разобранная таблица для просмотрщика
+ * (clientSheet/taskSheet) — Excel браузер не рисует, поэтому его читает сервер.
  *
  * Права намеренно совпадают с видимостью списка: кто видит модуль задач, тот
  * видит и документы задач (главбух проверяет чужие задачи, руководитель и
@@ -54,6 +58,35 @@ class DocumentController extends Controller
      */
     public function task(Request $request, BuhTaskDocument $document, ClientTaskHistory $history): StreamedResponse
     {
+        $this->authorizeTaskDocument($document, $history);
+
+        return $this->serve($request, $document->path, $document->name);
+    }
+
+    /**
+     * Содержимое таблицы клиента для просмотрщика. Доступ тот же, что и к файлу:
+     * иначе через разбор можно было бы прочитать то, что скачать нельзя.
+     */
+    public function clientSheet(ClientDocument $document, SpreadsheetPreview $preview): JsonResponse
+    {
+        $this->authorizeModule('clients');
+
+        return $this->sheet($preview, $document->path, $document->original_name ?: $document->name);
+    }
+
+    /** Содержимое таблицы, приложенной к задаче. */
+    public function taskSheet(
+        BuhTaskDocument $document,
+        ClientTaskHistory $history,
+        SpreadsheetPreview $preview,
+    ): JsonResponse {
+        $this->authorizeTaskDocument($document, $history);
+
+        return $this->sheet($preview, $document->path, $document->name);
+    }
+
+    private function authorizeTaskDocument(BuhTaskDocument $document, ClientTaskHistory $history): void
+    {
         $employee = auth('employee')->user();
 
         abort_unless(
@@ -64,8 +97,6 @@ class DocumentController extends Controller
             403,
             'У вас нет доступа к этому документу',
         );
-
-        return $this->serve($request, $document->path, $document->name);
     }
 
     /**
@@ -124,6 +155,34 @@ class DocumentController extends Controller
         }
 
         return $disk->download($path, $name, $headers);
+    }
+
+    /**
+     * Разбираем таблицу и отдаём её текстом. Сам файл наружу тут не уходит:
+     * фронт рисует из этого обычную HTML-таблицу.
+     */
+    private function sheet(SpreadsheetPreview $preview, string $path, string $name): JsonResponse
+    {
+        abort_if(str_contains($path, '..'), 404);
+        abort_unless($preview->supports($name), 415, 'Этот файл не таблица');
+
+        $disk = Storage::disk('local');
+
+        abort_unless($disk->exists($path), 404, 'Файл не найден');
+
+        try {
+            $data = $preview->read($disk->path($path), $name);
+        } catch (\Throwable $e) {
+            // Битый или слишком тяжёлый файл — не повод для пятисотки: показываем
+            // причину, скачать его человек всё равно сможет.
+            report($e);
+
+            return response()->json([
+                'message' => 'Не удалось показать таблицу — скачайте файл, чтобы открыть его в Excel',
+            ], 422);
+        }
+
+        return response()->json($data + ['name' => $name]);
     }
 
     /**

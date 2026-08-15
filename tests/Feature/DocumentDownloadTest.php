@@ -13,6 +13,11 @@ use App\Models\Role;
 use App\Models\Service;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Storage;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
+use PhpOffice\PhpSpreadsheet\Shared\Date as SharedDate;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xls as XlsWriter;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx as XlsxWriter;
 use Tests\TestCase;
 
 /**
@@ -125,6 +130,36 @@ class DocumentDownloadTest extends TestCase
         ]);
 
         return [$log, $image];
+    }
+
+    /** Настоящий .xlsx на диске: просмотр таблицы читает файл, а не запись в БД. */
+    private function makeTaskSheetDocument(string $extension = 'xlsx'): array
+    {
+        [$log, ] = $this->makeTaskDocument();
+
+        $path = 'buh_task_documents/' . $log->id . '/отчёт.' . $extension;
+        Storage::disk('local')->put($path, 'placeholder');
+        $this->writeSpreadsheet(Storage::disk('local')->path($path), $extension);
+
+        $doc = $log->documents()->create(['path' => $path, 'name' => 'отчёт.' . $extension]);
+
+        return [$log, $doc];
+    }
+
+    private function writeSpreadsheet(string $absolutePath, string $extension): void
+    {
+        $book = new Spreadsheet();
+        $sheet = $book->getActiveSheet();
+        $sheet->setTitle('Реестр');
+        $sheet->fromArray([['Дата', 'Контрагент', 'Сумма']], null, 'A1');
+        $sheet->setCellValue('A2', SharedDate::PHPToExcel(new \DateTime('2026-03-05')));
+        $sheet->getStyle('A2')->getNumberFormat()->setFormatCode('dd.mm.yyyy');
+        $sheet->setCellValueExplicit('B2', '00700123456', DataType::TYPE_STRING);
+        $sheet->setCellValue('C2', 1500.5);
+
+        $writer = $extension === 'xls' ? new XlsWriter($book) : new XlsxWriter($book);
+        $writer->save($absolutePath);
+        $book->disconnectWorksheets();
     }
 
     private function makeClientDocument(string $mime = 'application/pdf'): ClientDocument
@@ -333,6 +368,88 @@ class DocumentDownloadTest extends TestCase
             ->assertNotFound();
 
         $this->assertFalse(file_exists(public_path('storage')), 'Симлинк public/storage вернулся');
+    }
+
+    /**
+     * Excel браузер не рисует, поэтому просмотрщик просит у сервера содержимое.
+     * Проверяем и .xlsx, и старый .xls: клиенты приносят оба.
+     */
+    public function test_task_spreadsheet_is_returned_as_rows(): void
+    {
+        foreach (['xlsx', 'xls'] as $extension) {
+            [, $doc] = $this->makeTaskSheetDocument($extension);
+
+            $response = $this->actingAs($this->accountant, 'employee')
+                ->getJson(route('documents.task.sheet', $doc))
+                ->assertOk();
+
+            $response->assertJsonPath('sheets.0.name', 'Реестр');
+            $response->assertJsonPath('sheets.0.rows.0', ['Дата', 'Контрагент', 'Сумма']);
+            // Дата остаётся датой, а не числом 46086; текстовый номер не теряет нули.
+            $response->assertJsonPath('sheets.0.rows.1.0', '05.03.2026');
+            $response->assertJsonPath('sheets.0.rows.1.1', '00700123456');
+        }
+    }
+
+    /** Права те же, что и на сам файл: разбор не должен становиться обходным путём. */
+    public function test_employee_without_module_cannot_read_spreadsheet(): void
+    {
+        [, $doc] = $this->makeTaskSheetDocument();
+
+        $this->actingAs($this->outsider, 'employee')
+            ->getJson(route('documents.task.sheet', $doc))
+            ->assertForbidden();
+    }
+
+    public function test_guest_cannot_read_spreadsheet(): void
+    {
+        [, $doc] = $this->makeTaskSheetDocument();
+
+        $this->getJson(route('documents.task.sheet', $doc))
+            ->assertUnauthorized();
+    }
+
+    /** Таблица клиента открывается так же, как таблица задачи. */
+    public function test_client_spreadsheet_is_returned_as_rows(): void
+    {
+        $path = 'clients/' . $this->client->id . '/реестр.xlsx';
+        Storage::disk('local')->put($path, 'placeholder');
+        $this->writeSpreadsheet(Storage::disk('local')->path($path), 'xlsx');
+
+        $doc = $this->client->documents()->create([
+            'name' => 'реестр.xlsx', 'original_name' => 'Реестр платежей.xlsx',
+            'path' => $path, 'mime_type' => 'application/zip', 'size' => 1,
+        ]);
+
+        $this->actingAs($this->accountant, 'employee')
+            ->getJson(route('documents.client.sheet', $doc))
+            ->assertOk()
+            ->assertJsonPath('sheets.0.rows.0.0', 'Дата');
+    }
+
+    /** Не таблица — не разбираем: для PDF есть свой просмотрщик. */
+    public function test_non_spreadsheet_is_rejected(): void
+    {
+        [, $doc] = $this->makeTaskDocument();
+
+        $this->actingAs($this->accountant, 'employee')
+            ->getJson(route('documents.task.sheet', $doc))
+            ->assertStatus(415);
+    }
+
+    /** Битый файл с расширением таблицы — понятное сообщение, а не пятисотка. */
+    public function test_broken_spreadsheet_gives_message_instead_of_error(): void
+    {
+        [$log, ] = $this->makeTaskDocument();
+
+        $path = 'buh_task_documents/' . $log->id . '/битый.xlsx';
+        Storage::disk('local')->put($path, 'это совсем не таблица');
+        $doc = $log->documents()->create(['path' => $path, 'name' => 'битый.xlsx']);
+
+        $this->actingAs($this->accountant, 'employee')
+            ->getJson(route('documents.task.sheet', $doc))
+            ->assertStatus(422)
+            ->assertJsonStructure(['message']);
     }
 
     /** Путь на диске наружу не отдаётся — во фронт уходит только ссылка. */

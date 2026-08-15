@@ -743,7 +743,7 @@
                             </template>
                         </div>
                         {{-- Скрепка: сразу видно, есть ли документ, без открывания карточки.
-                             Клик по ней — просмотр (один PDF) или карточка (несколько файлов). --}}
+                             Клик по ней — просмотр (один PDF или Excel) или карточка (несколько файлов). --}}
                         <span class="flex-shrink-0 w-9 flex justify-end">
                             <button type="button" x-show="docCount(c) > 0"
                                     @click.stop="openDocFromRow(c)"
@@ -1563,12 +1563,12 @@
                         <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5"
                            x-text="tasks[taskModalIdx].requires_document ? 'Документы для закрытия' : 'Документы (необязательно)'"></p>
                         <div class="space-y-1">
-                            {{-- PDF открывается тут же во встроенном просмотрщике (это нужно проверяющему,
+                            {{-- PDF и Excel открываются тут же в окне (это нужно проверяющему,
                                  чтобы не скачивать файл ради приёмки), рядом иконка скачивания.
                                  Остальные типы — как раньше, ссылкой. --}}
                             <template x-for="doc in (tasks[taskModalIdx].documents || [])" :key="doc.id">
                                 <div class="flex items-center gap-2">
-                                    <template x-if="isPdf(doc)">
+                                    <template x-if="canPreviewDoc(doc)">
                                         <button type="button" @click="openDocViewer(doc)"
                                                 title="Посмотреть, не покидая страницу"
                                                 class="inline-flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 underline truncate max-w-[240px] min-w-0">
@@ -1576,14 +1576,14 @@
                                             <span class="truncate" x-text="doc.name"></span>
                                         </button>
                                     </template>
-                                    <template x-if="!isPdf(doc)">
+                                    <template x-if="!canPreviewDoc(doc)">
                                         <a :href="doc.url" target="_blank"
                                            class="inline-flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 underline truncate max-w-[260px]">
                                             <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                                             <span x-text="doc.name"></span>
                                         </a>
                                     </template>
-                                    <a x-show="isPdf(doc)" :href="doc.url" title="Скачать"
+                                    <a x-show="canPreviewDoc(doc)" :href="doc.url" title="Скачать"
                                        class="flex-shrink-0 text-slate-300 hover:text-slate-500 transition-colors">
                                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                                     </a>
@@ -1644,7 +1644,7 @@
                                         <div class="mt-1 ml-6 text-xs">
                                             <template x-for="doc in (child.documents || [])" :key="doc.id">
                                                 <div class="flex items-center gap-1.5 py-0.5">
-                                                    <template x-if="isPdf(doc)">
+                                                    <template x-if="canPreviewDoc(doc)">
                                                         <button type="button" @click="openDocViewer(doc)"
                                                                 title="Посмотреть, не покидая страницу"
                                                                 class="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 underline truncate max-w-[170px] min-w-0">
@@ -1652,11 +1652,11 @@
                                                             <span class="truncate" x-text="doc.name"></span>
                                                         </button>
                                                     </template>
-                                                    <template x-if="!isPdf(doc)">
+                                                    <template x-if="!canPreviewDoc(doc)">
                                                         <a :href="doc.url" target="_blank"
                                                            class="text-indigo-600 hover:text-indigo-800 underline truncate max-w-[180px]" x-text="doc.name"></a>
                                                     </template>
-                                                    <a x-show="isPdf(doc)" :href="doc.url" title="Скачать"
+                                                    <a x-show="canPreviewDoc(doc)" :href="doc.url" title="Скачать"
                                                        class="flex-shrink-0 text-slate-300 hover:text-slate-500 transition-colors">
                                                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                                                     </a>
@@ -1859,11 +1859,11 @@
                     <div class="mt-4 pt-4 border-t border-slate-100">
                         <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Прикреплённые документы</p>
                         <div class="space-y-1">
-                            {{-- PDF открывается тут же во встроенном просмотрщике,
+                            {{-- PDF и Excel открываются тут же в окне,
                                  рядом иконка скачивания. Остальные типы — как раньше, ссылкой. --}}
                             <template x-for="doc in (completedItem.documents || [])" :key="doc.id">
                                 <div class="flex items-center gap-1.5 max-w-[340px]">
-                                    <template x-if="isPdf(doc)">
+                                    <template x-if="canPreviewDoc(doc)">
                                         <button type="button" @click="openDocViewer(doc)"
                                                 title="Посмотреть, не покидая страницу"
                                                 class="flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 underline truncate min-w-0">
@@ -1871,14 +1871,14 @@
                                             <span class="truncate" x-text="doc.name"></span>
                                         </button>
                                     </template>
-                                    <template x-if="!isPdf(doc)">
+                                    <template x-if="!canPreviewDoc(doc)">
                                         <a :href="doc.url" target="_blank"
                                            class="flex items-center gap-1.5 text-sm text-indigo-600 hover:text-indigo-800 underline truncate min-w-0">
                                             <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                                             <span class="truncate" x-text="doc.name"></span>
                                         </a>
                                     </template>
-                                    <a x-show="isPdf(doc)" :href="doc.url" title="Скачать"
+                                    <a x-show="canPreviewDoc(doc)" :href="doc.url" title="Скачать"
                                        class="flex-shrink-0 text-slate-300 hover:text-slate-500 transition-colors">
                                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                                     </a>
@@ -1913,7 +1913,7 @@
                                         <div class="mt-1 text-xs space-y-0.5" style="margin-left:1.625rem">
                                             <template x-for="doc in (child.documents || [])" :key="doc.id">
                                                 <div class="flex items-center gap-1 max-w-[280px]">
-                                                    <template x-if="isPdf(doc)">
+                                                    <template x-if="canPreviewDoc(doc)">
                                                         <button type="button" @click="openDocViewer(doc)"
                                                                 title="Посмотреть, не покидая страницу"
                                                                 class="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 underline truncate min-w-0">
@@ -1921,7 +1921,7 @@
                                                             <span class="truncate" x-text="doc.name"></span>
                                                         </button>
                                                     </template>
-                                                    <template x-if="!isPdf(doc)">
+                                                    <template x-if="!canPreviewDoc(doc)">
                                                         <a :href="doc.url" target="_blank"
                                                            class="flex items-center gap-1 text-indigo-600 hover:text-indigo-800 underline truncate min-w-0">
                                                             <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
@@ -1941,8 +1941,9 @@
         </template>
     </div>
 
-    {{-- Просмотрщик PDF: поверх карточки задачи, чтобы, закрыв его, вернуться к деталям.
-         Рисует сам браузер — iframe на ссылку документа с ?inline=1. --}}
+    {{-- Просмотрщик документа: поверх карточки задачи, чтобы, закрыв его, вернуться к деталям.
+         PDF рисует сам браузер — iframe на ссылку с ?inline=1. Excel он не умеет вовсе,
+         поэтому таблицу разбирает сервер, а тут она превращается в обычную таблицу. --}}
     <div x-show="docViewer.show"
          x-transition:enter="ease-out duration-150"
          x-transition:enter-start="opacity-0"
@@ -1952,13 +1953,14 @@
          style="display:none">
         <div class="w-full max-w-5xl mx-auto flex flex-col flex-1 min-h-0 bg-white rounded-2xl shadow-2xl overflow-hidden">
             <div class="flex items-center gap-3 px-4 py-3 border-b border-slate-100 flex-shrink-0">
-                <svg class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                <svg x-show="!docViewer.sheet" class="w-5 h-5 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                <svg x-show="docViewer.sheet" class="w-5 h-5 text-emerald-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
                 <p class="text-sm font-medium text-slate-700 truncate flex-1" x-text="docViewer.name"></p>
                 <a :href="docViewer.url.replace('?inline=1', '')" title="Скачать"
                    class="flex-shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
                     <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
                 </a>
-                <a :href="docViewer.url" target="_blank" title="Открыть в новой вкладке"
+                <a x-show="!docViewer.sheet" :href="docViewer.url" target="_blank" title="Открыть в новой вкладке"
                    class="flex-shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
                     <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                 </a>
@@ -1967,9 +1969,12 @@
                     <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                 </button>
             </div>
-            {{-- iframe создаём только когда просмотрщик открыт: иначе браузер тянет файл заранее --}}
-            <template x-if="docViewer.show">
+            {{-- Содержимое создаём только когда просмотрщик открыт: иначе браузер тянет файл заранее --}}
+            <template x-if="docViewer.show && !docViewer.sheet">
                 <iframe :src="docViewer.url" :title="docViewer.name" class="flex-1 w-full min-h-0 border-0"></iframe>
+            </template>
+            <template x-if="docViewer.show && docViewer.sheet">
+                @include('partials.sheet-preview', ['state' => 'sheetView'])
             </template>
         </div>
     </div>
@@ -2010,9 +2015,10 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         completedPeriod: 'all',     // 'all' | 'today' | 'd7' | 'd30' — по дате выполнения
         completedDoer: 'all',       // 'all' | 'mine' (свои) | employee_id
         completedWithDoc: false,    // «Только с документом» — по умолчанию выключен, ничего не прячем
-        // Просмотр PDF прямо в окне: DocumentController отдаёт файл с ?inline=1,
+        // Просмотр документа прямо в окне: PDF отдаётся браузеру с ?inline=1,
         // дальше его рисует встроенный просмотрщик браузера в iframe.
-        docViewer: { show: false, name: '', url: '' },
+        docViewer: { show: false, name: '', url: '', sheet: false },
+        sheetView: sheetPreview(),
         year,
         month,
         allClients,
@@ -2707,28 +2713,45 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         },
 
         // === Просмотр документа без ухода со страницы ===
-        // Показываем только PDF: остальные типы браузер либо скачает, либо покажет
-        // непредсказуемо. Тип определяем по расширению — с сервера приходят только id, имя и ссылка.
+        // Показываем PDF (его рисует браузер) и Excel (его разбирает сервер): остальное
+        // браузер либо скачает, либо покажет непредсказуемо. Тип определяем по расширению —
+        // с сервера приходят только id, имя и ссылка.
         isPdf(doc) {
             return /\.pdf$/i.test(doc?.name || '');
+        },
+        isSheetDoc(doc) {
+            return /\.(xlsx?|xlsm|ods)$/i.test(doc?.name || '');
+        },
+        canPreviewDoc(doc) {
+            return this.isPdf(doc) || this.isSheetDoc(doc);
         },
         openDocViewer(doc) {
             // inline=1 — единственный режим, в котором контроллер отдаёт файл
             // с Content-Disposition: inline (и только для разрешённых типов).
-            this.docViewer = { show: true, name: doc.name, url: doc.url + '?inline=1' };
+            this.docViewer = {
+                show: true,
+                name: doc.name,
+                url: doc.url + '?inline=1',
+                sheet: this.isSheetDoc(doc),
+            };
+
+            if (this.docViewer.sheet) {
+                this.sheetView.load(doc);
+            }
         },
         closeDocViewer() {
-            this.docViewer = { show: false, name: '', url: '' };
+            this.docViewer = { show: false, name: '', url: '', sheet: false };
+            this.sheetView.reset();
         },
 
         /**
-         * Клик по скрепке в строке «Выполненных». Один PDF — сразу открываем просмотр
-         * (ради этого скрепка и кликабельная). Если файлов несколько или это не PDF,
-         * показываем карточку задачи: там видны имена и можно выбрать нужный.
+         * Клик по скрепке в строке «Выполненных». Один просматриваемый файл — сразу
+         * открываем просмотр (ради этого скрепка и кликабельная). Если файлов несколько
+         * или тип не открыть, показываем карточку задачи: там видны имена и можно выбрать.
          */
         openDocFromRow(c) {
             const docs = c.documents || [];
-            if (docs.length === 1 && this.isPdf(docs[0])) {
+            if (docs.length === 1 && this.canPreviewDoc(docs[0])) {
                 this.openDocViewer(docs[0]);
 
                 return;
