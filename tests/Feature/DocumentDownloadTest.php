@@ -110,6 +110,23 @@ class DocumentDownloadTest extends TestCase
         return [$log, $doc];
     }
 
+    /** Картинка на диске настоящая: mime документа задачи определяется по содержимому. */
+    private function makeTaskImageDocument(): array
+    {
+        [$log, $doc] = $this->makeTaskDocument();
+
+        $png = base64_decode(
+            'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+        );
+        Storage::disk('local')->put('buh_task_documents/' . $log->id . '/скан.png', $png);
+        $image = $log->documents()->create([
+            'path' => 'buh_task_documents/' . $log->id . '/скан.png',
+            'name' => 'скан.png',
+        ]);
+
+        return [$log, $image];
+    }
+
     private function makeClientDocument(string $mime = 'application/pdf'): ClientDocument
     {
         Storage::disk('local')->put('clients/' . $this->client->id . '/устав.pdf', '%PDF-1.4 тест');
@@ -237,6 +254,23 @@ class DocumentDownloadTest extends TestCase
             ->get(route('documents.task', $doc) . '?inline=1')
             ->assertOk()
             ->assertHeader('Content-Type', 'application/pdf')
+            ->assertHeader('X-Content-Type-Options', 'nosniff');
+
+        $this->assertStringContainsString('inline', $response->headers->get('Content-Disposition'));
+    }
+
+    /**
+     * Просмотрщик истории задач открывает в окне не только PDF, но и картинки —
+     * рисует их <img> по той же ссылке с ?inline=1.
+     */
+    public function test_task_image_opens_inline_for_preview(): void
+    {
+        [, $doc] = $this->makeTaskImageDocument();
+
+        $response = $this->actingAs($this->accountant, 'employee')
+            ->get(route('documents.task', $doc) . '?inline=1')
+            ->assertOk()
+            ->assertHeader('Content-Type', 'image/png')
             ->assertHeader('X-Content-Type-Options', 'nosniff');
 
         $this->assertStringContainsString('inline', $response->headers->get('Content-Disposition'));

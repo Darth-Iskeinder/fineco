@@ -1985,10 +1985,10 @@
                                                 <span class="text-slate-700" x-text="child.name"></span>
                                                 <template x-for="doc in child.documents" :key="doc.id">
                                                     <div class="flex items-center gap-2">
-                                                        <button type="button" x-show="isPdf(doc)" @click="openDocViewer(doc)"
+                                                        <button type="button" x-show="canPreviewDoc(doc)" @click="openDocViewer(doc)"
                                                                 class="text-xs text-indigo-600 hover:text-indigo-700 hover:underline truncate"
                                                                 x-text="doc.name"></button>
-                                                        <a x-show="!isPdf(doc)" :href="doc.url"
+                                                        <a x-show="!canPreviewDoc(doc)" :href="doc.url"
                                                            class="text-xs text-indigo-600 hover:text-indigo-700 hover:underline truncate" x-text="doc.name"></a>
                                                         <a :href="doc.url" title="Скачать" class="text-slate-300 hover:text-slate-500 shrink-0">
                                                             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -2008,15 +2008,18 @@
                                 <ul x-show="selected.documents.length > 0" class="space-y-1.5">
                                     <template x-for="doc in selected.documents" :key="doc.id">
                                         <li class="flex items-center gap-2">
-                                            {{-- PDF открываем прямо в окне, остальное браузер скачает --}}
-                                            <button type="button" x-show="isPdf(doc)" @click="openDocViewer(doc)"
+                                            {{-- PDF и картинки открываем прямо в окне, остальное браузер скачает --}}
+                                            <button type="button" x-show="canPreviewDoc(doc)" @click="openDocViewer(doc)"
                                                     class="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-700 hover:underline min-w-0">
-                                                <svg class="w-4 h-4 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <svg x-show="!isImageDoc(doc)" class="w-4 h-4 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                </svg>
+                                                <svg x-show="isImageDoc(doc)" class="w-4 h-4 text-sky-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                                                 </svg>
                                                 <span class="truncate" x-text="doc.name"></span>
                                             </button>
-                                            <a x-show="!isPdf(doc)" :href="doc.url"
+                                            <a x-show="!canPreviewDoc(doc)" :href="doc.url"
                                                class="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-700 hover:underline min-w-0">
                                                 <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
@@ -2041,15 +2044,19 @@
             </div>
         </div>
 
-        {{-- Просмотрщик PDF: поверх карточки задачи (z выше), чтобы, закрыв его, вернуться
-             к деталям. Рисует встроенный просмотрщик браузера — iframe на ссылку с ?inline=1. --}}
+        {{-- Просмотрщик документа: поверх карточки задачи (z выше), чтобы, закрыв его,
+             вернуться к деталям. Ссылка одна и та же — с ?inline=1, различается только
+             чем рисуем: PDF отдаём встроенному просмотрщику браузера в iframe, картинку — <img>. --}}
         <div x-show="docViewer.show" x-transition.opacity
              class="fixed inset-0 z-[60] flex flex-col bg-black/70 p-3 sm:p-6"
              @click.self="closeDocViewer()" @keydown.escape.window="closeDocViewer()" style="display:none">
             <div class="w-full max-w-5xl mx-auto flex flex-col flex-1 min-h-0 bg-white rounded-2xl shadow-2xl overflow-hidden">
                 <div class="flex items-center gap-3 px-4 py-3 border-b border-slate-100 shrink-0">
-                    <svg class="w-5 h-5 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <svg x-show="!docViewer.image" class="w-5 h-5 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    <svg x-show="docViewer.image" class="w-5 h-5 text-sky-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
                     <p class="text-sm font-medium text-slate-700 truncate flex-1" x-text="docViewer.name"></p>
                     <a :href="docViewer.url.replace('?inline=1', '')" title="Скачать"
@@ -2071,9 +2078,15 @@
                         </svg>
                     </button>
                 </div>
-                {{-- iframe создаём только когда просмотрщик открыт: иначе браузер тянет файл заранее --}}
-                <template x-if="docViewer.show">
+                {{-- Содержимое создаём только когда просмотрщик открыт: иначе браузер тянет файл заранее --}}
+                <template x-if="docViewer.show && !docViewer.image">
                     <iframe :src="docViewer.url" :title="docViewer.name" class="flex-1 w-full min-h-0 border-0"></iframe>
+                </template>
+                <template x-if="docViewer.show && docViewer.image">
+                    <div class="flex-1 min-h-0 overflow-auto bg-slate-100 flex items-center justify-center p-4">
+                        <img :src="docViewer.url" :alt="docViewer.name"
+                             class="max-w-full max-h-full object-contain rounded-lg shadow-md select-none">
+                    </div>
                 </template>
             </div>
         </div>
@@ -2109,9 +2122,9 @@ function taskHistory(clientId) {
         detailLoading: false,
         detailError: '',
 
-        // Просмотр PDF прямо в окне: DocumentController отдаёт файл с ?inline=1,
-        // дальше его рисует встроенный просмотрщик браузера в iframe.
-        docViewer: { show: false, name: '', url: '' },
+        // Просмотр документа прямо в окне: DocumentController отдаёт файл с ?inline=1,
+        // дальше PDF рисует встроенный просмотрщик браузера в iframe, картинку — <img>.
+        docViewer: { show: false, name: '', url: '', image: false },
 
         toggle() {
             this.open = !this.open;
@@ -2200,27 +2213,37 @@ function taskHistory(clientId) {
         },
 
         /**
-         * Показываем в окне только PDF: остальные типы браузер либо скачает, либо
-         * покажет непредсказуемо. Тип определяем по расширению — с сервера приходят
+         * Показываем в окне PDF и растровые картинки — их рисует сам браузер.
+         * Остальное (в том числе SVG: это XML, внутри может быть скрипт) отдаём
+         * ссылкой на скачивание. Тип определяем по расширению — с сервера приходят
          * только id, имя и ссылка. Контроллер всё равно перепроверяет реальный mime
          * и отдаёт inline только то, что безопасно.
          */
-        isPdf(doc) {
-            return /\.pdf$/i.test(doc?.name || '');
+        isImageDoc(doc) {
+            return /\.(jpe?g|png|gif|webp|bmp)$/i.test(doc?.name || '');
+        },
+
+        canPreviewDoc(doc) {
+            return /\.pdf$/i.test(doc?.name || '') || this.isImageDoc(doc);
         },
 
         openDocViewer(doc) {
-            this.docViewer = { show: true, name: doc.name, url: doc.url + '?inline=1' };
+            this.docViewer = {
+                show: true,
+                name: doc.name,
+                url: doc.url + '?inline=1',
+                image: this.isImageDoc(doc),
+            };
         },
 
         closeDocViewer() {
-            this.docViewer = { show: false, name: '', url: '' };
+            this.docViewer = { show: false, name: '', url: '', image: false };
         },
 
         /**
-         * Клик по скрепке в строке списка. Один PDF — открываем сразу, ради этого
-         * скрепка и кликабельная. Иначе показываем карточку задачи: там видны имена
-         * файлов и можно выбрать нужный.
+         * Клик по скрепке в строке списка. Один просматриваемый файл — открываем
+         * сразу, ради этого скрепка и кликабельная. Иначе показываем карточку задачи:
+         * там видны имена файлов и можно выбрать нужный.
          */
         async openDocsFromRow(row) {
             if (row.documents_count === 0) return;
@@ -2228,7 +2251,7 @@ function taskHistory(clientId) {
             await this.openTask(row);
 
             const docs = this.selected?.documents ?? [];
-            if (docs.length === 1 && this.isPdf(docs[0])) {
+            if (docs.length === 1 && this.canPreviewDoc(docs[0])) {
                 this.openDocViewer(docs[0]);
             }
         },
