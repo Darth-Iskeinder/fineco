@@ -58,7 +58,11 @@ class SpreadsheetPreview
         }
 
         $size = @filesize($absolutePath);
-        if ($size === false || $size > self::MAX_BYTES) {
+        if ($size === false) {
+            throw new RuntimeException('Файл не читается с диска');
+        }
+
+        if ($size > self::MAX_BYTES) {
             throw new RuntimeException('Файл слишком большой для просмотра');
         }
 
@@ -91,33 +95,60 @@ class SpreadsheetPreview
     }
 
     /**
-     * Читаем со стилями: без них дата превращается в число вроде 45870, а сумма —
-     * в 10.500000000001. Но стили тянут за собой и картинки внутри .xls, а их
-     * библиотека разбирает через gd. Если расширения нет — перечитываем голые
-     * значения: лучше показать таблицу с числом вместо даты, чем не показать её.
+     * Подбираем читателя. Сначала по расширению — имя приходит из нашей БД, это
+     * дёшево и точно. Если не вышло, определяем по содержимому: «.xls» из 1С,
+     * банк-клиента или почты сплошь и рядом оказывается HTML-таблицей или текстом,
+     * и настоящий Xls-ридер на нём падает.
+     *
+     * Второй заход каждого читателя — без стилей. Стили тянут за собой картинки
+     * внутри .xls, а их библиотека разбирает через gd; если расширения нет, лучше
+     * показать таблицу с датой в виде числа, чем не показать её вовсе.
      */
     private function load(string $absolutePath, string $name): Spreadsheet
     {
-        $reader = IOFactory::createReader($this->readerName($name));
+        $failures = [];
 
-        try {
-            return $reader->load($absolutePath);
-        } catch (\Throwable $e) {
-            if (function_exists('imagecreatefromstring')) {
-                throw $e;
+        foreach ($this->readerNames($absolutePath, $name) as $readerName) {
+            foreach ([false, true] as $readDataOnly) {
+                try {
+                    $reader = IOFactory::createReader($readerName);
+                    $reader->setReadDataOnly($readDataOnly);
+
+                    return $reader->load($absolutePath);
+                } catch (\Throwable $e) {
+                    $failures[] = $readerName . ': ' . $e->getMessage();
+                }
             }
-
-            $reader = IOFactory::createReader($this->readerName($name));
-            $reader->setReadDataOnly(true);
-
-            return $reader->load($absolutePath);
         }
+
+        throw new RuntimeException('Файл не читается как таблица (' . implode('; ', array_unique($failures)) . ')');
     }
 
     /**
-     * Читатель по расширению, а не по содержимому: имя приходит из нашей БД, а
-     * автоопределение библиотеки само открывает файл всеми ридерами подряд.
+     * @return list<string>
      */
+    private function readerNames(string $absolutePath, string $name): array
+    {
+        $names = [$this->readerName($name)];
+
+        try {
+            // Список задаём явно: без него identify перебирает вообще всё, что умеет
+            // библиотека, включая форматы, которых у нас быть не может.
+            $detected = IOFactory::identify($absolutePath, [
+                IOFactory::READER_XLSX,
+                IOFactory::READER_XLS,
+                IOFactory::READER_ODS,
+                IOFactory::READER_HTML,
+                IOFactory::READER_CSV,
+            ]);
+        } catch (\Throwable) {
+            return $names;
+        }
+
+        return in_array($detected, $names, true) ? $names : [...$names, $detected];
+    }
+
+    /** Читатель по расширению: имя файла приходит из нашей БД, а не от браузера. */
     private function readerName(string $name): string
     {
         return match (strtolower(pathinfo($name, PATHINFO_EXTENSION))) {

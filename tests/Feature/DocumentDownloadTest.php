@@ -391,6 +391,32 @@ class DocumentDownloadTest extends TestCase
         }
     }
 
+    /**
+     * 1С, банк-клиенты и почта регулярно отдают «.xls», внутри которого HTML-таблица
+     * или текст с табуляциями. Excel такое открывает — значит, и просмотр должен.
+     */
+    public function test_fake_xls_from_1c_is_still_shown(): void
+    {
+        $html = '<html><body><table>'
+            . '<tr><td>Дата</td><td>Контрагент</td></tr>'
+            . '<tr><td>05.03.2026</td><td>ОсОО Ромашка</td></tr>'
+            . '</table></body></html>';
+
+        foreach (['выписка.xls' => $html, 'реестр.xls' => "Дата\tКонтрагент\n05.03.2026\tОсОО Ромашка\n"] as $fileName => $content) {
+            [$log, ] = $this->makeTaskDocument();
+
+            $path = 'buh_task_documents/' . $log->id . '/' . $fileName;
+            Storage::disk('local')->put($path, $content);
+            $doc = $log->documents()->create(['path' => $path, 'name' => $fileName]);
+
+            $this->actingAs($this->accountant, 'employee')
+                ->getJson(route('documents.task.sheet', $doc))
+                ->assertOk()
+                ->assertJsonPath('sheets.0.rows.0.0', 'Дата')
+                ->assertJsonPath('sheets.0.rows.1.1', 'ОсОО Ромашка');
+        }
+    }
+
     /** Права те же, что и на сам файл: разбор не должен становиться обходным путём. */
     public function test_employee_without_module_cannot_read_spreadsheet(): void
     {
@@ -437,13 +463,17 @@ class DocumentDownloadTest extends TestCase
             ->assertStatus(415);
     }
 
-    /** Битый файл с расширением таблицы — понятное сообщение, а не пятисотка. */
+    /**
+     * Битый файл с расширением таблицы — понятное сообщение, а не пятисотка.
+     * Кладём именно двоичный мусор: обычный текст с расширением .xlsx система
+     * теперь показывает как таблицу из одной колонки, и это правильно.
+     */
     public function test_broken_spreadsheet_gives_message_instead_of_error(): void
     {
         [$log, ] = $this->makeTaskDocument();
 
         $path = 'buh_task_documents/' . $log->id . '/битый.xlsx';
-        Storage::disk('local')->put($path, 'это совсем не таблица');
+        Storage::disk('local')->put($path, random_bytes(2048));
         $doc = $log->documents()->create(['path' => $path, 'name' => 'битый.xlsx']);
 
         $this->actingAs($this->accountant, 'employee')

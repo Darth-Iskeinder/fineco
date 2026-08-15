@@ -10,6 +10,7 @@ use App\Services\ClientTaskHistory;
 use App\Services\SpreadsheetPreview;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -174,11 +175,18 @@ class DocumentController extends Controller
             $data = $preview->read($disk->path($path), $name);
         } catch (\Throwable $e) {
             // Битый или слишком тяжёлый файл — не повод для пятисотки: показываем
-            // причину, скачать его человек всё равно сможет.
-            report($e);
+            // причину, скачать его человек всё равно сможет. В лог кладём имя файла:
+            // без него «не удалось показать таблицу» невозможно разобрать постфактум.
+            Log::error('Не удалось разобрать таблицу для просмотра', [
+                'file'  => $name,
+                'path'  => $path,
+                'error' => $e->getMessage(),
+            ]);
 
             return response()->json([
                 'message' => 'Не удалось показать таблицу — скачайте файл, чтобы открыть его в Excel',
+                // В отладке показываем причину прямо в окне: иначе до неё добираться через логи.
+                'reason'  => config('app.debug') ? $e->getMessage() : null,
             ], 422);
         }
 

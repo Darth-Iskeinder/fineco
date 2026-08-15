@@ -20,7 +20,7 @@
     </div>
 
     <div x-show="!{{ $state }}.loading && {{ $state }}.error" class="flex-1 flex items-center justify-center p-6">
-        <p class="text-sm text-slate-500 text-center" x-text="{{ $state }}.error"></p>
+        <p class="text-sm text-slate-500 text-center whitespace-pre-line" x-text="{{ $state }}.error"></p>
     </div>
 
     <template x-if="!{{ $state }}.loading && !{{ $state }}.error && {{ $state }}.sheets.length > 0">
@@ -95,7 +95,10 @@
                         const data = await response.json().catch(() => ({}));
 
                         if (!response.ok) {
-                            this.error = data.message || 'Не удалось открыть таблицу — скачайте файл';
+                            // reason приходит только при APP_DEBUG: настоящая причина отказа
+                            this.error = [data.message || 'Не удалось открыть таблицу — скачайте файл', data.reason]
+                                .filter(Boolean)
+                                .join('\n\n');
                             return;
                         }
 
