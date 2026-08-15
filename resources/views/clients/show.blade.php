@@ -890,7 +890,7 @@
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                                             </svg>
                                         </button>
-                                        <a x-show="isSheetDoc(doc)" :href="doc.url + '/sheet/view'" target="_blank"
+                                        <a x-show="canPreview(doc)" :href="docTabUrl(doc)" target="_blank"
                                            class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" title="Открыть во вкладке">
                                             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
@@ -1686,7 +1686,7 @@
                         </div>
                     </div>
                     <div class="flex items-center gap-2 flex-shrink-0 ml-4">
-                        <a x-show="isSheetDoc(previewDoc)" :href="previewDoc?.url + '/sheet/view'" target="_blank"
+                        <a x-show="canPreview(previewDoc)" :href="docTabUrl(previewDoc)" target="_blank"
                            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors">
                             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                             Во вкладке
@@ -1706,11 +1706,10 @@
                 <!-- Контент -->
                 <div class="flex-1 overflow-hidden bg-slate-100 relative">
 
-                    <!-- PDF -->
-                    <template x-if="previewDoc?.mime_type === 'application/pdf'">
+                    <!-- PDF и текст: и то и другое рисует сам браузер -->
+                    <template x-if="previewDoc?.mime_type === 'application/pdf' || isTextDoc(previewDoc)">
                         <iframe :src="previewDoc.url + '?inline=1#toolbar=1&navpanes=0&scrollbar=1'"
-                                class="w-full h-full border-0 block"
-                                type="application/pdf"></iframe>
+                                class="w-full h-full border-0 block"></iframe>
                     </template>
 
                     <!-- Изображения -->
@@ -2010,7 +2009,7 @@
                                                            x-text="doc.name"></a>
                                                         <a x-show="!canPreviewDoc(doc)" :href="doc.url"
                                                            class="text-xs text-indigo-600 hover:text-indigo-700 hover:underline truncate" x-text="doc.name"></a>
-                                                        <a x-show="isSheetDoc(doc)" :href="docTabUrl(doc)" target="_blank"
+                                                        <a x-show="canPreviewDoc(doc)" :href="docTabUrl(doc)" target="_blank"
                                                            title="Открыть во вкладке" class="text-slate-300 hover:text-slate-500 shrink-0">
                                                             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
@@ -2056,7 +2055,7 @@
                                                 </svg>
                                                 <span class="truncate" x-text="doc.name"></span>
                                             </a>
-                                            <a x-show="isSheetDoc(doc)" :href="docTabUrl(doc)" target="_blank" title="Открыть во вкладке"
+                                            <a x-show="canPreviewDoc(doc)" :href="docTabUrl(doc)" target="_blank" title="Открыть во вкладке"
                                                class="p-1 rounded-md text-slate-300 hover:text-slate-600 hover:bg-slate-100 shrink-0">
                                                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
@@ -2269,11 +2268,18 @@ function taskHistory(clientId) {
         },
 
         isSheetDoc(doc) {
-            return /\.(xlsx?|xlsm|ods)$/i.test(doc?.name || '');
+            return /\.(xlsx?|xlsm|ods|csv)$/i.test(doc?.name || '');
+        },
+
+        isTextDoc(doc) {
+            return /\.(txt|log)$/i.test(doc?.name || '');
         },
 
         canPreviewDoc(doc) {
-            return /\.pdf$/i.test(doc?.name || '') || this.isImageDoc(doc) || this.isSheetDoc(doc);
+            return /\.pdf$/i.test(doc?.name || '')
+                || this.isImageDoc(doc)
+                || this.isSheetDoc(doc)
+                || this.isTextDoc(doc);
         },
 
         /**
@@ -2281,6 +2287,9 @@ function taskHistory(clientId) {
          * таблице нужна наша страница: .xlsx во вкладке он просто скачает.
          */
         docTabUrl(doc) {
+            // Вызывается и на закрытом окне, когда документа ещё (или уже) нет
+            if (!doc?.url) return '#';
+
             return this.isSheetDoc(doc) ? doc.url + '/sheet/view' : doc.url + '?inline=1';
         },
 
@@ -2668,15 +2677,28 @@ function clientShow() {
          * как таблицу, то как zip, и у старых загрузок в базе лежит что попало.
          */
         isSheetDoc(doc) {
-            return /\.(xlsx?|xlsm|ods)$/i.test(doc?.original_name || doc?.name || '');
+            return /\.(xlsx?|xlsm|ods|csv)$/i.test(doc?.original_name || doc?.name || '');
+        },
+
+        isTextDoc(doc) {
+            return /\.(txt|log)$/i.test(doc?.original_name || doc?.name || '');
         },
 
         canPreview(doc) {
             const mimeType = doc?.mime_type;
 
             return this.isSheetDoc(doc)
+                || this.isTextDoc(doc)
                 || mimeType === 'application/pdf'
                 || !!mimeType?.startsWith('image/');
+        },
+
+        /** Таблице нужна наша страница, остальное браузер рисует сам по ?inline=1. */
+        docTabUrl(doc) {
+            // Вызывается и на закрытом окне, когда документа ещё (или уже) нет
+            if (!doc?.url) return '#';
+
+            return this.isSheetDoc(doc) ? doc.url + '/sheet/view' : doc.url + '?inline=1';
         },
 
         openPreview(doc) {

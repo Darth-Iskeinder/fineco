@@ -1584,7 +1584,7 @@
                                             <span x-text="doc.name"></span>
                                         </a>
                                     </template>
-                                    <a x-show="isSheetDoc(doc)" :href="docTabUrl(doc)" target="_blank" title="Открыть во вкладке"
+                                    <a x-show="canPreviewDoc(doc)" :href="docTabUrl(doc)" target="_blank" title="Открыть во вкладке"
                                        class="flex-shrink-0 text-slate-300 hover:text-slate-500 transition-colors">
                                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                                     </a>
@@ -1661,7 +1661,7 @@
                                                         <a :href="doc.url" target="_blank"
                                                            class="text-indigo-600 hover:text-indigo-800 underline truncate max-w-[180px]" x-text="doc.name"></a>
                                                     </template>
-                                                    <a x-show="isSheetDoc(doc)" :href="docTabUrl(doc)" target="_blank" title="Открыть во вкладке"
+                                                    <a x-show="canPreviewDoc(doc)" :href="docTabUrl(doc)" target="_blank" title="Открыть во вкладке"
                                                        class="flex-shrink-0 text-slate-300 hover:text-slate-500 transition-colors">
                                                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                                                     </a>
@@ -1887,7 +1887,7 @@
                                             <span class="truncate" x-text="doc.name"></span>
                                         </a>
                                     </template>
-                                    <a x-show="isSheetDoc(doc)" :href="docTabUrl(doc)" target="_blank" title="Открыть во вкладке"
+                                    <a x-show="canPreviewDoc(doc)" :href="docTabUrl(doc)" target="_blank" title="Открыть во вкладке"
                                        class="flex-shrink-0 text-slate-300 hover:text-slate-500 transition-colors">
                                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                                     </a>
@@ -1941,7 +1941,7 @@
                                                             <span class="truncate" x-text="doc.name"></span>
                                                         </a>
                                                     </template>
-                                                    <a x-show="isSheetDoc(doc)" :href="docTabUrl(doc)" target="_blank" title="Открыть во вкладке"
+                                                    <a x-show="canPreviewDoc(doc)" :href="docTabUrl(doc)" target="_blank" title="Открыть во вкладке"
                                                        class="flex-shrink-0 text-slate-300 hover:text-slate-500 transition-colors">
                                                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
                                                     </a>
@@ -2737,16 +2737,21 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             return /\.pdf$/i.test(doc?.name || '');
         },
         isSheetDoc(doc) {
-            return /\.(xlsx?|xlsm|ods)$/i.test(doc?.name || '');
+            return /\.(xlsx?|xlsm|ods|csv)$/i.test(doc?.name || '');
+        },
+        isTextDoc(doc) {
+            return /\.(txt|log)$/i.test(doc?.name || '');
         },
         canPreviewDoc(doc) {
-            return this.isPdf(doc) || this.isSheetDoc(doc);
+            return this.isPdf(doc) || this.isSheetDoc(doc) || this.isTextDoc(doc);
         },
         /**
          * Куда ведёт «открыть во вкладке». PDF браузер рисует сам, а таблице нужна
          * наша страница: .xlsx во вкладке он просто скачает.
          */
         docTabUrl(doc) {
+            if (!doc?.url) return '#';
+
             return this.isSheetDoc(doc) ? doc.url + '/sheet/view' : doc.url + '?inline=1';
         },
         /**

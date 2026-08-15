@@ -34,8 +34,11 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class DocumentController extends Controller
 {
-    /** Что безопасно показать во вкладке браузера, а не отдать файлом. */
-    private const INLINE_MIMES = ['application/pdf'];
+    /**
+     * Что безопасно показать во вкладке браузера, а не отдать файлом. Текст сюда
+     * входит: браузер его не исполняет, а рисует как есть (плюс nosniff ниже).
+     */
+    private const INLINE_MIMES = ['application/pdf', 'text/plain'];
 
     /** Документ клиента: доступен тем, у кого есть модуль «Клиенты». */
     public function client(Request $request, ClientDocument $document): StreamedResponse

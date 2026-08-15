@@ -590,6 +590,52 @@ class DocumentDownloadTest extends TestCase
             ->assertSee('Не удалось показать таблицу', false);
     }
 
+    /**
+     * CSV показываем той же таблицей: для бухгалтера это такой же «эксель», и
+     * приходит он в разных кодировках — Excel пишет UTF-8 с BOM, 1С — cp1251.
+     */
+    public function test_csv_opens_as_table_in_any_encoding(): void
+    {
+        $utf8 = "\xEF\xBB\xBFНаименование;ИНН\nОсОО Ромашка;00123456789012\n";
+        $cp1251 = mb_convert_encoding("Наименование;ИНН\nОсОО Ромашка;00123456789012\n", 'CP1251', 'UTF-8');
+
+        foreach (['выгрузка.csv' => $utf8, 'из1с.csv' => $cp1251] as $fileName => $content) {
+            [$log, ] = $this->makeTaskDocument();
+
+            $path = 'buh_task_documents/' . $log->id . '/' . $fileName;
+            Storage::disk('local')->put($path, $content);
+            $doc = $log->documents()->create(['path' => $path, 'name' => $fileName]);
+
+            $this->actingAs($this->accountant, 'employee')
+                ->getJson(route('documents.task.sheet', $doc))
+                ->assertOk()
+                ->assertJsonPath('sheets.0.rows.0.0', 'Наименование')
+                ->assertJsonPath('sheets.0.rows.1.1', '00123456789012');
+
+            $this->actingAs($this->accountant, 'employee')
+                ->get(route('documents.task.sheet.view', $doc))
+                ->assertOk()
+                ->assertSee('ОсОО Ромашка');
+        }
+    }
+
+    /** Текст браузер рисует сам — значит, его можно отдать inline и открыть во вкладке. */
+    public function test_text_document_opens_inline(): void
+    {
+        [$log, ] = $this->makeTaskDocument();
+
+        $path = 'buh_task_documents/' . $log->id . '/пояснение.txt';
+        Storage::disk('local')->put($path, 'Пояснение к акту');
+        $doc = $log->documents()->create(['path' => $path, 'name' => 'пояснение.txt']);
+
+        $response = $this->actingAs($this->accountant, 'employee')
+            ->get(route('documents.task', $doc) . '?inline=1')
+            ->assertOk()
+            ->assertHeader('X-Content-Type-Options', 'nosniff');
+
+        $this->assertStringContainsString('inline', $response->headers->get('Content-Disposition'));
+    }
+
     /** Путь на диске наружу не отдаётся — во фронт уходит только ссылка. */
     public function test_json_exposes_url_not_path(): void
     {

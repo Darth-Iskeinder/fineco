@@ -6,6 +6,7 @@ use PhpOffice\PhpSpreadsheet\Cell\Cell;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Reader\Csv as CsvReader;
 use PhpOffice\PhpSpreadsheet\RichText\RichText;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
@@ -30,7 +31,7 @@ use RuntimeException;
 class SpreadsheetPreview
 {
     /** Что умеет читать библиотека и что реально приносят клиенты. */
-    public const EXTENSIONS = ['xls', 'xlsx', 'xlsm', 'ods'];
+    public const EXTENSIONS = ['xls', 'xlsx', 'xlsm', 'ods', 'csv'];
 
     /** Дальше парсер съедает слишком много памяти — такой файл проще скачать. */
     private const MAX_BYTES = 15 * 1024 * 1024;
@@ -126,6 +127,15 @@ class SpreadsheetPreview
                     $reader = IOFactory::createReader($readerName);
                     $reader->setReadDataOnly($readDataOnly);
 
+                    // CSV приходит в чём попало: Excel отдаёт UTF-8 с BOM, 1С — cp1251,
+                    // разделитель то запятая, то точка с запятой. BOM и разделитель
+                    // библиотека определит сама, а вот текст без BOM она считает UTF-8 —
+                    // поэтому для не-UTF-8 файлов подсказываем кодировку явно.
+                    if ($reader instanceof CsvReader) {
+                        $reader->setInputEncoding(CsvReader::GUESS_ENCODING);
+                        $reader->setFallbackEncoding($this->fallbackEncoding($absolutePath));
+                    }
+
                     return $reader->load($absolutePath);
                 } catch (\Throwable $e) {
                     $failures[] = $readerName . ': ' . $e->getMessage();
@@ -160,6 +170,18 @@ class SpreadsheetPreview
         return in_array($detected, $names, true) ? $names : [...$names, $detected];
     }
 
+    /**
+     * Чем читать CSV, если он не UTF-8. Отдельного признака в файле нет, поэтому
+     * смотрим на содержимое: у нас и у клиентов «не UTF-8» на практике означает
+     * windows-1251 — так пишут 1С и старый Excel.
+     */
+    private function fallbackEncoding(string $absolutePath): string
+    {
+        $head = @file_get_contents($absolutePath, false, null, 0, 8192);
+
+        return $head !== false && !mb_check_encoding($head, 'UTF-8') ? 'CP1251' : 'UTF-8';
+    }
+
     /** Читатель по расширению: имя файла приходит из нашей БД, а не от браузера. */
     private function readerName(string $name): string
     {
@@ -167,6 +189,7 @@ class SpreadsheetPreview
             'xls'          => 'Xls',
             'xlsx', 'xlsm' => 'Xlsx',
             'ods'          => 'Ods',
+            'csv'          => 'Csv',
             default        => throw new RuntimeException('Этот файл не таблица'),
         };
     }
