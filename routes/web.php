@@ -46,6 +46,12 @@ Route::get('/', function () {
     return redirect()->route('no-access');
 })->middleware('auth:employee');
 
+// Витрина системы — единственная страница, открытая без входа. Отдаётся
+// как есть: ни запросов в базу, ни форм, ни ссылок внутрь системы, поэтому
+// гостю здесь нечего увидеть, кроме самого текста. Всё остальное по-прежнему
+// закрыто auth:employee.
+Route::view('/welcome', 'welcome')->name('welcome');
+
 Route::get('/no-access', function () {
     return view('errors.no-access');
 })->name('no-access')->middleware('auth:employee');
