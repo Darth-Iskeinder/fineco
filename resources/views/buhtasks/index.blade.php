@@ -1056,16 +1056,25 @@
                     </div>
                 </template>
 
-                {{-- На проверку — тогл как в попапе БП --}}
-                <div class="flex items-center justify-between gap-3">
-                    <span class="text-sm text-slate-700">Отправлять на проверку после выполнения</span>
-                    <button type="button" @click="newTask.requires_review = !newTask.requires_review"
-                            class="flex-shrink-0 w-11 h-6 rounded-full relative transition-colors duration-200"
-                            :class="newTask.requires_review ? 'bg-indigo-600' : 'bg-slate-200'">
-                        <span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200"
-                              :style="newTask.requires_review ? 'transform: translateX(20px)' : ''"></span>
-                    </button>
-                </div>
+                {{-- На проверку — тогл как в попапе БП. Только для задачи себе: поручение
+                     сотрудник сдаёт автору всегда, выбирать тут нечего. --}}
+                <template x-if="String(newTask.employee_id) === String(currentEmployeeId)">
+                    <div class="flex items-center justify-between gap-3">
+                        <span class="text-sm text-slate-700">Отправлять на проверку после выполнения</span>
+                        <button type="button" @click="newTask.requires_review = !newTask.requires_review"
+                                class="flex-shrink-0 w-11 h-6 rounded-full relative transition-colors duration-200"
+                                :class="newTask.requires_review ? 'bg-indigo-600' : 'bg-slate-200'">
+                            <span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200"
+                                  :style="newTask.requires_review ? 'transform: translateX(20px)' : ''"></span>
+                        </button>
+                    </div>
+                </template>
+                <template x-if="String(newTask.employee_id) !== String(currentEmployeeId)">
+                    <div class="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-500">
+                        <svg class="w-4 h-4 mt-0.5 flex-shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        <span>Выполнив задачу, сотрудник сдаёт её вам: она придёт на вкладку «Я поручил» со статусом «На проверке». Закроется, когда вы нажмёте «Принять».</span>
+                    </div>
+                </template>
 
                 {{-- Документ (необязательно) --}}
                 <div>
@@ -2051,7 +2060,9 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         teamMembers: teamMembers || [],
         teamFilter: 'all', // фильтр по бухгалтеру: 'all' | employee_id
         // Вкладка «Я поручил»: задачи, заведённые другим сотрудникам
-        assignedTasks: assignedTasks || [],
+        // loading проставляем явно: строка приходит с сервера без него, а по нему
+        // считается disabled у кнопок «Принять»/«Вернуть».
+        assignedTasks: (assignedTasks || []).map(t => ({ ...t, loading: false })),
         assignedAlertCount: assignedAlertCount || 0,
         assignedDoneDays: assignedDoneDays || 30,
         assignedReject: { show: false, task: null, comment: '' },
@@ -3000,6 +3011,13 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
 
             // Устаревшая сессия: запрос увели на страницу входа, данных в ответе нет.
             if (r.redirected && /\/login(\?|$)/.test(r.url)) {
+                alert('Сессия истекла. Обновите страницу и войдите заново.');
+                return { success: false };
+            }
+
+            // Вход слетел (401) или протух CSRF-токен (419): до контроллера запрос не
+            // дошёл, и его текст пользователю ничего не скажет. Объясняем сами.
+            if (r.status === 401 || r.status === 419) {
                 alert('Сессия истекла. Обновите страницу и войдите заново.');
                 return { success: false };
             }

@@ -1261,7 +1261,11 @@ class BuhTasksController extends Controller
             'description'     => $description,
             'clarification'   => $validated['clarification'] ?? null,
             'checklist'       => $checklist,
-            'requires_review' => (bool) ($validated['requires_review'] ?? false),
+            // Поручение сотрудник не закрывает сам: выполнил — сдал, принимает автор.
+            // Тумблер «на проверку» остаётся только у задач, заведённых себе.
+            'requires_review' => $assignee->id !== $author->id
+                ? true
+                : (bool) ($validated['requires_review'] ?? false),
             'cost'            => 0,
             'year'            => $due->year,
             'month'           => $due->month,
@@ -1383,7 +1387,12 @@ class BuhTasksController extends Controller
 
         // Задача с проверкой уходит на ревью (3-дневный срок), НО если принимать её некому
         // (сам главбух клиента её и выполнил, клиент не указан) — закрываем сразу.
-        $needsReview = $task->requires_review && $this->reviewerForAdhoc($task) !== null;
+        //
+        // Поручение уходит на приёмку всегда, даже без галочки: «выполнено» от исполнителя
+        // означает «сдал», а закрывает задачу тот, кто поручил. Проверяем это здесь, а не
+        // только при создании, чтобы правило действовало и на поручения, заведённые раньше.
+        $needsReview = ($task->requires_review || $task->isAssignment())
+            && $this->reviewerForAdhoc($task) !== null;
 
         if ($needsReview) {
             $task->status            = 'review';

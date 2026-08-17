@@ -197,6 +197,49 @@ class AssignedTasksTest extends TestCase
         $this->assertSame('completed', $task->fresh()->status);
     }
 
+    public function test_assignment_goes_to_the_author_even_without_the_review_flag(): void
+    {
+        // Тумблера «на проверку» у поручения нет: выполнил — значит сдал, закрывает автор.
+        $task = $this->adhoc(['requires_review' => false]);
+
+        $this->actingAs($this->doer, 'employee')
+            ->post(route('buhtasks.adhoc.complete', $task->id))
+            ->assertOk();
+
+        $this->assertSame('review', $task->fresh()->status);
+
+        $this->actingAs($this->author, 'employee')
+            ->post(route('buhtasks.adhoc.review-approve', $task->id))
+            ->assertOk();
+
+        $this->assertSame('completed', $task->fresh()->status);
+    }
+
+    public function test_new_assignment_is_created_with_review_required(): void
+    {
+        $this->actingAs($this->author, 'employee')
+            ->post(route('buhtasks.adhoc.store'), [
+                'employee_id' => $this->doer->id,
+                'name'        => 'Сверка по банку',
+                'due_date'    => now()->toDateString(),
+            ])
+            ->assertOk();
+
+        $this->assertTrue((bool) BuhAdhocTask::latest('id')->first()->requires_review);
+    }
+
+    public function test_task_for_self_still_closes_without_the_review_flag(): void
+    {
+        // Задачу себе приёмка не касается: тумблер выключен — закрывается сразу.
+        $task = $this->adhoc(['employee_id' => $this->author->id, 'requires_review' => false]);
+
+        $this->actingAs($this->author, 'employee')
+            ->post(route('buhtasks.adhoc.complete', $task->id))
+            ->assertOk();
+
+        $this->assertSame('completed', $task->fresh()->status);
+    }
+
     public function test_author_sees_his_assignment_awaiting_review_in_the_task_list(): void
     {
         $task = $this->adhoc(['requires_review' => true, 'status' => 'review', 'review_started_at' => now()]);
