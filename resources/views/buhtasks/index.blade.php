@@ -2975,6 +2975,13 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             return document.querySelector('meta[name="csrf-token"]').content;
         },
 
+        // Единственная точка выхода на сервер для действий над задачами.
+        // Раньше отсюда возвращался «голый» r.json(): если сервер отвечал не JSON
+        // (истекла сессия и нас увели на /login, упал nginx, пропала сеть), разбор
+        // падал с исключением прямо посреди обработчика. Вызывающий код не успевал
+        // снять task.loading, кнопка навсегда оставалась полупрозрачной и мёртвой —
+        // клики по ней гасились проверкой `if (task.loading) return`. Поэтому здесь
+        // ловим всё: наружу уходит объект, а пользователь видит причину.
         async post(url, body = null) {
             const headers = { 'X-CSRF-TOKEN': this.csrf(), 'Accept': 'application/json' };
             const options = { method: 'POST', headers };
@@ -2982,8 +2989,28 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 headers['Content-Type'] = 'application/json';
                 options.body = JSON.stringify(body);
             }
-            const r = await fetch(url, options);
-            return r.json();
+
+            let r;
+            try {
+                r = await fetch(url, options);
+            } catch (e) {
+                alert('Не удалось связаться с сервером. Проверьте связь и повторите.');
+                return { success: false };
+            }
+
+            // Устаревшая сессия: запрос увели на страницу входа, данных в ответе нет.
+            if (r.redirected && /\/login(\?|$)/.test(r.url)) {
+                alert('Сессия истекла. Обновите страницу и войдите заново.');
+                return { success: false };
+            }
+
+            const text = await r.text();
+            try {
+                return JSON.parse(text);
+            } catch (e) {
+                alert('Сервер вернул неожиданный ответ. Обновите страницу и повторите.');
+                return { success: false };
+            }
         },
 
         // Точечно мутирует поля одной задачи. Важно для производительности:
@@ -3125,9 +3152,14 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             const task = this.tasks[idx];
             if (task.loading) return;
             task.loading = true;
-            const data = await this.post(this.actionUrl(task, 'review-approve'));
-            task.loading = false;
+            let data;
+            try {
+                data = await this.post(this.actionUrl(task, 'review-approve'));
+            } finally {
+                task.loading = false; // что бы ни случилось, кнопка должна ожить
+            }
             if (data.success) this.removeReviewRow(task);
+            else if (data.message) alert(data.message);
         },
         openReviewReject(idx) {
             this.reviewReject = { show: true, idx, comment: '' };
@@ -3137,10 +3169,15 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             if (!comment) return;
             const task = this.tasks[this.reviewReject.idx];
             task.loading = true;
-            const data = await this.post(this.actionUrl(task, 'review-reject'), { comment });
-            task.loading = false;
+            let data;
+            try {
+                data = await this.post(this.actionUrl(task, 'review-reject'), { comment });
+            } finally {
+                task.loading = false;
+            }
             this.reviewReject = { show: false, idx: null, comment: '' };
             if (data.success) this.removeReviewRow(task);
+            else if (data.message) alert(data.message);
         },
         removeReviewRow(task) {
             if (this.taskModalIdx !== null && this.tasks[this.taskModalIdx] === task) this.taskModalIdx = null;
@@ -3155,9 +3192,16 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         async approveAssigned(t) {
             if (t.loading) return;
             t.loading = true;
-            const data = await this.post(`/buhtasks/adhoc/${t.adhoc_id}/review-approve`);
-            t.loading = false;
-            if (!data.success) return;
+            let data;
+            try {
+                data = await this.post(`/buhtasks/adhoc/${t.adhoc_id}/review-approve`);
+            } finally {
+                t.loading = false; // иначе кнопка залипает в disabled и клики перестают проходить
+            }
+            if (!data.success) {
+                if (data.message) alert(data.message);
+                return;
+            }
 
             t.status = 'completed';
             t.is_overdue = false;
@@ -3172,10 +3216,17 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             if (!comment) return;
             const t = this.assignedReject.task;
             t.loading = true;
-            const data = await this.post(`/buhtasks/adhoc/${t.adhoc_id}/review-reject`, { comment });
-            t.loading = false;
+            let data;
+            try {
+                data = await this.post(`/buhtasks/adhoc/${t.adhoc_id}/review-reject`, { comment });
+            } finally {
+                t.loading = false;
+            }
             this.assignedReject = { show: false, task: null, comment: '' };
-            if (!data.success) return;
+            if (!data.success) {
+                if (data.message) alert(data.message);
+                return;
+            }
 
             t.status = 'rework';
             t.review_comment = comment;
