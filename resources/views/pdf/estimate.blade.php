@@ -125,7 +125,10 @@
 
 <div class="footer">
     <span>Kubik</span>
-    <span>{{ $periodLabel }}</span>
+    {{-- Раньше здесь стоял период сметы ($periodLabel): смета была помесячной.
+         Месяц с года из estimates убрали, переменную считать перестали, а вывод
+         остался — и PDF падал с 500 на каждой попытке открыть. --}}
+    <span>Обновлено: {{ ($estimate->updated_at ?? $estimate->created_at)?->format('d.m.Y') }}</span>
 </div>
 
 </body>

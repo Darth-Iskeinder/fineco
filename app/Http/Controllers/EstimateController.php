@@ -11,6 +11,7 @@ use App\Models\Service;
 use App\Services\PricingCalculator;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
 
 class EstimateController extends Controller
@@ -690,8 +691,11 @@ class EstimateController extends Controller
         $pdf = Pdf::loadView('pdf.estimate', compact('client', 'estimate'))
             ->setPaper('a4', 'portrait');
 
-        $filename = 'smeta_' . preg_replace('/[^a-zA-Z0-9]/', '_', $client->name) . '.pdf';
+        // Имя файла из кириллицы: без транслитерации preg_replace оставлял одни подчёркивания
+        $filename = 'smeta-' . (Str::slug($client->name) ?: 'client-' . $client->id) . '.pdf';
 
-        return $pdf->download($filename);
+        // Обе ссылки на смету открываются в новой вкладке — показываем PDF там,
+        // а не отдаём вложением: иначе вкладка остаётся пустой, а файл молча падает в загрузки.
+        return $pdf->stream($filename);
     }
 }

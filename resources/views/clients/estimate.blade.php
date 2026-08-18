@@ -268,18 +268,11 @@
 
                 <!-- Кнопки -->
                 <div class="px-5 pb-5 pt-1 space-y-2">
-                    <div class="grid grid-cols-2 gap-2">
-                        <a href="/clients/{{ $client->id }}/estimate/pdf" target="_blank"
-                           class="inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors">
-                            <svg class="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                            PDF
-                        </a>
-                        <button type="button" @click="exportXls()"
-                                class="inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors">
-                            <svg class="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-                            XLS
-                        </button>
-                    </div>
+                    <a href="/clients/{{ $client->id }}/estimate/pdf" target="_blank"
+                       class="w-full inline-flex items-center justify-center px-3 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors">
+                        <svg class="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                        PDF
+                    </a>
                     <button @click="save()" :disabled="saving"
                             class="w-full inline-flex items-center justify-center px-4 py-2.5 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-60 transition-colors">
                         <svg x-show="saving" class="w-4 h-4 mr-1.5 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -840,10 +833,6 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
                 this.showToast('Ошибка: ' + e.message, 'error');
             }
             this.scheduleSaving = false;
-        },
-
-        exportXls() {
-            this.showToast('XLS-экспорт скоро будет доступен', 'success');
         },
 
         async save() {
