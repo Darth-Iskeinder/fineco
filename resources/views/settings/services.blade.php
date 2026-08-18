@@ -340,11 +340,11 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                 </div>
                                 <div>
                                     <label class="block text-sm font-medium text-slate-700 mb-1">Биллинг</label>
-                                    {{-- Есть подпункты → тариф несут они, у родителя биллинг недоступен --}}
-                                    <template x-if="serviceForm.children.length > 0">
-                                        <div class="px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-500">Задаётся в подпунктах ↓</div>
+                                    {{-- Биллинг задаётся только на основном БП; подпункты наследуют режим и ставку --}}
+                                    <template x-if="serviceForm.parent_id">
+                                        <div class="px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-500">Наследуется от основного БП</div>
                                     </template>
-                                    <template x-if="serviceForm.children.length === 0">
+                                    <template x-if="!serviceForm.parent_id">
                                         <select x-model="serviceForm.billing" @change="onBillingChange()" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
                                             <option value="">— не указан —</option>
                                             <template x-if="serviceForm.billing && !billings.some(b => b.name === serviceForm.billing)">
@@ -356,10 +356,30 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                         </select>
                                     </template>
                                 </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-700 mb-1">Количество</label>
+                                    {{-- Количество, как и биллинг, задаётся только на основном БП --}}
+                                    <template x-if="serviceForm.parent_id">
+                                        <div class="px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-500">Наследуется от основного БП</div>
+                                    </template>
+                                    <template x-if="!serviceForm.parent_id">
+                                        <div>
+                                            <div class="flex items-center gap-2">
+                                                <button type="button" @click="serviceForm.allows_quantity = !serviceForm.allows_quantity"
+                                                        :class="serviceForm.allows_quantity ? 'bg-indigo-600' : 'bg-slate-300'"
+                                                        class="relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500/20">
+                                                    <span :class="serviceForm.allows_quantity ? 'translate-x-6' : 'translate-x-1'" class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform"></span>
+                                                </button>
+                                                <span class="text-sm text-slate-700" x-text="serviceForm.allows_quantity ? 'Можно указывать количество' : 'Без количества'"></span>
+                                            </div>
+                                            <p class="mt-1 text-xs text-slate-400" x-text="serviceForm.allows_quantity ? 'В смете вводится кол-во (напр. операций)' : 'В смете количество не вводится'"></p>
+                                        </div>
+                                    </template>
+                                </div>
                             </div>
 
-                            {{-- Тарификация родителя: только если нет подпунктов --}}
-                            <template x-if="isPaidBilling && serviceForm.children.length === 0">
+                            {{-- Тарификация основного БП: ставка распространяется и на его подпункты --}}
+                            <template x-if="isPaidBilling && !serviceForm.parent_id">
                                 <div>
                                     <label class="block text-sm font-medium text-slate-700 mb-1">Ставка <span class="text-red-500">*</span></label>
                                     <select x-model="serviceForm.rate_id" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
@@ -370,9 +390,10 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                     </select>
                                     <p class="mt-1 text-xs text-slate-500" x-show="selectedRate" x-text="selectedRate ? ('Цена в смете: ' + formatPrice(selectedRate.price) + (selectedRate.unit ? ' / ' + selectedRate.unit : '') + ' × кол-во') : ''"></p>
                                     <p class="mt-1 text-xs text-amber-600" x-show="!serviceForm.rate_id">Выберите ставку — из неё берётся цена и единица измерения.</p>
+                                    <p class="mt-1 text-xs text-slate-400" x-show="serviceForm.children.length > 0">Ставка применяется и к подпунктам этого БП.</p>
                                 </div>
                             </template>
-                            <template x-if="isFreeBilling && serviceForm.children.length === 0">
+                            <template x-if="isFreeBilling && !serviceForm.parent_id">
                                 <div class="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-500">
                                     <span x-show="selectedBillingCode === 'included'">Цена 0 — услуга входит в абонентскую плату.</span>
                                     <span x-show="selectedBillingCode === 'none'">Не тарифицируется — цена 0 (контрольная задача).</span>
@@ -455,15 +476,6 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                 </div>
                             </div>
 
-                            <template x-if="serviceForm.children.length === 0">
-                                <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
-                                    <label class="flex items-center gap-2 cursor-pointer">
-                                        <input type="checkbox" x-model="serviceForm.allows_quantity" class="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500">
-                                        <span class="text-sm font-medium text-slate-700">Можно указывать количество <span class="text-slate-400 font-normal">(напр. кол-во операций)</span></span>
-                                    </label>
-                                </div>
-                            </template>
-
                             <template x-if="!serviceForm.parent_id">
                                 <div>
                                     <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Особые условия</label>
@@ -517,41 +529,22 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                     <template x-if="serviceForm.children.length === 0">
                                         <p class="text-xs text-slate-400 py-2">Нет подпунктов. Подпункты — это дочерние услуги, которые можно включить отдельно в смете.</p>
                                     </template>
+                                    {{-- Биллинг, ставка и количество у подпунктов не задаются — они наследуются от основного БП --}}
+                                    <p class="text-xs text-slate-500 mb-2" x-show="serviceForm.children.length > 0"
+                                       x-text="isPaidBilling
+                                            ? (selectedRate
+                                                ? 'Биллинг из основного БП: ' + formatPrice(selectedRate.price) + (selectedRate.unit ? ' / ' + selectedRate.unit : '') + ' × кол-во по каждому подпункту'
+                                                : 'Биллинг из основного БП — выберите ставку выше')
+                                            : (isFreeBilling
+                                                ? (selectedBillingCode === 'included' ? 'Биллинг из основного БП: входит в абонентку — 0' : 'Биллинг из основного БП: не тарифицируется — 0')
+                                                : 'Биллинг наследуется от основного БП')"></p>
+                                    <p class="text-xs text-slate-400 mb-2" x-show="serviceForm.children.length > 0"
+                                       x-text="serviceForm.allows_quantity ? 'Количество можно указывать по каждому подпункту' : 'Количество в смете не вводится'"></p>
                                     <div class="space-y-2">
                                         <template x-for="(child, cidx) in serviceForm.children" :key="cidx">
                                             <div class="flex items-start gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200">
                                                 <div class="flex-1 space-y-2">
                                                     <input type="text" x-model="child.name" placeholder="Название подпункта *" required class="block w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
-                                                    <div class="grid grid-cols-2 gap-2">
-                                                        <div>
-                                                            <select x-model="child.billing" @change="onChildBillingChange(child)" class="block w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
-                                                                <option value="">— биллинг —</option>
-                                                                <template x-if="child.billing && !billings.some(b => b.name === child.billing)">
-                                                                    <option :value="child.billing" x-text="child.billing"></option>
-                                                                </template>
-                                                                <template x-for="b in billings" :key="b.name">
-                                                                    <option :value="b.name" x-text="b.name"></option>
-                                                                </template>
-                                                            </select>
-                                                        </div>
-                                                        <div>
-                                                            <template x-if="childIsPaid(child)">
-                                                                <select x-model="child.rate_id" class="block w-full px-2.5 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
-                                                                    <option value="">— ставка —</option>
-                                                                    <template x-for="r in rates" :key="r.id">
-                                                                        <option :value="r.id" x-text="rateLabel(r)"></option>
-                                                                    </template>
-                                                                </select>
-                                                            </template>
-                                                        </div>
-                                                    </div>
-                                                    <p class="text-xs text-slate-500" x-show="childIsPaid(child) && childRate(child)" x-text="childRate(child) ? ('Цена: ' + formatPrice(childRate(child).price) + (childRate(child).unit ? ' / ' + childRate(child).unit : '') + ' × кол-во') : ''"></p>
-                                                    <p class="text-xs text-amber-600" x-show="childIsPaid(child) && !child.rate_id">Выберите ставку для подпункта.</p>
-                                                    <p class="text-xs text-slate-400" x-show="childIsFree(child)" x-text="billingCodeOf(child.billing) === 'included' ? 'Входит в абонентку — 0' : 'Не тарифицируется — 0'"></p>
-                                                    <label class="flex items-center gap-1.5 cursor-pointer">
-                                                        <input type="checkbox" x-model="child.allows_quantity" class="w-3.5 h-3.5 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500">
-                                                        <span class="text-xs text-slate-600">Можно указывать количество</span>
-                                                    </label>
                                                 </div>
                                                 <button type="button" @click="removeChildForm(cidx)" class="p-1 text-slate-300 hover:text-red-500 transition-colors rounded mt-0.5">
                                                     <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -654,12 +647,6 @@ function servicesPage() {
         rateLabel(r) { return r.name + ' · ' + this.formatPrice(r.price) + (r.unit ? ' / ' + r.unit : ''); },
         onBillingChange() { if (!this.isPaidBilling) this.serviceForm.rate_id = null; },
 
-        // Тарификация на уровне подпункта (когда у БП есть подпункты — цену несут они)
-        billingCodeOf(name) { const b = this.billings.find(x => x.name === name); return b ? b.code : null; },
-        childIsPaid(child) { return ['by_quantity', 'addon'].includes(this.billingCodeOf(child.billing)); },
-        childIsFree(child) { return ['included', 'none'].includes(this.billingCodeOf(child.billing)); },
-        childRate(child) { return this.rates.find(r => r.id == child.rate_id) || null; },
-        onChildBillingChange(child) { if (!this.childIsPaid(child)) child.rate_id = null; },
         get monthMultiple() { return this.selectedKind === 'quarterly'; }, // ежегодно — только один месяц
         get dayIsWeekday() { return this.selectedKind === 'weekly'; },
         get monthDisabledHint() {
@@ -776,7 +763,7 @@ function servicesPage() {
                     allows_quantity: svc.allows_quantity || false,
                     splits_by_branch: svc.splits_by_branch || false,
                     flags: this.flagsFromSvc(svc),
-                    children: (svc.children || []).map(c => ({ id: c.id, name: c.name, cost: c.cost, periodicity: c.periodicity || '', allows_quantity: c.allows_quantity || false, billing: c.billing || '', rate_id: c.rate_id ?? null })),
+                    children: (svc.children || []).map(c => ({ id: c.id, name: c.name, cost: c.cost, periodicity: c.periodicity || '' })),
                 };
             } else {
                 this.serviceForm = {
@@ -797,7 +784,7 @@ function servicesPage() {
             this.showDeleteModal = true;
         },
 
-        addChildForm() { this.serviceForm.children.push({ id: null, name: '', cost: 0, periodicity: '', allows_quantity: false, billing: '', rate_id: null }); },
+        addChildForm() { this.serviceForm.children.push({ id: null, name: '', cost: 0, periodicity: '' }); },
         removeChildForm(cidx) { this.serviceForm.children.splice(cidx, 1); },
 
         isTaxSystemSelected(id) { return this.serviceForm.tax_systems.includes(id); },

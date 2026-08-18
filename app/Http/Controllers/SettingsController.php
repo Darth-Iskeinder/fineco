@@ -370,17 +370,11 @@ class SettingsController extends Controller
             'children'                      => 'nullable|array',
             'children.*.name'               => 'required|string|max:255',
             'children.*.cost'               => 'required|numeric|min:0',
-            'children.*.billing'            => 'nullable|string|max:255',
-            'children.*.rate_id'            => 'nullable|exists:rates,id',
             'children.*.periodicity'        => 'nullable|string|max:100',
-            'children.*.allows_quantity'    => 'boolean',
         ], self::SCHEDULE_MESSAGES);
 
         // Новый бизнес-процесс ставим в начало списка (сортировка по sort_order ASC)
         $minSortOrder = (int) Service::roots()->min('sort_order');
-
-        // Есть подпункты → родитель-контейнер, собственного тарифа у него нет.
-        $hasChildren = !empty($request->input('children'));
 
         $service = Service::create(array_merge([
             'name'               => $request->name,
@@ -390,7 +384,7 @@ class SettingsController extends Controller
             'business_process'   => $request->business_process ?: null,
             'category'           => $request->category ?: null,
             'cost'               => $request->cost,
-            'rate_id'            => $hasChildren ? null : $this->resolveRateId($request),
+            'rate_id'            => $this->resolveRateId($request),
             'pricing_rules'      => $request->input('pricing_rules') ?: null,
             'periodicity'        => $request->periodicity,
             'due_day'            => $request->input('due_day') ?: null,
@@ -402,7 +396,7 @@ class SettingsController extends Controller
             'requires_document'  => $request->boolean('requires_document', false),
             'check_type'         => $request->check_type ?: null,
             'requires_review'    => $request->boolean('requires_review', false),
-            'billing'            => $hasChildren ? null : ($request->billing ?: null),
+            'billing'            => $request->billing ?: null,
             'comment'            => $request->comment ?: null,
             'is_active'          => true,
             'allows_quantity'    => $request->boolean('allows_quantity', false),
@@ -416,8 +410,11 @@ class SettingsController extends Controller
             $service->children()->create([
                 'name'            => $childData['name'],
                 'cost'            => $childData['cost'],
+                // Биллинг, ставка и количество живут только на основном БП — подпункт их наследует.
+                'billing'         => $service->billing,
+                'rate_id'         => $service->rate_id,
                 'periodicity'     => $childData['periodicity'] ?? null,
-                'allows_quantity' => (bool) ($childData['allows_quantity'] ?? false),
+                'allows_quantity' => $service->allows_quantity,
                 'is_active'       => true,
                 'sort_order'      => $idx,
             ]);
@@ -469,14 +466,14 @@ class SettingsController extends Controller
             'children.*.id'                 => 'nullable|integer',
             'children.*.name'               => 'required|string|max:255',
             'children.*.cost'               => 'required|numeric|min:0',
-            'children.*.billing'            => 'nullable|string|max:255',
-            'children.*.rate_id'            => 'nullable|exists:rates,id',
             'children.*.periodicity'        => 'nullable|string|max:100',
-            'children.*.allows_quantity'    => 'boolean',
         ], self::SCHEDULE_MESSAGES);
 
-        // Есть подпункты → родитель-контейнер, собственного тарифа у него нет.
-        $hasChildren = !empty($request->input('children'));
+        // Биллинг и количество живут только на основном БП: у подпункта они наследуются от родителя.
+        $parent    = $service->parent_id ? $service->parent : null;
+        $billing   = $parent ? $parent->billing : ($request->billing ?: null);
+        $rateId    = $parent ? $parent->rate_id : $this->resolveRateId($request);
+        $allowsQty = $parent ? (bool) $parent->allows_quantity : $request->boolean('allows_quantity', false);
 
         $service->update(array_merge([
             'name'               => $request->name,
@@ -486,7 +483,7 @@ class SettingsController extends Controller
             'business_process'   => $request->business_process ?: null,
             'category'           => $request->category ?: null,
             'cost'               => $request->cost,
-            'rate_id'            => $hasChildren ? null : $this->resolveRateId($request),
+            'rate_id'            => $rateId,
             'pricing_rules'      => $request->input('pricing_rules') ?: null,
             'periodicity'        => $request->periodicity,
             'due_day'            => $request->input('due_day') ?: null,
@@ -498,9 +495,9 @@ class SettingsController extends Controller
             'requires_document'  => $request->boolean('requires_document', false),
             'check_type'         => $request->check_type ?: null,
             'requires_review'    => $request->boolean('requires_review', false),
-            'billing'            => $hasChildren ? null : ($request->billing ?: null),
+            'billing'            => $billing,
             'comment'            => $request->comment ?: null,
-            'allows_quantity'    => $request->boolean('allows_quantity', false),
+            'allows_quantity'    => $allowsQty,
             'splits_by_branch'   => $request->boolean('splits_by_branch', false),
             'sort_order'         => $request->input('sort_order', $service->sort_order),
         ], $this->serviceFlagValues($request)));
@@ -518,20 +515,20 @@ class SettingsController extends Controller
                 $service->children()->where('id', $childData['id'])->update([
                     'name'            => $childData['name'],
                     'cost'            => $childData['cost'],
-                    'billing'         => ($childData['billing'] ?? '') ?: null,
-                    'rate_id'         => $this->rateForBilling($childData['billing'] ?? null, $childData['rate_id'] ?? null),
+                    'billing'         => $service->billing,
+                    'rate_id'         => $service->rate_id,
                     'periodicity'     => $childData['periodicity'] ?? null,
-                    'allows_quantity' => (bool) ($childData['allows_quantity'] ?? false),
+                    'allows_quantity' => $service->allows_quantity,
                     'sort_order'      => $idx,
                 ]);
             } else {
                 $service->children()->create([
                     'name'            => $childData['name'],
                     'cost'            => $childData['cost'],
-                    'billing'         => ($childData['billing'] ?? '') ?: null,
-                    'rate_id'         => $this->rateForBilling($childData['billing'] ?? null, $childData['rate_id'] ?? null),
+                    'billing'         => $service->billing,
+                    'rate_id'         => $service->rate_id,
                     'periodicity'     => $childData['periodicity'] ?? null,
-                    'allows_quantity' => (bool) ($childData['allows_quantity'] ?? false),
+                    'allows_quantity' => $service->allows_quantity,
                     'is_active'       => true,
                     'sort_order'      => $idx,
                 ]);
