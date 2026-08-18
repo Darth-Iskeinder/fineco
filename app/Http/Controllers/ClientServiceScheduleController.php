@@ -17,6 +17,8 @@ class ClientServiceScheduleController extends Controller
     /** Создать/обновить индивидуальное расписание БП для клиента. */
     public function update(Request $request, Client $client, Service $service)
     {
+        $this->authorizeClient($client);
+
         $data = $request->validate([
             'periodicity'   => ['nullable', 'string', 'max:100', Rule::exists('periodicities', 'name')],
             'start_month'   => ['nullable', 'array'],
@@ -40,9 +42,17 @@ class ClientServiceScheduleController extends Controller
         return $this->payload($service, $schedule);
     }
 
+    /** Расписание чужой компании не трогаем — правило то же, что в списке клиентов. */
+    private function authorizeClient(Client $client): void
+    {
+        abort_unless($client->isVisibleTo(auth('employee')->user()), 403, 'Это не ваш клиент');
+    }
+
     /** Сбросить к дефолтному расписанию БП (удалить override). */
     public function destroy(Client $client, Service $service)
     {
+        $this->authorizeClient($client);
+
         ClientServiceSchedule::where('client_id', $client->id)
             ->where('service_id', $service->id)
             ->delete();

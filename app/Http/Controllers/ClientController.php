@@ -18,24 +18,35 @@ class ClientController extends Controller
 {
     public function index(Request $request)
     {
+        $me = auth('employee')->user();
+
         // Вторичная сортировка по id: у импортированных клиентов created_at совпадает
         // с точностью до секунды, и без неё порядок «последний созданный сверху» плавает.
-        $clients = Client::with(['taxSystem', 'tariff', 'responsibleEmployee'])
+        $clients = Client::visibleTo($me)
+            ->with(['taxSystem', 'tariff', 'responsibleEmployee'])
             ->withCount('estimateRootItems')
             ->filter($request->only(Client::FILTER_KEYS))
             ->orderBy('created_at', 'desc')
             ->orderBy('id', 'desc')
             ->get();
 
+        // Фильтр по ответственному нужен только тем, кто видит чужие компании:
+        // у остальных в списке и так одни свои — селект из одного человека это шум.
+        $seesEveryone = Client::canBeManagedBy($me);
+
         return view('clients.index', [
             'clients' => $clients,
             'search' => $request->search,
             'filters' => $request->only(Client::FILTER_KEYS),
             // Всего клиентов без фильтров — для счётчика «Найдено N из M»
-            'totalClients' => Client::count(),
+            'totalClients' => Client::visibleTo($me)->count(),
             'taxSystems' => TaxSystem::active()->ordered()->get(),
+            // Список сотрудников нужен и рядовым: из него выбирают ответственного
+            // в модалке правки клиента. Скрыт от них только фильтр по ответственному.
             'employees' => Employee::active()->orderBy('full_name')->get(),
             'tariffs' => Tariff::active()->ordered()->get(),
+            'canManageClients' => $seesEveryone,
+            'canFilterByPerson' => $seesEveryone,
         ]);
     }
 
@@ -45,7 +56,8 @@ class ClientController extends Controller
         $filters = $request->only(Client::FILTER_KEYS);
         $filters['search'] = $filters['search'] ?? $request->get('q', '');
 
-        $clients = Client::with(['taxSystem', 'tariff', 'responsibleEmployee'])
+        $clients = Client::visibleTo(auth('employee')->user())
+            ->with(['taxSystem', 'tariff', 'responsibleEmployee'])
             ->withCount('estimateRootItems')
             ->filter($filters)
             ->orderBy('created_at', 'desc')
@@ -72,6 +84,8 @@ class ClientController extends Controller
 
     public function show(Client $client)
     {
+        $this->authorizeClient($client);
+
         $client->load([
             'organizationForm',
             'taxSystem',
@@ -97,6 +111,8 @@ class ClientController extends Controller
 
     public function store(Request $request)
     {
+        $this->authorizeManage();
+
         $validated = $request->validateWithBag('createClient', [
             'name' => ['required', 'string', 'max:255'],
             // Уникальность ИНН — в пределах своей фирмы. Правило проверки ходит
@@ -135,6 +151,8 @@ class ClientController extends Controller
 
     public function update(Request $request, Client $client)
     {
+        $this->authorizeClient($client);
+
         $validated = $request->validateWithBag('updateClient', [
             'name' => ['required', 'string', 'max:255'],
             'inn' => ['required', 'string', 'max:14', $this->innIsFreeInTenant($client->id)],
@@ -165,6 +183,8 @@ class ClientController extends Controller
 
     public function updateSection(Request $request, Client $client)
     {
+        $this->authorizeClient($client);
+
         $section = $request->input('section');
 
         $rules = match($section) {
@@ -357,6 +377,8 @@ class ClientController extends Controller
 
     public function uploadDocument(Request $request, Client $client)
     {
+        $this->authorizeClient($client);
+
         $request->validate([
             'files' => ['required', 'array'],
             'files.*' => ['required', 'file', 'max:40960'],
@@ -397,6 +419,8 @@ class ClientController extends Controller
 
     public function deleteDocument(Client $client, ClientDocument $document)
     {
+        $this->authorizeClient($client);
+
         if ($document->client_id !== $client->id) {
             return response()->json(['error' => 'Forbidden'], 403);
         }
@@ -409,12 +433,26 @@ class ClientController extends Controller
 
     public function destroy(Client $client)
     {
+        $this->authorizeManage();
+
         $name = $client->name;
         $client->delete();
 
         return redirect()
             ->route('clients.index')
             ->with('success', 'Клиент ' . $name . ' удалён');
+    }
+
+    /** Чужая компания — 403: прямая ссылка не должна открывать то, чего нет в списке. */
+    private function authorizeClient(Client $client): void
+    {
+        abort_unless($client->isVisibleTo(auth('employee')->user()), 403, 'Это не ваш клиент');
+    }
+
+    /** Заводить и удалять компании может только админ и руководитель. */
+    private function authorizeManage(): void
+    {
+        abort_unless(Client::canBeManagedBy(auth('employee')->user()), 403, 'Недостаточно прав');
     }
 
     /** Правило «такой ИНН у нас ещё не занят» — только в своей фирме. */

@@ -15,6 +15,12 @@ use Illuminate\Support\Facades\DB;
 
 class EstimateController extends Controller
 {
+    /** Смета чужой компании недоступна — правило видимости то же, что в списке клиентов. */
+    private function authorizeClient(Client $client): void
+    {
+        abort_unless($client->isVisibleTo(auth('employee')->user()), 403, 'Это не ваш клиент');
+    }
+
     /**
      * Может ли текущий пользователь переназначать исполнителей БП в смете клиента.
      * Только главбух этого клиента (он же ответственный) или админ.
@@ -32,6 +38,8 @@ class EstimateController extends Controller
 
     public function edit(Request $request, Client $client)
     {
+        $this->authorizeClient($client);
+
         $client->load(['taxSystem']);
 
         // Одна смета на клиента
@@ -374,6 +382,8 @@ class EstimateController extends Controller
 
     public function show(Request $request, Client $client)
     {
+        $this->authorizeClient($client);
+
         $estimate = Estimate::where('client_id', $client->id)->first();
 
         if (!$estimate) {
@@ -390,6 +400,8 @@ class EstimateController extends Controller
 
     public function save(Request $request, Client $client)
     {
+        $this->authorizeClient($client);
+
         $request->validate([
             'notes'                                => 'nullable|string|max:1000',
             'tariff_bps'                           => 'nullable|array',
@@ -664,6 +676,8 @@ class EstimateController extends Controller
 
     public function pdf(Request $request, Client $client)
     {
+        $this->authorizeClient($client);
+
         $client->load(['taxSystem', 'tariff']);
         $estimate = Estimate::with(['rootItems.children'])
             ->where('client_id', $client->id)

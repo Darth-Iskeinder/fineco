@@ -338,6 +338,50 @@ class Client extends Model
     // =============================================
     // СКОУПЫ
     // =============================================
+
+    /**
+     * Компании, которые сотрудник вправе видеть.
+     *
+     * Админ и руководитель видят всех — как и в остальных модулях. Остальные видят
+     * только те компании, к которым прикреплены, а прикрепление оформляется тремя
+     * способами (тот же перечень, что в профиле сотрудника,
+     * EmployeeController::clientsOfEmployee):
+     *   - ответственное лицо клиента (clients.responsible_employee_id);
+     *   - исполнитель БП в смете (estimate_items.assignee_id);
+     *   - сотрудник в команде клиента (client_employee).
+     *
+     * Следствие: компания без ответственного и без команды не попадает никому,
+     * кроме админа и руководителя, — так и договорились.
+     */
+    public function scopeVisibleTo($query, Employee $employee)
+    {
+        if ($employee->isAdmin() || $employee->isManager()) {
+            return $query;
+        }
+
+        return $query->where(function ($q) use ($employee) {
+            $q->where('responsible_employee_id', $employee->id)
+                ->orWhereHas('employees', fn ($e) => $e->where('employees.id', $employee->id))
+                ->orWhereHas('estimates.items', fn ($i) => $i->where('assignee_id', $employee->id));
+        });
+    }
+
+    /** Тот же вопрос про одну компанию — для проверок доступа в контроллерах. */
+    public function isVisibleTo(Employee $employee): bool
+    {
+        if ($employee->isAdmin() || $employee->isManager()) {
+            return true;
+        }
+
+        return static::query()->whereKey($this->id)->visibleTo($employee)->exists();
+    }
+
+    /** Заводить, импортировать и удалять компании может только админ и руководитель. */
+    public static function canBeManagedBy(Employee $employee): bool
+    {
+        return $employee->isAdmin() || $employee->isManager();
+    }
+
     public function scopeActive($query)
     {
         return $query->where('is_active', true);

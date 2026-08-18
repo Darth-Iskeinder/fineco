@@ -184,6 +184,7 @@
             <p class="text-slate-500">Управление клиентской базой</p>
         </div>
         <div class="mt-4 sm:mt-0 flex items-center gap-3">
+            @if ($canManageClients)
             <button @click="showImportModal = true" type="button"
                     class="inline-flex items-center px-4 py-2.5 bg-white text-slate-600 text-sm font-medium rounded-xl border border-slate-200 hover:bg-slate-50 hover:text-slate-800 transition-all duration-200">
                 <svg class="-ml-0.5 mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -191,6 +192,7 @@
                 </svg>
                 Импорт
             </button>
+            @endif
             {{-- Выгружаем то, что человек сейчас видит: с поиском и фильтрами — найденное,
                  без них — всех. Фильтры живут в Alpine, поэтому ссылку собираем на лету. --}}
             <a :href="exportUrl"
@@ -202,6 +204,7 @@
                 Экспорт
                 <span x-show="isFiltered" class="ml-1 text-slate-400" x-text="'(' + clients.length + ')'"></span>
             </a>
+            @if ($canManageClients)
             <button @click="showCreateModal = true; resetCreateForm()"
                     type="button"
                     class="inline-flex items-center px-5 py-2.5 bg-gradient-to-r from-violet-500 to-indigo-600 text-white text-sm font-medium rounded-xl shadow-lg shadow-indigo-500/25 hover:shadow-xl hover:shadow-indigo-500/30 hover:-translate-y-0.5 transition-all duration-200">
@@ -210,6 +213,7 @@
                 </svg>
                 Добавить клиента
             </button>
+            @endif
         </div>
     </div>
 
@@ -231,6 +235,7 @@
 
     {{-- Окно импорта: только выбор файла. Всё, что можно сделать не так,
          человек увидит на следующем экране — до записи в базу. --}}
+    @if ($canManageClients)
     <div x-show="showImportModal" x-cloak
          class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
          @click.self="showImportModal = false"
@@ -275,6 +280,7 @@
             </form>
         </div>
     </div>
+    @endif
 
     <!-- Поиск -->
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 mb-6">
@@ -321,6 +327,9 @@
                  клиент без ответственного или без РН иначе не находится, а именно
                  такие ломают работу (задачи никуда не идут, смета пустая). --}}
             <div class="mt-4 flex flex-wrap items-center gap-2">
+                {{-- Фильтр по ответственному нужен только тем, кто видит чужие компании:
+                     у остальных в списке одни свои — селект из одного человека это шум. --}}
+                @if ($canFilterByPerson)
                 <select x-model="filters.responsible" @change="applyFilters()"
                         :class="filters.responsible ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-slate-50/50 text-slate-600'"
                         class="px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 transition-colors">
@@ -330,6 +339,7 @@
                         <option :value="e.id" x-text="e.name"></option>
                     </template>
                 </select>
+                @endif
 
                 <select x-model="filters.status" @change="applyFilters()"
                         :class="filters.status ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-slate-50/50 text-slate-600'"

@@ -34,12 +34,13 @@ class ClientCsvExportTest extends TestCase
         return parent::setUpTraits();
     }
 
+    /** Выгружает админ: экспорт отдаёт только те компании, которые человек видит в списке. */
     private function viewer(): Employee
     {
-        $role = Role::firstOrCreate(['name' => 'employee'], ['display_name' => 'Сотрудник']);
+        $role = Role::firstOrCreate(['name' => Role::ADMIN], ['display_name' => 'Администратор']);
 
         $employee = Employee::create([
-            'full_name' => 'Смотрящий', 'position' => 'Бухгалтер',
+            'full_name' => 'Смотрящий', 'position' => 'Администратор',
             'email' => uniqid('emp_') . '@test.kg', 'password' => bcrypt('x'),
             'role_id' => $role->id, 'status' => Employee::STATUS_ACTIVE,
         ]);

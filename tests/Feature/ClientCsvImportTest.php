@@ -37,12 +37,13 @@ class ClientCsvImportTest extends TestCase
         return parent::setUpTraits();
     }
 
+    /** Загружать клиентов вправе только админ и руководитель. */
     private function importer(): Employee
     {
-        $role = Role::firstOrCreate(['name' => 'employee'], ['display_name' => 'Сотрудник']);
+        $role = Role::firstOrCreate(['name' => Role::ADMIN], ['display_name' => 'Администратор']);
 
         $employee = Employee::create([
-            'full_name' => 'Импортёр', 'position' => 'Бухгалтер',
+            'full_name' => 'Импортёр', 'position' => 'Администратор',
             'email' => uniqid('imp_') . '@test.kg', 'password' => bcrypt('x'),
             'role_id' => $role->id, 'status' => Employee::STATUS_ACTIVE,
         ]);

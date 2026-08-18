@@ -31,6 +31,8 @@ class ClientImportController extends Controller
     /** Разобрать загруженный файл и показать, что произойдёт. Базу не трогаем. */
     public function preview(Request $request)
     {
+        $this->authorizeImport();
+
         $request->validate([
             // Excel и почтовые клиенты присваивают CSV разные типы, поэтому
             // проверяем расширение, а не то, чем файл представился.
@@ -79,6 +81,8 @@ class ClientImportController extends Controller
      */
     public function history()
     {
+        $this->authorizeImport();
+
         return view('clients.imports', [
             'imports' => ClientImport::with('employee')
                 ->withCount('rows')
@@ -90,6 +94,8 @@ class ClientImportController extends Controller
     /** Кого именно затронула одна загрузка. */
     public function show(ClientImport $import)
     {
+        $this->authorizeImport();
+
         return view('clients.import-show', [
             'import' => $import->load('employee'),
             'rows'   => $import->rows()->with('client')->orderBy('id')->paginate(50),
@@ -99,6 +105,8 @@ class ClientImportController extends Controller
     /** Подтверждённая запись: делаем ровно то, что человек видел на экране проверки. */
     public function apply(Request $request, string $token)
     {
+        $this->authorizeImport();
+
         $meta = $request->session()->get('client_import.' . $token);
 
         abort_unless($meta, 404);
@@ -173,6 +181,8 @@ class ClientImportController extends Controller
     /** Строки, которые не пройдут, — отдельным файлом: исправить и залить снова. */
     public function errors(Request $request, string $token): StreamedResponse
     {
+        $this->authorizeImport();
+
         abort_unless($request->session()->has('client_import.' . $token), 404);
 
         $updateExisting = $request->boolean('update_existing');
@@ -221,13 +231,14 @@ class ClientImportController extends Controller
     {
         // Тот же запрос, что и на странице клиентов: человек выгружает то, что
         // видит — с поиском и фильтрами. Иначе «нашёл десять, скачал тысячу».
-        $clients = Client::with([
-            'organizationForm',
-            'activityType',
-            'taxSystem',
-            'tariff',
-            'responsibleEmployee',
-        ])
+        $clients = Client::visibleTo(auth('employee')->user())
+            ->with([
+                'organizationForm',
+                'activityType',
+                'taxSystem',
+                'tariff',
+                'responsibleEmployee',
+            ])
             ->filter($request->only(Client::FILTER_KEYS))
             ->orderBy('id')
             ->get();
@@ -236,6 +247,12 @@ class ClientImportController extends Controller
             'clients-' . now()->format('Y-m-d') . '.csv',
             $clients->map(fn (Client $client) => ClientCsvSchema::row($client)),
         );
+    }
+
+    /** Загрузка клиентов и её журнал — только админ и руководитель, как и заведение вручную. */
+    private function authorizeImport(): void
+    {
+        abort_unless(Client::canBeManagedBy(auth('employee')->user()), 403, 'Недостаточно прав');
     }
 
     /** Файл с шапкой и примерами — с него начинают заполнение. */

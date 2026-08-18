@@ -46,11 +46,13 @@ class ClientsFilterTest extends TestCase
     {
         parent::setUp();
 
-        $role   = Role::firstOrCreate(['name' => Role::EMPLOYEE], ['display_name' => 'Сотрудник']);
+        // Фильтры проверяем от админа: он видит всех клиентов, иначе половина
+        // тестовых компаний просто не попадёт в список (см. ClientVisibilityTest).
+        $role   = Role::firstOrCreate(['name' => Role::ADMIN], ['display_name' => 'Администратор']);
         $module = Module::firstOrCreate(['name' => 'clients'], ['display_name' => 'Клиенты', 'is_active' => true]);
 
         $this->viewer = Employee::create([
-            'full_name' => 'Фильтр Смотрящий', 'position' => 'Бухгалтер',
+            'full_name' => 'Фильтр Смотрящий', 'position' => 'Администратор',
             'email' => uniqid('flt_') . '@test.kg', 'password' => bcrypt('x'),
             'role_id' => $role->id, 'status' => Employee::STATUS_ACTIVE,
         ]);

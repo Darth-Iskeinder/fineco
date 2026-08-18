@@ -451,6 +451,10 @@ class ClientTaskHistoryTest extends TestCase
             ->assertOk()
             ->assertSee('История задач');
 
+        // Карточку бухгалтер открывает как участник команды клиента, а вот историю
+        // задач видит только ответственный — секции в разметке быть не должно.
+        $this->client->employees()->syncWithoutDetaching([$this->accountant->id]);
+
         $this->actingAs($this->accountant, 'employee')
             ->get(route('clients.show', $this->client))
             ->assertOk()
