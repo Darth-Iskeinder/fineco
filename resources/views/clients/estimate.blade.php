@@ -1,7 +1,7 @@
 @extends('layouts.app')
 
 @section('title', 'Смета — ' . $client->name)
-@section('page-title', 'Смета')
+@section('page-title', 'Смета — ' . $client->name)
 
 @section('content')
 <style>
@@ -31,14 +31,35 @@
         <span class="text-slate-800 font-medium">Смета</span>
     </div>
 
-    <!-- Шапка -->
-    <div class="mb-6">
-        <h1 class="text-2xl font-bold text-slate-900">{{ $client->name }}</h1>
-        <p class="text-sm text-slate-500 mt-1">
-            ИНН: {{ $client->inn }}
-            @if($client->taxSystem) · {{ $client->taxSystem->name }} @endif
-            @if($client->tariff) · Тариф: {{ $client->tariff->name }} @endif
-        </p>
+    {{-- Шапка липкая: список услуг длинный, и при прокрутке терялось, чья это смета
+         и на какую сумму она вышла. top-16 — высота шапки layout'а (h-16), иначе
+         панель уезжает под неё. --}}
+    <div class="sticky top-16 z-20 -mx-6 px-6 py-3 mb-6 bg-white/90 backdrop-blur-xl border-b border-slate-200/70">
+        <div class="flex items-center justify-between gap-4">
+            <div class="min-w-0">
+                <h1 class="text-xl font-bold text-slate-900 truncate" title="{{ $client->name }}">{{ $client->name }}</h1>
+                <p class="text-xs text-slate-500 mt-0.5 truncate">
+                    ИНН: {{ $client->inn }}
+                    @if($client->taxSystem) · {{ $client->taxSystem->name }} @endif
+                    @if($client->tariff) · Тариф: {{ $client->tariff->name }} @endif
+                </p>
+            </div>
+
+            <div class="flex items-center gap-3 flex-shrink-0">
+                <div class="text-right">
+                    <p class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider leading-none">Итого</p>
+                    <p class="text-lg font-bold text-slate-900 leading-tight" x-text="fmt(grandTotal())"></p>
+                </div>
+                <button type="button" @click="save()" :disabled="saving"
+                        class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-60 transition-colors">
+                    <svg x-show="saving" class="w-4 h-4 mr-1.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                    </svg>
+                    <span x-text="saving ? 'Сохранение...' : 'Сохранить'"></span>
+                </button>
+            </div>
+        </div>
     </div>
 
     @if(!$client->responsible_employee_id)
@@ -200,7 +221,8 @@
         </div>
 
         {{-- ШАГ 3 + 4. Правая колонка — карточка «Смета» (sticky), связанная с тумблерами слева --}}
-        <aside class="lg:sticky lg:top-6">
+        {{-- top-40: шапка layout'а (64px) + липкая панель сметы, иначе заголовок карточки прячется --}}
+        <aside class="lg:sticky lg:top-40">
             <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
 
                 <!-- Заголовок -->
