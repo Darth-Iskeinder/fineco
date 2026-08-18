@@ -2004,10 +2004,10 @@
                                                     <div class="flex items-center gap-2">
                                                         {{-- Ссылка, а не кнопка: обычный клик открывает окно, Ctrl+клик и
                                                              колёсико — новую вкладку силами самого браузера --}}
-                                                        <a x-show="canPreviewDoc(doc)" :href="docTabUrl(doc)" @click="openDocFromLink($event, doc)"
+                                                        <a x-show="canPreviewDoc(doc)" data-no-guard :href="docTabUrl(doc)" @click="openDocFromLink($event, doc)"
                                                            class="text-xs text-indigo-600 hover:text-indigo-700 hover:underline truncate"
                                                            x-text="doc.name"></a>
-                                                        <a x-show="!canPreviewDoc(doc)" :href="doc.url"
+                                                        <a x-show="!canPreviewDoc(doc)" data-no-guard :href="doc.url"
                                                            class="text-xs text-indigo-600 hover:text-indigo-700 hover:underline truncate" x-text="doc.name"></a>
                                                         <a x-show="canPreviewDoc(doc)" :href="docTabUrl(doc)" target="_blank"
                                                            title="Открыть во вкладке" class="text-slate-300 hover:text-slate-500 shrink-0">
@@ -2015,7 +2015,7 @@
                                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                                                             </svg>
                                                         </a>
-                                                        <a :href="doc.url" title="Скачать" class="text-slate-300 hover:text-slate-500 shrink-0">
+                                                        <a :href="doc.url" data-no-guard title="Скачать" class="text-slate-300 hover:text-slate-500 shrink-0">
                                                             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                                                             </svg>
@@ -2035,7 +2035,7 @@
                                         <li class="flex items-center gap-2">
                                             {{-- PDF, картинки и таблицы открываем прямо в окне, остальное браузер скачает.
                                                  Ссылкой, а не кнопкой: Ctrl+клик и колёсико тогда откроют новую вкладку --}}
-                                            <a x-show="canPreviewDoc(doc)" :href="docTabUrl(doc)" @click="openDocFromLink($event, doc)"
+                                            <a x-show="canPreviewDoc(doc)" data-no-guard :href="docTabUrl(doc)" @click="openDocFromLink($event, doc)"
                                                class="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-700 hover:underline min-w-0">
                                                 <svg x-show="!isImageDoc(doc) && !isSheetDoc(doc)" class="w-4 h-4 text-red-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -2048,7 +2048,7 @@
                                                 </svg>
                                                 <span class="truncate" x-text="doc.name"></span>
                                             </a>
-                                            <a x-show="!canPreviewDoc(doc)" :href="doc.url"
+                                            <a x-show="!canPreviewDoc(doc)" data-no-guard :href="doc.url"
                                                class="inline-flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-700 hover:underline min-w-0">
                                                 <svg class="w-4 h-4 text-slate-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
@@ -2061,7 +2061,7 @@
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                                                 </svg>
                                             </a>
-                                            <a :href="doc.url" title="Скачать" class="p-1 rounded-md text-slate-300 hover:text-slate-600 hover:bg-slate-100 shrink-0">
+                                            <a :href="doc.url" data-no-guard title="Скачать" class="p-1 rounded-md text-slate-300 hover:text-slate-600 hover:bg-slate-100 shrink-0">
                                                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                                                 </svg>
@@ -2098,7 +2098,7 @@
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
                     <p class="text-sm font-medium text-slate-700 truncate flex-1" x-text="docViewer.name"></p>
-                    <a :href="docViewer.url.replace('?inline=1', '')" title="Скачать"
+                    <a :href="docViewer.url.replace('?inline=1', '')" data-no-guard title="Скачать"
                        class="shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
                         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -2134,6 +2134,57 @@
         </div>
     </div>
     @endif
+
+    {{-- Несохранённые правки: карточку правят по секциям, и уйти со страницы, забыв
+         нажать «Сохранить», слишком легко. Показываем, что именно не сохранено. --}}
+    <div x-show="unsaved.open" style="display: none" class="fixed inset-0 z-[60] flex items-center justify-center px-4"
+         @keydown.escape.window="closeUnsaved()">
+        <div class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm" @click="closeUnsaved()"></div>
+
+        <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div class="flex items-start gap-3">
+                <div class="p-2 rounded-xl bg-amber-100 text-amber-600 flex-shrink-0">
+                    <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                    </svg>
+                </div>
+                <div class="min-w-0">
+                    <h3 class="text-base font-semibold text-slate-800">Изменения не сохранены</h3>
+                    <p class="text-sm text-slate-500 mt-1">Если продолжить без сохранения, правки в этих разделах пропадут:</p>
+                </div>
+            </div>
+
+            <ul class="mt-4 space-y-1.5">
+                <template x-for="section in unsaved.sections" :key="section">
+                    <li class="flex items-center gap-2 text-sm text-slate-700">
+                        <span class="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0"></span>
+                        <span x-text="sectionTitles[section] || section"></span>
+                    </li>
+                </template>
+            </ul>
+
+            <p x-show="unsaved.error" x-text="unsaved.error" class="mt-4 rounded-xl bg-rose-50 border border-rose-200 px-3 py-2 text-sm text-rose-700"></p>
+
+            <div class="flex flex-wrap justify-end gap-2 mt-6">
+                <button type="button" @click="closeUnsaved()"
+                        class="px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
+                    Вернуться к правке
+                </button>
+                <button type="button" @click="discardUnsaved()"
+                        class="px-4 py-2 text-sm font-medium text-slate-600 bg-slate-100 rounded-xl hover:bg-slate-200 transition-colors">
+                    Не сохранять
+                </button>
+                <button type="button" @click="saveUnsaved()" :disabled="unsaved.saving"
+                        class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                    <svg x-show="unsaved.saving" class="w-4 h-4 mr-2 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                    </svg>
+                    Сохранить
+                </button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -2412,6 +2463,29 @@ function clientShow() {
         sheetView: sheetPreview(),
         previewDoc: null,
 
+        // Снимок каждой секции на момент входа в правку: по нему видно, что не сохранено.
+        snapshot: {},
+        navGuardReady: false,
+
+        // Окно «есть несохранённые изменения». next — что сделать, когда вопрос решён
+        // (уйти по ссылке, открыть другую секцию); null — просто закрыть окно.
+        unsaved: { open: false, sections: [], saving: false, error: '', next: null },
+
+        sectionTitles: {
+            basic: 'Основная информация',
+            status: 'Статус и период обслуживания',
+            tax: 'Налоговые данные',
+            flags: 'Характеристики бизнеса',
+            contract: 'Договор и обслуживание',
+            attorney: 'Доверенность',
+            eds: 'ЭЦП и доступы',
+            its: 'ИТС (1С)',
+            banks: 'Интернет-банкинг',
+            contacts_info: 'Контакты и связанные лица',
+            extras: 'Дополнительно',
+            notes: 'Примечания',
+        },
+
         editing: {
             basic: false,
             status: false,
@@ -2459,124 +2533,248 @@ function clientShow() {
 
         init() {
             this.resetForms();
+            this.guardNavigation();
         },
 
-        resetForms() {
-            this.form.basic = {
-                name: this.client.name,
-                organization_form_id: this.client.organization_form_id ? String(this.client.organization_form_id) : '',
-                inn: this.client.inn,
-                director_inn: this.client.director_inn,
-                tax_office_code: this.client.tax_office_code,
-                activity_type_id: this.client.activity_type_id ? String(this.client.activity_type_id) : '',
+        /** Правки в секции есть и они отличаются от сохранённого. */
+        isDirty(section) {
+            return this.editing[section] && JSON.stringify(this.form[section]) !== this.snapshot[section];
+        },
+
+        /** Секции с несохранёнными правками — их имена показываем в предупреждении. */
+        dirtySections() {
+            return Object.keys(this.editing).filter(section => this.isDirty(section));
+        },
+
+        /**
+         * Уйти с карточки, забыв сохранить, слишком легко: секций дюжина, кнопка
+         * «Сохранить» у каждой своя. Переходы по ссылкам перехватываем сами — тогда
+         * видно, что именно не сохранено, и можно сохранить не уходя. Закрытие вкладки
+         * и кнопку «назад» так не перехватить: там браузер показывает только свой
+         * стандартный вопрос, без списка разделов и без кнопки «Сохранить».
+         */
+        guardNavigation() {
+            // init() у этой карточки срабатывает дважды (Alpine + x-init в разметке),
+            // поэтому слушатели вешаем только с первого раза.
+            if (this.navGuardReady) return;
+            this.navGuardReady = true;
+
+            window.addEventListener('beforeunload', (event) => {
+                if (this.dirtySections().length === 0) return;
+
+                event.preventDefault();
+                event.returnValue = '';
+            });
+
+            document.addEventListener('click', (event) => {
+                if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey) return;
+
+                const link = event.target.closest('a[href]');
+                if (!link || link.target === '_blank' || link.hasAttribute('download')) return;
+                // Скачивание и просмотр документов страницу не покидают
+                if (link.hasAttribute('data-no-guard')) return;
+
+                const href = link.getAttribute('href');
+                if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
+
+                const dirty = this.dirtySections();
+                if (dirty.length === 0) return;
+
+                event.preventDefault();
+                this.askUnsaved(dirty, () => { window.location.href = link.href; });
+            }, true);
+        },
+
+        /** Спросить про несохранённое. next выполняется, когда человек решил, что с ним делать. */
+        askUnsaved(sections, next = null) {
+            this.unsaved = { open: true, sections, saving: false, error: '', next };
+        },
+
+        closeUnsaved() {
+            this.unsaved = { open: false, sections: [], saving: false, error: '', next: null };
+        },
+
+        /** «Не сохранять»: откатываем секции к сохранённому и продолжаем. */
+        discardUnsaved() {
+            const next = this.unsaved.next;
+
+            this.unsaved.sections.forEach(section => {
+                this.editing[section] = false;
+                this.resetForm(section);
+            });
+
+            this.closeUnsaved();
+            if (next) next();
+        },
+
+        /** «Сохранить»: по секции за раз. Сорвалось — остаёмся в окне и не уходим. */
+        async saveUnsaved() {
+            this.unsaved.saving = true;
+            this.unsaved.error = '';
+
+            for (const section of [...this.unsaved.sections]) {
+                if (!await this.saveSection(section)) {
+                    this.unsaved.saving = false;
+                    this.unsaved.sections = this.dirtySections();
+                    this.unsaved.error = 'Не удалось сохранить раздел «'
+                        + (this.sectionTitles[section] || section) + '». Проверьте поля и попробуйте ещё раз.';
+
+                    return;
+                }
+            }
+
+            const next = this.unsaved.next;
+            this.closeUnsaved();
+            if (next) next();
+        },
+
+        /** Значения всех секций, как они лежат в базе. */
+        buildForms() {
+            return {
+                basic: {
+                    name: this.client.name,
+                    organization_form_id: this.client.organization_form_id ? String(this.client.organization_form_id) : '',
+                    inn: this.client.inn,
+                    director_inn: this.client.director_inn,
+                    tax_office_code: this.client.tax_office_code,
+                    activity_type_id: this.client.activity_type_id ? String(this.client.activity_type_id) : '',
+                },
+                status: {
+                    client_status_id: this.client.client_status_id ? String(this.client.client_status_id) : '',
+                    service_start_date: this.client.service_start_date
+                        ? this.client.service_start_date.split('T')[0]
+                        : (this.client.created_at ? this.client.created_at.split('T')[0] : ''),
+                    service_end_date: this.client.service_end_date ? this.client.service_end_date.split('T')[0] : '',
+                },
+                flags: {
+                    is_zero_movement: this.client.is_zero_movement || false,
+                    has_employees: this.client.has_employees || false,
+                    employees_count: this.client.employees_count ?? null,
+                    has_kkm: this.client.has_kkm || false,
+                    kkm_count: this.client.kkm_count ?? null,
+                    has_marketplaces: this.client.has_marketplaces || false,
+                    marketplaces_count: this.client.marketplaces_count ?? null,
+                    import_eaeu: this.client.import_eaeu || false,
+                    import_third_countries: this.client.import_third_countries || false,
+                    has_export: this.client.has_export || false,
+                    pvt_mode: this.client.pvt_mode || false,
+                    pki_mode: this.client.pki_mode || false,
+                    has_alcohol: this.client.has_alcohol || false,
+                    has_insurance_policy: this.client.has_insurance_policy || false,
+                    has_mbt: this.client.has_mbt || false,
+                    has_crypto_exchange: this.client.has_crypto_exchange || false,
+                    has_payment_aggregators: this.client.has_payment_aggregators || false,
+                    has_production: this.client.has_production || false,
+                    has_management_report: this.client.has_management_report || false,
+                    has_fixed_assets: this.client.has_fixed_assets || false,
+                    fixed_assets_count: this.client.fixed_assets_count ?? null,
+                    has_fuel: this.client.has_fuel || false,
+                    fuel_count: this.client.fuel_count ?? null,
+                    has_loans: this.client.has_loans || false,
+                    loans_count: this.client.loans_count ?? null,
+                    has_branches: this.client.has_branches || false,
+                    branches: JSON.parse(JSON.stringify(this.client.branches || [])),
+                    has_excise: this.client.has_excise || false,
+                    has_nonresident_services: this.client.has_nonresident_services || false,
+                    has_property: this.client.has_property || false,
+                    has_bank_client: this.client.has_bank_client || false,
+                    has_separate_books: this.client.has_separate_books || false,
+                    has_nonstandard_contracts: this.client.has_nonstandard_contracts || false,
+                    has_foreign_trade: this.client.has_foreign_trade || false,
+                    has_vat_refund: this.client.has_vat_refund || false,
+                    has_special_reporting: this.client.has_special_reporting || false,
+                    has_currency_operations: this.client.has_currency_operations || false,
+                    edo_operator: this.client.edo_operator || '',
+                },
+                contacts_info: {
+                    contacts: JSON.parse(JSON.stringify(this.client.contacts || [])),
+                    related_persons: JSON.parse(JSON.stringify(this.client.related_persons || [])),
+                },
+                extras: {
+                    client_folder_url: this.client.client_folder_url || '',
+                    access_instructions: this.client.access_instructions || '',
+                    extra_fields: JSON.parse(JSON.stringify(this.client.extra_fields || [])),
+                },
+                tax: {
+                    tax_system_id: this.client.tax_system_id ? String(this.client.tax_system_id) : '',
+                    accounting_method: this.client.accounting_method || '',
+                    taxpayer_category: this.client.taxpayer_category || '',
+                    taxpayer_category_id: this.client.taxpayer_category_id ? String(this.client.taxpayer_category_id) : '',
+                },
+                contract: {
+                    service_type: this.client.service_type || '',
+                    tariff_id: this.client.tariff_id ? String(this.client.tariff_id) : '',
+                    contract_with: this.client.contract_with,
+                    contract_url: this.client.contract_url,
+                    requisites_url: this.client.requisites_url,
+                    responsible_employee_id: this.client.responsible_employee_id ? String(this.client.responsible_employee_id) : '',
+                },
+                attorney: {
+                    power_of_attorney_name: Array.isArray(this.client.power_of_attorney_name)
+                        ? [...this.client.power_of_attorney_name]
+                        : (this.client.power_of_attorney_name ? [this.client.power_of_attorney_name] : []),
+                    power_of_attorney_expires: this.client.power_of_attorney_expires?.split('T')[0],
+                },
+                eds: {
+                    eds_password: this.client.eds_password,
+                    eds_expires: this.client.eds_expires?.split('T')[0],
+                    cabinet_credentials: this.client.cabinet_credentials || { login: '', password: '' },
+                    esf_user_credentials: this.client.esf_user_credentials || { login: '', password: '' },
+                    ettn_user_credentials: this.client.ettn_user_credentials || { login: '', password: '' },
+                },
+                its: {
+                    its_enabled: this.client.its_enabled,
+                    connection_type: this.client.connection_type || '',
+                    its_contact: this.client.its_contact,
+                    database_path: this.client.database_path,
+                    its_credentials: this.client.its_credentials || { login: '', password: '' },
+                    onec_connect_credentials: this.client.onec_connect_credentials || { login: '', password: '' },
+                },
+                banks: {
+                    bank_credentials: JSON.parse(JSON.stringify(this.client.bank_credentials || [])),
+                },
+                notes: {
+                    notes: this.client.notes,
+                },
             };
-            this.form.status = {
-                client_status_id: this.client.client_status_id ? String(this.client.client_status_id) : '',
-                service_start_date: this.client.service_start_date
-                    ? this.client.service_start_date.split('T')[0]
-                    : (this.client.created_at ? this.client.created_at.split('T')[0] : ''),
-                service_end_date: this.client.service_end_date ? this.client.service_end_date.split('T')[0] : '',
-            };
-            this.form.flags = {
-                is_zero_movement: this.client.is_zero_movement || false,
-                has_employees: this.client.has_employees || false,
-                employees_count: this.client.employees_count ?? null,
-                has_kkm: this.client.has_kkm || false,
-                kkm_count: this.client.kkm_count ?? null,
-                has_marketplaces: this.client.has_marketplaces || false,
-                marketplaces_count: this.client.marketplaces_count ?? null,
-                import_eaeu: this.client.import_eaeu || false,
-                import_third_countries: this.client.import_third_countries || false,
-                has_export: this.client.has_export || false,
-                pvt_mode: this.client.pvt_mode || false,
-                pki_mode: this.client.pki_mode || false,
-                has_alcohol: this.client.has_alcohol || false,
-                has_insurance_policy: this.client.has_insurance_policy || false,
-                has_mbt: this.client.has_mbt || false,
-                has_crypto_exchange: this.client.has_crypto_exchange || false,
-                has_payment_aggregators: this.client.has_payment_aggregators || false,
-                has_production: this.client.has_production || false,
-                has_management_report: this.client.has_management_report || false,
-                has_fixed_assets: this.client.has_fixed_assets || false,
-                fixed_assets_count: this.client.fixed_assets_count ?? null,
-                has_fuel: this.client.has_fuel || false,
-                fuel_count: this.client.fuel_count ?? null,
-                has_loans: this.client.has_loans || false,
-                loans_count: this.client.loans_count ?? null,
-                has_branches: this.client.has_branches || false,
-                branches: JSON.parse(JSON.stringify(this.client.branches || [])),
-                has_excise: this.client.has_excise || false,
-                has_nonresident_services: this.client.has_nonresident_services || false,
-                has_property: this.client.has_property || false,
-                has_bank_client: this.client.has_bank_client || false,
-                has_separate_books: this.client.has_separate_books || false,
-                has_nonstandard_contracts: this.client.has_nonstandard_contracts || false,
-                has_foreign_trade: this.client.has_foreign_trade || false,
-                has_vat_refund: this.client.has_vat_refund || false,
-                has_special_reporting: this.client.has_special_reporting || false,
-                has_currency_operations: this.client.has_currency_operations || false,
-                edo_operator: this.client.edo_operator || '',
-            };
-            this.form.contacts_info = {
-                contacts: JSON.parse(JSON.stringify(this.client.contacts || [])),
-                related_persons: JSON.parse(JSON.stringify(this.client.related_persons || [])),
-            };
-            this.form.extras = {
-                client_folder_url: this.client.client_folder_url || '',
-                access_instructions: this.client.access_instructions || '',
-                extra_fields: JSON.parse(JSON.stringify(this.client.extra_fields || [])),
-            };
-            this.form.tax = {
-                tax_system_id: this.client.tax_system_id ? String(this.client.tax_system_id) : '',
-                accounting_method: this.client.accounting_method || '',
-                taxpayer_category: this.client.taxpayer_category || '',
-                taxpayer_category_id: this.client.taxpayer_category_id ? String(this.client.taxpayer_category_id) : '',
-            };
-            this.form.contract = {
-                service_type: this.client.service_type || '',
-                tariff_id: this.client.tariff_id ? String(this.client.tariff_id) : '',
-                contract_with: this.client.contract_with,
-                contract_url: this.client.contract_url,
-                requisites_url: this.client.requisites_url,
-                responsible_employee_id: this.client.responsible_employee_id ? String(this.client.responsible_employee_id) : '',
-            };
-            this.form.attorney = {
-                power_of_attorney_name: Array.isArray(this.client.power_of_attorney_name)
-                    ? [...this.client.power_of_attorney_name]
-                    : (this.client.power_of_attorney_name ? [this.client.power_of_attorney_name] : []),
-                power_of_attorney_expires: this.client.power_of_attorney_expires?.split('T')[0],
-            };
-            this.form.eds = {
-                eds_password: this.client.eds_password,
-                eds_expires: this.client.eds_expires?.split('T')[0],
-                cabinet_credentials: this.client.cabinet_credentials || { login: '', password: '' },
-                esf_user_credentials: this.client.esf_user_credentials || { login: '', password: '' },
-                ettn_user_credentials: this.client.ettn_user_credentials || { login: '', password: '' },
-            };
-            this.form.its = {
-                its_enabled: this.client.its_enabled,
-                connection_type: this.client.connection_type || '',
-                its_contact: this.client.its_contact,
-                database_path: this.client.database_path,
-                its_credentials: this.client.its_credentials || { login: '', password: '' },
-                onec_connect_credentials: this.client.onec_connect_credentials || { login: '', password: '' },
-            };
-            this.form.banks = {
-                bank_credentials: JSON.parse(JSON.stringify(this.client.bank_credentials || [])),
-            };
-            this.form.notes = {
-                notes: this.client.notes,
-            };
+        },
+
+        /**
+         * Сброс форм к сохранённому. `keep` — секции, которые сейчас правят:
+         * их трогать нельзя, иначе чужие несохранённые правки пропадают молча.
+         */
+        resetForms(keep = []) {
+            const fresh = this.buildForms();
+
+            Object.keys(fresh).forEach(section => {
+                if (keep.includes(section)) return;
+                this.form[section] = fresh[section];
+                this.snapshot[section] = JSON.stringify(fresh[section]);
+            });
+        },
+
+        /** Одна секция к сохранённому виду — и новый снимок «что было при входе в правку». */
+        resetForm(section) {
+            this.form[section] = this.buildForms()[section];
+            this.snapshot[section] = JSON.stringify(this.form[section]);
         },
 
         startEdit(section) {
-            this.resetForms();
+            // Сбрасываем только эту секцию: раньше resetForms() затирал правки
+            // в соседних открытых секциях — молча, без единого предупреждения.
+            this.resetForm(section);
             this.editing[section] = true;
         },
 
         cancelEdit(section) {
+            if (this.isDirty(section)) {
+                this.askUnsaved([section]);
+
+                return;
+            }
+
             this.editing[section] = false;
-            this.resetForms();
+            this.resetForm(section);
         },
 
         async saveSection(section) {
@@ -2608,16 +2806,22 @@ function clientShow() {
                         this.clientDocuments = data.client.documents;
                     }
                     this.editing[section] = false;
-                    this.resetForms();
-                } else {
-                    alert(data.message || 'Ошибка сохранения');
+                    // Открытые секции не пересобираем: там могут быть свои несохранённые правки
+                    this.resetForms(Object.keys(this.editing).filter(s => this.editing[s]));
+                    this.saving[section] = false;
+
+                    return true;
                 }
+
+                alert(data.message || 'Ошибка сохранения');
             } catch (error) {
                 console.error('Error:', error);
                 alert('Ошибка сохранения');
             }
 
             this.saving[section] = false;
+
+            return false;
         },
 
         addBank() {
