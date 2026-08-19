@@ -12,11 +12,13 @@ use App\Http\Controllers\CompanyProfileController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\EmployeeController;
+use App\Http\Controllers\ErrorReportController;
 use App\Http\Controllers\EstimateController;
 use App\Http\Controllers\RegisterController;
 use App\Http\Controllers\SettingsController;
 use App\Http\Controllers\TaskAlertController;
 use App\Http\Controllers\Vendor\VendorAuthController;
+use App\Http\Controllers\Vendor\VendorErrorsController;
 use App\Http\Controllers\Vendor\VendorPanelController;
 use Illuminate\Support\Facades\Route;
 
@@ -79,6 +81,12 @@ Route::prefix('vendor')->name('vendor.')->group(function () {
         Route::get('/', [VendorPanelController::class, 'index'])->name('index');
         Route::post('/tenants/{tenant}/enter', [VendorPanelController::class, 'enter'])->name('enter');
         Route::post('/leave', [VendorPanelController::class, 'leave'])->name('leave');
+
+        // Журнал сбоев — по всем фирмам сразу. Смотрит его тот, кто чинит систему,
+        // а это вендор: администратору фирмы стек вызовов ни о чём не говорит.
+        Route::get('/errors', [VendorErrorsController::class, 'index'])->name('errors.index');
+        Route::post('/errors/{report}/resolve', [VendorErrorsController::class, 'resolve'])->name('errors.resolve');
+        Route::post('/errors/{report}/reopen', [VendorErrorsController::class, 'reopen'])->name('errors.reopen');
     });
 });
 
@@ -102,6 +110,14 @@ Route::middleware('auth:employee')->group(function () {
     // Логотип своей фирмы: нужен в шапке на каждой странице, поэтому вне
     // настроек — видеть его должны все сотрудники, а не только допущенные туда.
     Route::get('/company/logo', [CompanyProfileController::class, 'logo'])->name('company.logo');
+
+    // Сбои в браузере: страница присылает сюда то, что у неё сломалось. Вне системы
+    // модулей — ломаться может на любой странице. Ограничение частоты не про защиту
+    // от чужих (маршрут за auth), а про зациклившуюся вкладку: она способна слать
+    // одну и ту же ошибку в цикле рендера.
+    Route::post('/client-errors', [ErrorReportController::class, 'store'])
+        ->middleware('throttle:20,1')
+        ->name('client-errors.store');
 
     // Уведомления о задачах — карточка живёт в общем макете, поэтому запрашиваются
     // с любой страницы ERP и вне системы модулей (доступ проверяет сам контроллер).

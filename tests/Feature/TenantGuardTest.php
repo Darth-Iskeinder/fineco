@@ -57,6 +57,22 @@ class TenantGuardTest extends TestCase
     ];
 
     /**
+     * Таблицы с колонкой tenant_id, но НАМЕРЕННО без трейта и без запрета на
+     * строки без хозяина.
+     *
+     * Пока здесь одна — журнал сбоев. Фирму он записывает (полезно знать, у кого
+     * сломалось), но фильтровать по ней нельзя ни на запись, ни на чтение.
+     * На запись: сбой случается и когда фирмы в контексте нет вовсе — крон,
+     * консоль, падение до входа; глобальный скоуп в строгом режиме сам бросил бы
+     * исключение прямо в обработчике ошибок, то есть журнал ронял бы приложение
+     * ровно там, где должен помогать. На чтение: журнал открывает владелец
+     * системы, и ему нужны все фирмы разом — в этом весь смысл экрана.
+     */
+    private const TENANT_COLUMN_WITHOUT_TRAIT = [
+        'error_reports',
+    ];
+
+    /**
      * Таблицы связей без своей пометки: обе стороны уже тенантные, и добраться
      * до строки можно только через родителя, у которого пометка есть.
      */
@@ -121,6 +137,10 @@ class TenantGuardTest extends TestCase
                 continue;
             }
 
+            if (in_array($table, self::TENANT_COLUMN_WITHOUT_TRAIT, true)) {
+                continue;
+            }
+
             if (!in_array(BelongsToTenant::class, class_uses_recursive($class), true)) {
                 $missing[] = class_basename($class);
             }
@@ -161,6 +181,11 @@ class TenantGuardTest extends TestCase
 
         foreach (collect(Schema::getTables())->pluck('name') as $table) {
             if (!Schema::hasColumn($table, 'tenant_id')) {
+                continue;
+            }
+
+            // Журналу сбоев строка без фирмы разрешена: см. комментарий к списку.
+            if (in_array($table, self::TENANT_COLUMN_WITHOUT_TRAIT, true)) {
                 continue;
             }
 

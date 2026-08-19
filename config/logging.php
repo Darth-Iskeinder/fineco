@@ -52,9 +52,13 @@ return [
 
     'channels' => [
 
+        // По умолчанию daily, а не single: single пишет всё в один laravel.log,
+        // который никогда не чистится и за год превращается в файл на гигабайты —
+        // открыть его в момент разбора аварии уже нельзя. daily режет по дням и
+        // хранит LOG_DAILY_DAYS последних.
         'stack' => [
             'driver' => 'stack',
-            'channels' => explode(',', (string) env('LOG_STACK', 'single')),
+            'channels' => explode(',', (string) env('LOG_STACK', 'daily')),
             'ignore_exceptions' => false,
         ],
 

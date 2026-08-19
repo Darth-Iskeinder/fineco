@@ -6,6 +6,7 @@ use App\Http\Middleware\CheckModuleAccess;
 use App\Http\Middleware\EndIdleImpersonation;
 use App\Http\Middleware\ManagerMiddleware;
 use App\Http\Middleware\SetTenantContext;
+use App\Support\ErrorReporter;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -53,6 +54,15 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
+        // Каждое исключение — ещё и строкой в журнал сбоев (/vendor/errors).
+        // Файловый лог остаётся на месте, но лежит он на сервере, и заглядывает
+        // туда кто-то только после жалобы клиента. Журнал видно сразу и всем,
+        // кто обслуживает систему. Шум (404, 403, валидация) ErrorReporter
+        // отсеивает сам, и сам же молчит, если записать не вышло.
+        $exceptions->report(function (Throwable $e) {
+            ErrorReporter::server($e, request());
+        });
+
         // Истёкший CSRF-токен (419 Page Expired).
         //
         // Ловим именно HttpException со статусом 419, а не TokenMismatchException:

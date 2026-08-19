@@ -67,6 +67,80 @@
     $vendorActingAs = \App\Support\Impersonation::actingAs();
 @endphp
 <body class="bg-slate-50 min-h-screen antialiased {{ $vendorInsideTenant ? 'pb-14' : '' }}">
+{{-- Сбор ошибок страницы. Стоит первым скриптом намеренно: то, что сломается
+     ниже, должно попасть в журнал, а не остаться в консоли у одного человека.
+
+     Поводом стала ошибка «Unexpected end of JSON input» при создании задачи:
+     о ней мы узнали от клиента, потому что браузерные сбои не собирались вовсе.
+     Теперь они уходят на /client-errors и видны владельцу системы сразу. --}}
+<script>
+(function () {
+    const ENDPOINT = @js(route('client-errors.store'));
+
+    // Ограничители — от лавины. Зациклившийся рендер способен звать обработчик
+    // ошибок десятки раз в секунду; в журнал от этого полезнее не станет, а вот
+    // положить страницу и сервер запросами — вполне.
+    const MAX_PER_PAGE = 5;
+    const seen = new Set();
+    let sent = 0;
+    let sending = false;
+
+    function report(payload) {
+        // Ошибка внутри самой отправки не должна порождать новую отправку.
+        if (sending || sent >= MAX_PER_PAGE) return;
+
+        const key = (payload.message || '') + '|' + (payload.source || '');
+        if (seen.has(key)) return;
+        seen.add(key);
+        sent++;
+
+        sending = true;
+        try {
+            fetch(ENDPOINT, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+                },
+                body: JSON.stringify({
+                    message: String(payload.message || 'Неизвестная ошибка').slice(0, 1000),
+                    source:  payload.source ? String(payload.source).slice(0, 500) : null,
+                    url:     location.href.slice(0, 500),
+                    status:  payload.status ?? null,
+                    context: payload.context ? String(payload.context).slice(0, 5000) : null,
+                }),
+                // Страницу могут закрыть сразу после сбоя — запрос должен успеть уйти.
+                keepalive: true,
+            }).catch(() => {}).finally(() => { sending = false; });
+        } catch (e) {
+            sending = false;
+        }
+    }
+
+    // Доступно страницам: там, где сбой понятен коду (сервер ответил не тем),
+    // сообщение осмысленнее, чем всё, что можно достать из перехватчиков ниже.
+    window.reportClientError = report;
+
+    window.addEventListener('error', function (e) {
+        report({
+            message: e.message,
+            source:  e.filename ? e.filename + ':' + e.lineno + ':' + e.colno : null,
+            context: e.error?.stack || null,
+        });
+    });
+
+    // Необработанный отказ промиса: именно так выглядит упавший await fetch.
+    window.addEventListener('unhandledrejection', function (e) {
+        const reason = e.reason;
+        report({
+            message: reason?.message ? String(reason.message) : String(reason),
+            source:  'unhandledrejection',
+            context: reason?.stack || null,
+        });
+    });
+})();
+</script>
     @if ($vendorInsideTenant)
         <div class="fixed bottom-0 inset-x-0 z-50 bg-amber-400 border-t border-amber-500 shadow-lg">
             <div class="px-6 h-14 flex items-center justify-between">

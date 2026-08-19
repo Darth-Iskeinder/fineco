@@ -2327,18 +2327,13 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             const child = task.children[cidx];
             if (child.log_id) return child.log_id;
 
-            const r = await fetch('/buhtasks/logs', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRF-TOKEN': this.csrf(), 'Accept': 'application/json' },
-                body: JSON.stringify({
-                    client_id:        task.client_id,
-                    estimate_item_id: child.id,
-                    year:             task.year,
-                    month:            task.month,
-                    due_date:         task.slot, // weekly → дата вхождения, иначе null
-                }),
+            const data = await this.post('/buhtasks/logs', {
+                client_id:        task.client_id,
+                estimate_item_id: child.id,
+                year:             task.year,
+                month:            task.month,
+                due_date:         task.slot, // weekly → дата вхождения, иначе null
             });
-            const data = await r.json();
             if (!data.success) return null;
             task.children[cidx] = { ...task.children[cidx], log_id: data.log.id };
             return data.log.id;
@@ -2445,12 +2440,10 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             for (const file of files) {
                 const fd = new FormData();
                 fd.append('file', file);
-                const r = await fetch(docUrl, {
-                    method: 'POST',
-                    headers: { 'X-CSRF-TOKEN': this.csrf(), 'Accept': 'application/json' },
-                    body: fd,
-                });
-                const data = await r.json();
+                const data = await this.postForm(
+                    docUrl, fd,
+                    'Обновите страницу и проверьте, приложился ли документ.',
+                );
                 if (data.success) {
                     this.patch(taskIdx, { documents: data.log.documents });
                 } else {
@@ -2504,12 +2497,10 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             for (const file of files) {
                 const fd = new FormData();
                 fd.append('file', file);
-                const r = await fetch(`/buhtasks/logs/${logId}/document`, {
-                    method: 'POST',
-                    headers: { 'X-CSRF-TOKEN': this.csrf(), 'Accept': 'application/json' },
-                    body: fd,
-                });
-                const data = await r.json();
+                const data = await this.postForm(
+                    `/buhtasks/logs/${logId}/document`, fd,
+                    'Обновите страницу и проверьте, приложился ли документ.',
+                );
                 if (data.success) {
                     task.children[cidx] = { ...task.children[cidx], documents: data.log.documents };
                 } else {
@@ -3026,8 +3017,57 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             try {
                 return JSON.parse(text);
             } catch (e) {
+                this.reportBadResponse(url, r.status, text);
                 alert('Сервер вернул неожиданный ответ. Обновите страницу и повторите.');
                 return { success: false };
+            }
+        },
+
+        // Сервер ответил не JSON — в журнал сбоев. Сам пользователь об этом не
+        // расскажет («нажал, ничего не произошло»), а без кода ответа и адреса
+        // такую поломку потом не найти: в логах приложения её может не быть вовсе,
+        // если запрос умер ниже — на php-fpm или прокси.
+        reportBadResponse(url, status, body) {
+            window.reportClientError?.({
+                message: 'Сервер ответил не JSON (код ' + status + ')',
+                source:  url,
+                status:  status,
+                context: (body || '').slice(0, 2000) || '(пустое тело ответа)',
+            });
+        },
+
+        // Тот же разбор ответа, что в post(), но для запросов с файлом: документ
+        // уходит одним запросом с задачей, и JSON-телом тут не обойтись.
+        // Наружу всегда уходит объект — на пустой или не-JSON ответ с готовым
+        // текстом причины, который вызывающий покажет так, как ему удобно.
+        async postForm(url, fd, hint = 'Обновите страницу и проверьте результат.') {
+            let r;
+            try {
+                r = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'X-CSRF-TOKEN': this.csrf(), 'Accept': 'application/json' },
+                    body: fd,
+                });
+            } catch (e) {
+                return { success: false, message: 'Не удалось связаться с сервером. Проверьте связь и повторите.' };
+            }
+
+            // Сессия истекла: запрос увели на вход (redirect) либо отбили по 401/419 —
+            // до контроллера он не дошёл, и его текст пользователю ничего не скажет.
+            if ((r.redirected && /\/login(\?|$)/.test(r.url)) || r.status === 401 || r.status === 419) {
+                return { success: false, message: 'Сессия истекла. Обновите страницу и войдите заново.' };
+            }
+
+            const text = await r.text();
+            try {
+                return JSON.parse(text);
+            } catch (e) {
+                this.reportBadResponse(url, r.status, text);
+                // Пустое тело — обычно признак того, что запрос до приложения дошёл,
+                // а ответ уже нет: упал php-fpm, 502/504, обрезал прокси. Записать в
+                // базу при этом могло успеть, поэтому не «ошибка», а предупреждение:
+                // иначе пользователь жмёт кнопку повторно и плодит дубли.
+                return { success: false, message: 'Сервер не ответил (код ' + r.status + '). ' + hint };
             }
         },
 
@@ -3290,22 +3330,13 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             const task = this.tasks[idx];
             if (task.log_id) return task.log_id;
 
-            const r = await fetch('/buhtasks/logs', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': this.csrf(),
-                    'Accept': 'application/json',
-                },
-                body: JSON.stringify({
-                    client_id:        task.client_id,
-                    estimate_item_id: task.item_id,
-                    year:             task.year,
-                    month:            task.month,
-                    due_date:         task.slot, // weekly → дата вхождения, иначе null
-                }),
+            const data = await this.post('/buhtasks/logs', {
+                client_id:        task.client_id,
+                estimate_item_id: task.item_id,
+                year:             task.year,
+                month:            task.month,
+                due_date:         task.slot, // weekly → дата вхождения, иначе null
             });
-            const data = await r.json();
             if (data.success) {
                 this.tasks[idx].log_id = data.log.id;
                 return data.log.id;
@@ -3488,12 +3519,10 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 const file = pendingFiles.get('create');
                 if (file) fd.append('file', file);
 
-                const r = await fetch('/buhtasks/adhoc', {
-                    method: 'POST',
-                    headers: { 'X-CSRF-TOKEN': this.csrf(), 'Accept': 'application/json' },
-                    body: fd,
-                });
-                const data = await r.json();
+                const data = await this.postForm(
+                    '/buhtasks/adhoc', fd,
+                    'Обновите страницу и проверьте список — задача могла создаться.',
+                );
 
                 if (data.success) {
                     pendingFiles.delete('create');

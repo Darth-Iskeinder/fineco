@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Models\ErrorReport;
 use App\Support\TenantContext;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\View;
@@ -13,6 +14,13 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // Счётчик неразобранных сбоев рядом со ссылкой в панели владельца.
+        // Ради него журнал и заведён: поломку видно с любой страницы панели,
+        // не открывая сам журнал и не дожидаясь звонка от клиента.
+        View::composer('layouts.vendor', function ($view) {
+            $view->with('unresolvedErrorCount', ErrorReport::unresolved()->count());
+        });
+
         View::composer('layouts.app', function ($view) {
             $urgentCount = 0;
 
