@@ -27,6 +27,7 @@ final class ClientCsvSchema
         'organization_form'  => 'Форма организации',
         'activity_type'      => 'Вид деятельности',
         'tax_system'         => 'Режим налогообложения',
+        // Только на выгрузку: импорт эту колонку не читает (см. ClientImportPlanner).
         'tariff'             => 'Тариф',
         'responsible'        => 'Ответственный',
         'tax_office_code'    => 'Код НО',

@@ -6,7 +6,6 @@ use App\Models\ActivityType;
 use App\Models\Client;
 use App\Models\Employee;
 use App\Models\OrganizationForm;
-use App\Models\Tariff;
 use App\Models\TaxSystem;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Validator;
@@ -215,7 +214,11 @@ final class ClientImportPlanner
             'organization_form' => ['organization_forms', 'organization_form_id', 'Форма организации'],
             'activity_type'     => ['activity_types', 'activity_type_id', 'Вид деятельности'],
             'tax_system'        => ['tax_systems', 'tax_system_id', 'Режим налогообложения'],
-            'tariff'            => ['tariffs', 'tariff_id', 'Тариф'],
+            // Тарифа здесь нет намеренно: в чужих таблицах в этой колонке лежит
+            // ставка налога («0.02»), а не название тарифа, и строка отбивалась
+            // целиком из-за поля, которое ни на что не влияет. Колонку «Тариф» в
+            // файле не считаем ошибкой — парсер пропускает незнакомые заголовки,
+            // так что выгруженный системой файл по-прежнему читается.
             'responsible'       => ['employees', 'responsible_employee_id', 'Ответственный'],
         ];
     }
@@ -226,7 +229,6 @@ final class ClientImportPlanner
             'organization_forms' => $this->book(OrganizationForm::query()->pluck('id', 'name')),
             'activity_types'     => $this->book(ActivityType::query()->pluck('id', 'name')),
             'tax_systems'        => $this->book(TaxSystem::query()->pluck('id', 'name')),
-            'tariffs'            => $this->book(Tariff::query()->pluck('id', 'name')),
             // Ответственного ищем и по имени, и по почте: в чужих таблицах
             // встречается и то, и другое.
             'employees'          => $this->book(Employee::query()->pluck('id', 'full_name'))

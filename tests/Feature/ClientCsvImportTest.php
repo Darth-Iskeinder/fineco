@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\ActivityType;
 use App\Models\Client;
 use App\Models\ClientImport;
 use App\Models\ClientImportRow;
@@ -99,6 +100,7 @@ class ClientCsvImportTest extends TestCase
         $name   = 'Импортированный ' . uniqid();
         $inn    = $this->inn();
 
+        // Колонка «Тариф» в файле есть — импорт её не читает, но и не спотыкается.
         [, $token] = $this->preview($who, $this->csv([
             ";{$name};{$inn};{$tariff->name};{$who->full_name};да;+996700111222;из файла",
         ]));
@@ -110,7 +112,7 @@ class ClientCsvImportTest extends TestCase
         $client = Client::where('inn', $inn)->firstOrFail();
 
         $this->assertSame($name, $client->name);
-        $this->assertSame($tariff->id, $client->tariff_id);
+        $this->assertNull($client->tariff_id, 'Тариф из файла не должен проставляться');
         $this->assertSame($who->id, $client->responsible_employee_id);
         $this->assertSame('из файла', $client->notes);
         // Плоская колонка телефона ложится в список контактов.
@@ -175,16 +177,35 @@ class ClientCsvImportTest extends TestCase
 
     public function test_unknown_reference_book_value_is_an_error_not_a_new_entry(): void
     {
-        $who = $this->importer();
-        $before = Tariff::count();
+        $who    = $this->importer();
+        $before = ActivityType::count();
 
-        [$response] = $this->preview($who, $this->csv([";Клиент {$this->inn()};{$this->inn()};Тариф-которого-нет;;да;;"]));
+        [$response] = $this->preview($who, $this->csv(
+            [";Клиент {$this->inn()};{$this->inn()};Вида-которого-нет;;да;;"],
+            'id;Название;ИНН;Вид деятельности;Ответственный;Активен;Телефон;Заметка',
+        ));
 
         $plan = $response->viewData('plan');
 
         $this->assertSame('error', $plan[0]['verdict']);
-        $this->assertStringContainsString('Тариф', $plan[0]['reason']);
-        $this->assertSame($before, Tariff::count());
+        $this->assertStringContainsString('Вид деятельности', $plan[0]['reason']);
+        $this->assertSame($before, ActivityType::count(), 'Справочник пополнился сам собой');
+    }
+
+    /**
+     * Тариф импорт не читает: в чужих таблицах в этой колонке лежит ставка налога
+     * («0.02»), а не название тарифа, и раньше из-за неё отбивался весь файл.
+     */
+    public function test_tariff_column_is_ignored_instead_of_rejecting_the_row(): void
+    {
+        $who = $this->importer();
+        $inn = $this->inn();
+
+        [$response] = $this->preview($who, $this->csv([";Клиент {$inn};{$inn};0.02;;да;;"]));
+
+        $plan = $response->viewData('plan');
+
+        $this->assertSame('create', $plan[0]['verdict'], 'Строка отбита из-за тарифа: ' . $plan[0]['reason']);
     }
 
     public function test_rows_without_name_or_inn_are_rejected(): void

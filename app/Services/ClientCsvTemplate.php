@@ -5,7 +5,6 @@ namespace App\Services;
 use App\Models\ActivityType;
 use App\Models\Client;
 use App\Models\OrganizationForm;
-use App\Models\Tariff;
 use App\Models\TaxSystem;
 
 /**
@@ -30,13 +29,18 @@ final class ClientCsvTemplate
 {
     /**
      * Колонки шаблона — подмножество `ClientCsvSchema::COLUMNS` в том же порядке.
-     * Чего здесь нет по сравнению с выгрузкой: `id`, `responsible`, `tax_office_code`.
+     * Чего здесь нет по сравнению с выгрузкой: `id`, `responsible`, `tax_office_code`,
+     * `tariff`.
      *
      * `id` убран не для красоты. Заполненный id означает «обновить этого клиента»:
      * человек, переносящий базу из своей таблицы со своей нумерацией 1, 2, 3,
      * переписал бы название и ИНН у трёх существующих клиентов вместо создания
      * новых. В выгрузке колонка остаётся — там она заполнена настоящими id, и
      * сценарий «выгрузил, поправил, залил обратно» работает как прежде.
+     *
+     * `tariff` убран, потому что импорт его больше не читает: в чужих таблицах
+     * в этой колонке оказывается ставка налога, а не название тарифа. Тариф
+     * проставляют в карточке клиента.
      */
     public const COLUMNS = [
         'name',
@@ -44,7 +48,6 @@ final class ClientCsvTemplate
         'organization_form',
         'activity_type',
         'tax_system',
-        'tariff',
         'service_start_date',
         'is_active',
         'phone',
@@ -66,7 +69,6 @@ final class ClientCsvTemplate
         $form     = OrganizationForm::query()->orderBy('id')->value('name');
         $activity = ActivityType::query()->active()->ordered()->value('name');
         $tax      = TaxSystem::query()->active()->ordered()->value('name');
-        $tariff   = Tariff::query()->active()->ordered()->value('name');
 
         $inns = self::freeInns(3);
 
@@ -74,12 +76,11 @@ final class ClientCsvTemplate
             // Минимум: только то, без чего клиента не создать.
             self::row(['name' => 'ОсОО «Ромашка»', 'inn' => $inns[0]]),
 
-            // Обычный случай: по какому тарифу ведём и как связаться.
+            // Обычный случай: как связаться.
             self::row([
-                'name'   => 'ОсОО «Василёк»',
-                'inn'    => $inns[1],
-                'tariff' => $tariff,
-                'phone'  => '+996700123456',
+                'name'  => 'ОсОО «Василёк»',
+                'inn'   => $inns[1],
+                'phone' => '+996700123456',
             ]),
 
             // Все колонки разом — видно формат даты и «да/нет».
@@ -89,7 +90,6 @@ final class ClientCsvTemplate
                 'organization_form'  => $form,
                 'activity_type'      => $activity,
                 'tax_system'         => $tax,
-                'tariff'             => $tariff,
                 'service_start_date' => now()->format('Y-m-d'),
                 'is_active'          => 'да',
                 'phone'              => '+996555987654',
