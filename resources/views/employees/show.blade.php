@@ -74,6 +74,15 @@
                 </template>
             </div>
             <div class="px-6 py-5">
+                {{-- Что ответил сервер, если сохранение не прошло: без этого
+                     раздел просто оставался открытым, будто кнопка залипла. --}}
+                <template x-if="errors.info.length">
+                    <div class="mb-4 px-4 py-3 rounded-xl bg-red-50 border border-red-200">
+                        <template x-for="message in errors.info" :key="message">
+                            <p class="text-sm text-red-700" x-text="message"></p>
+                        </template>
+                    </div>
+                </template>
                 <template x-if="!editing.info">
                     <dl class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
                         <div>
@@ -126,8 +135,8 @@
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-slate-700 mb-1">Телефон</label>
-                            <input type="tel" x-model="form.info.phone" id="show_phone" placeholder="+996 (___) ___-___"
-                                   class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                            <x-phone-field model="form.info.phone" id="show_phone"
+                                           class="block w-full pl-[100px] pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500" />
                         </div>
                     </div>
                 </template>
@@ -167,6 +176,15 @@
                 </template>
             </div>
             <div class="px-6 py-5">
+                {{-- Что ответил сервер, если сохранение не прошло: без этого
+                     раздел просто оставался открытым, будто кнопка залипла. --}}
+                <template x-if="errors.personal.length">
+                    <div class="mb-4 px-4 py-3 rounded-xl bg-red-50 border border-red-200">
+                        <template x-for="message in errors.personal" :key="message">
+                            <p class="text-sm text-red-700" x-text="message"></p>
+                        </template>
+                    </div>
+                </template>
                 <template x-if="!editing.personal">
                     <dl class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-4">
                         <div>
@@ -257,6 +275,15 @@
                 </template>
             </div>
             <div class="px-6 py-5">
+                {{-- Что ответил сервер, если сохранение не прошло: без этого
+                     раздел просто оставался открытым, будто кнопка залипла. --}}
+                <template x-if="errors.access.length">
+                    <div class="mb-4 px-4 py-3 rounded-xl bg-red-50 border border-red-200">
+                        <template x-for="message in errors.access" :key="message">
+                            <p class="text-sm text-red-700" x-text="message"></p>
+                        </template>
+                    </div>
+                </template>
                 <template x-if="!editing.access">
                     <dl class="space-y-4">
                         <div>
@@ -444,6 +471,8 @@ function employeeShow() {
         adminRoleId: 1,
         editing: { info: false, personal: false, access: false },
         saving: { info: false, personal: false, access: false },
+        // Что сказал сервер, когда сохранение не прошло — по разделам.
+        errors: { info: [], personal: [], access: [] },
         form: {
             info: {},
             personal: {},
@@ -494,15 +523,18 @@ function employeeShow() {
 
         startEdit(section) {
             this.editing[section] = true;
+            this.errors[section] = [];
         },
 
         cancelEdit(section) {
             this.editing[section] = false;
+            this.errors[section] = [];
             this.resetForm();
         },
 
         async saveSection(section) {
             this.saving[section] = true;
+            this.errors[section] = [];
             try {
                 const data = { section };
                 if (section === 'info') Object.assign(data, this.form.info);
@@ -525,9 +557,16 @@ function employeeShow() {
                     this.employee = result.employee;
                     this.resetForm();
                     this.editing[section] = false;
+                } else if (resp.status === 422) {
+                    // Раньше здесь молчали: раздел оставался открытым без единого
+                    // слова, и это выглядело как залипшая кнопка «Сохранить».
+                    this.errors[section] = Object.values(result.errors ?? {}).flat();
+                } else {
+                    this.errors[section] = [result.message || 'Не удалось сохранить, попробуйте ещё раз'];
                 }
             } catch (e) {
                 console.error(e);
+                this.errors[section] = ['Не удалось сохранить: нет связи с сервером'];
             }
             this.saving[section] = false;
         },

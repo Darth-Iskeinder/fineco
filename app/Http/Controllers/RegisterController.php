@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Services\TenantRegistrar;
+use App\Support\KgPhone;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -31,6 +32,12 @@ class RegisterController extends Controller
 
     public function register(Request $request, TenantRegistrar $registrar)
     {
+        // Номер приходит национальными цифрами: код страны в форме — подпись у
+        // рамки, а не поле. Сводим к ним же всё, что вставили из буфера, и
+        // только потом проверяем длину — иначе «+996 705…» получит ошибку
+        // формата, хотя это правильный номер.
+        $request->merge(['phone' => KgPhone::digits($request->input('phone'))]);
+
         $data = $request->validate([
             'company_name' => ['required', 'string', 'min:2', 'max:255'],
             'full_name'    => ['required', 'string', 'min:2', 'max:255'],
@@ -39,7 +46,7 @@ class RegisterController extends Controller
             // сможет зарегистрировать свою тем же адресом — говорим об этом прямо,
             // иначе он видит «почта занята» и не понимает, кем именно.
             'email'        => ['required', 'email', 'max:255', 'unique:employees,email'],
-            'phone'        => ['nullable', 'string', 'max:50'],
+            'phone'        => ['nullable', 'digits:9'],
             'password'     => ['required', 'string', 'min:8', 'confirmed'],
             // Кем становится тот, кто регистрирует фирму: с галочкой —
             // руководитель (у него, сверх прав админа, свой дашборд), без неё —
@@ -56,9 +63,11 @@ class RegisterController extends Controller
             'password.required'     => 'Введите пароль',
             'password.min'          => 'Пароль должен быть минимум 8 символов',
             'password.confirmed'    => 'Пароли не совпадают',
+            'phone.digits'          => 'Номер телефона — 9 цифр после +996, например 779 779 979',
         ]);
 
         $data['as_manager'] = $request->boolean('as_manager');
+        $data['phone'] = isset($data['phone']) ? KgPhone::format($data['phone']) : null;
 
         $owner = $registrar->register($data);
 

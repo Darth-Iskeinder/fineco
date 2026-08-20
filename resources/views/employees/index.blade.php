@@ -270,7 +270,7 @@
 
                             <div>
                                 <label for="create_phone" class="block text-sm font-medium text-slate-700 mb-2">Телефон</label>
-                                <input type="tel" name="phone" id="create_phone" value="{{ old('phone') }}" placeholder="+996 (___) ___-___" class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
+                                <x-phone-field id="create_phone" :value="old('phone')" class="block w-full pl-[100px] pr-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200" />
                             </div>
 
                             <div x-data="{ show: false }">
@@ -444,33 +444,5 @@
     </div>
 </div>
 
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    function setupPhoneMask(input) {
-        if (!input) return;
 
-        input.addEventListener('input', function(e) {
-            let value = e.target.value.replace(/\D/g, '');
-            if (value.startsWith('996')) value = value.slice(3);
-
-            let formatted = '+996';
-            if (value.length > 0) formatted += ' (' + value.slice(0, 3);
-            if (value.length > 3) formatted += ') ' + value.slice(3, 6);
-            if (value.length > 6) formatted += '-' + value.slice(6, 9);
-
-            e.target.value = formatted === '+996' ? '' : formatted;
-        });
-
-        input.addEventListener('focus', function(e) {
-            if (!e.target.value) e.target.value = '+996';
-        });
-
-        input.addEventListener('blur', function(e) {
-            if (e.target.value === '+996' || e.target.value === '+996 (') e.target.value = '';
-        });
-    }
-
-    setupPhoneMask(document.getElementById('create_phone'));
-});
-</script>
 @endsection

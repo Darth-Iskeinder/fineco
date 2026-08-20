@@ -9,12 +9,34 @@ use App\Models\Employee;
 use App\Models\EstimateItem;
 use App\Models\Module;
 use App\Models\Role;
+use App\Support\KgPhone;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
 
 class EmployeeController extends Controller
 {
+    /** Телефон — девять национальных цифр: код страны в форме подписан у рамки. */
+    private const PHONE_RULES = ['nullable', 'digits:9'];
+
+    private const PHONE_MESSAGES = [
+        'phone.digits' => 'Номер телефона — 9 цифр после +996, например 779 779 979',
+    ];
+
+    /**
+     * Сводит присланный номер к девяти национальным цифрам — до валидации.
+     *
+     * Вставку из мессенджера («+996 779…», ведущий ноль) и старую запись из базы
+     * («+996 (779) 779-979», её подставляет карточка) отбивать ошибкой формата
+     * незачем: это тот же номер.
+     */
+    private function normalizePhone(Request $request): void
+    {
+        if ($request->has('phone')) {
+            $request->merge(['phone' => KgPhone::digits($request->input('phone'))]);
+        }
+    }
+
     public function index(Request $request)
     {
         $employees = Employee::with(['role', 'modules'])
@@ -117,16 +139,18 @@ class EmployeeController extends Controller
 
     public function store(Request $request)
     {
+        $this->normalizePhone($request);
+
         $validated = $request->validate([
             'full_name' => ['required', 'string', 'max:255'],
             'position' => ['nullable', 'string', 'max:255'],
             'email' => ['required', 'email', 'unique:employees,email'],
-            'phone' => ['nullable', 'string', 'max:20'],
+            'phone' => self::PHONE_RULES,
             'password' => ['required', 'string', 'min:8', 'confirmed'],
             'role_id' => ['required', 'exists:roles,id'],
             'modules' => ['array'],
             'modules.*' => ['exists:modules,id'],
-        ], [
+        ], self::PHONE_MESSAGES + [
             'password.required' => 'Введите пароль',
             'password.min' => 'Пароль должен быть минимум 8 символов',
             'password.confirmed' => 'Пароли не совпадают',
@@ -136,7 +160,7 @@ class EmployeeController extends Controller
             'full_name' => $validated['full_name'],
             'position' => $validated['position'] ?? '',
             'email' => $validated['email'],
-            'phone' => $validated['phone'] ?? null,
+            'phone' => isset($validated['phone']) ? KgPhone::format($validated['phone']) : null,
             'password' => Hash::make($validated['password']),
             'role_id' => $validated['role_id'],
             'status' => Employee::STATUS_ACTIVE,
@@ -154,21 +178,23 @@ class EmployeeController extends Controller
 
     public function update(Request $request, Employee $employee)
     {
+        $this->normalizePhone($request);
+
         $validated = $request->validate([
             'full_name' => ['required', 'string', 'max:255'],
             'position' => ['required', 'string', 'max:255'],
             'email' => ['required', 'email', Rule::unique('employees')->ignore($employee->id)],
-            'phone' => ['nullable', 'string', 'max:20'],
+            'phone' => self::PHONE_RULES,
             'role_id' => ['required', 'exists:roles,id'],
             'modules' => ['array'],
             'modules.*' => ['exists:modules,id'],
-        ]);
+        ], self::PHONE_MESSAGES);
 
         $employee->update([
             'full_name' => $validated['full_name'],
             'position' => $validated['position'],
             'email' => $validated['email'],
-            'phone' => $validated['phone'] ?? null,
+            'phone' => isset($validated['phone']) ? KgPhone::format($validated['phone']) : null,
             'role_id' => $validated['role_id'],
         ]);
 
@@ -188,15 +214,18 @@ class EmployeeController extends Controller
     {
         $section = $request->input('section');
 
+        $this->normalizePhone($request);
+
         switch ($section) {
             case 'info':
                 $validated = $request->validate([
                     'full_name' => ['required', 'string', 'max:255'],
                     'role_id' => ['required', 'exists:roles,id'],
                     'email' => ['required', 'email', Rule::unique('employees')->ignore($employee->id)],
-                    'phone' => ['nullable', 'string', 'max:20'],
+                    'phone' => self::PHONE_RULES,
                     'employee_number' => ['nullable', 'string', 'max:50'],
-                ]);
+                ], self::PHONE_MESSAGES);
+                $validated['phone'] = isset($validated['phone']) ? KgPhone::format($validated['phone']) : null;
                 $employee->update($validated);
                 // Роль «Администратор» имеет доступ ко всем модулям — снимаем индивидуальные.
                 if ($employee->fresh()->isAdmin()) {

@@ -58,7 +58,7 @@ class TenantRegistrationTest extends TestCase
             'company_name'          => 'ОсОО Ромашка ' . $unique,
             'full_name'             => 'Иванова Анна Петровна',
             'email'                 => "anna.{$unique}@example.com",
-            'phone'                 => '+996 700 123 456',
+            'phone'                 => '705 664 746',
             'password'              => 'secret123',
             'password_confirmation' => 'secret123',
         ], $overrides);
@@ -128,6 +128,68 @@ class TenantRegistrationTest extends TestCase
         $this->post('/onboarding', $this->form(['as_manager' => '1']))->assertSessionHasNoErrors();
 
         $this->get('/')->assertRedirect(route('dashboard.index'));
+    }
+
+    /**
+     * Телефон в форме — девять национальных цифр, код страны подписан у рамки.
+     * Храним в том же виде, что и маска в карточке сотрудника: владелец фирмы —
+     * такой же сотрудник, и его номер открывается в той же карточке.
+     */
+    public function test_phone_is_stored_in_the_usual_shape(): void
+    {
+        $form = $this->form(['phone' => '705 664 746']);
+
+        $this->post('/onboarding', $form)->assertSessionHasNoErrors();
+
+        $tenant = $this->tenantByName($form['company_name']);
+        $owner  = TenantContext::for($tenant, fn () => Employee::where('email', $form['email'])->first());
+
+        $this->assertSame('+996 (705) 664-746', $owner->phone);
+    }
+
+    /**
+     * Номер, вставленный из мессенджера, — тот же номер: код страны и ведущий
+     * ноль снимаем сами, а не отбиваем ошибкой формата.
+     */
+    public function test_pasted_number_with_country_code_is_accepted(): void
+    {
+        foreach (['+996 705 664 746', '0705664746', '+996 (705) 664-746'] as $pasted) {
+            $form = $this->form(['phone' => $pasted]);
+
+            $this->post('/onboarding', $form)->assertSessionHasNoErrors();
+
+            $tenant = $this->tenantByName($form['company_name']);
+            $owner  = TenantContext::for($tenant, fn () => Employee::where('email', $form['email'])->first());
+
+            $this->assertSame('+996 (705) 664-746', $owner->phone, "Не разобран номер «{$pasted}»");
+
+            $this->flushSession();
+            $this->post('/logout');
+        }
+    }
+
+    public function test_short_number_is_rejected(): void
+    {
+        $form = $this->form(['phone' => '705 664 74']);
+
+        $this->post('/onboarding', $form)
+            ->assertSessionHasErrors(['phone' => 'Номер телефона — 9 цифр после +996, например 779 779 979']);
+
+        $this->assertNull($this->tenantByName($form['company_name']), 'Аккаунт создался с неполным номером');
+        $this->assertGuest('employee');
+    }
+
+    /** Телефон необязателен — пустое поле не должно ронять регистрацию. */
+    public function test_phone_may_be_left_empty(): void
+    {
+        $form = $this->form(['phone' => '']);
+
+        $this->post('/onboarding', $form)->assertSessionHasNoErrors();
+
+        $tenant = $this->tenantByName($form['company_name']);
+        $owner  = TenantContext::for($tenant, fn () => Employee::where('email', $form['email'])->first());
+
+        $this->assertNull($owner->phone);
     }
 
     public function test_new_account_gets_the_starter_catalog(): void

@@ -21,7 +21,7 @@
                 Регистрация фирмы
             </h2>
             <p class="mt-2 text-sm text-slate-500">
-                Заведём аккаунт вашей бухфирмы и вашу учётную запись администратора
+                Заведём аккаунт вашей бухфирмы и вашу учётную запись
             </p>
         </div>
 
@@ -59,7 +59,7 @@
                                   focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all duration-200
                                   @error('full_name') border-red-300 focus:ring-red-500/20 focus:border-red-500 @enderror"
                            placeholder="Иванова Анна Петровна">
-                    <p class="mt-1.5 text-xs text-slate-400">Вы станете администратором аккаунта и сможете добавить сотрудников</p>
+                    <p class="mt-1.5 text-xs text-slate-400">Вы — владелец аккаунта: сможете добавить сотрудников и раздать доступы</p>
                     @error('full_name')
                         <p class="mt-2 text-sm text-red-600">{{ $message }}</p>
                     @enderror
@@ -87,15 +87,12 @@
                     <label for="phone" class="block text-sm font-medium text-slate-700 mb-1.5">
                         Телефон <span class="text-slate-400 font-normal">— необязательно</span>
                     </label>
-                    <input type="text"
-                           name="phone"
-                           id="phone"
-                           value="{{ old('phone') }}"
-                           autocomplete="tel"
-                           class="block w-full px-4 py-3 border border-slate-200 rounded-xl shadow-sm text-slate-900 placeholder-slate-400
-                                  focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all duration-200
-                                  @error('phone') border-red-300 focus:ring-red-500/20 focus:border-red-500 @enderror"
-                           placeholder="+996 700 123 456">
+                    <x-phone-field :value="old('phone')"
+                                   :class="'block w-full pl-[100px] pr-4 py-3 border rounded-xl shadow-sm text-slate-900 placeholder-slate-400
+                                            focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all duration-200 '
+                                           . ($errors->has('phone')
+                                               ? 'border-red-300 focus:ring-red-500/20 focus:border-red-500'
+                                               : 'border-slate-200')" />
                     @error('phone')
                         <p class="mt-2 text-sm text-red-600">{{ $message }}</p>
                     @enderror
