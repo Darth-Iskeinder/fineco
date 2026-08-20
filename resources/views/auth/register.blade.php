@@ -145,6 +145,26 @@
                     </div>
                 </div>
 
+                {{-- Кем регистрирующий войдёт в свою фирму. По умолчанию — администратор:
+                     он заводит сотрудников и настраивает систему. Руководитель умеет то же
+                     самое, но ещё видит дашборд по фирме. В админке эта роль не выдаётся,
+                     поэтому выбрать её можно только здесь. --}}
+                <label for="as_manager" class="flex items-start gap-3 p-4 rounded-xl border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors duration-150">
+                    <input type="checkbox"
+                           name="as_manager"
+                           id="as_manager"
+                           value="1"
+                           @checked(old('as_manager'))
+                           class="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/40">
+                    <span class="text-sm">
+                        <span class="block font-medium text-slate-700">Я руководитель фирмы</span>
+                        <span class="block mt-1 text-slate-500">
+                            Кроме прав администратора откроется дашборд с показателями по фирме.
+                            Без галочки аккаунт будет администратором.
+                        </span>
+                    </span>
+                </label>
+
                 <button type="submit"
                         class="w-full flex justify-center py-3 px-4 border border-transparent rounded-xl shadow-lg shadow-indigo-500/25
                                text-sm font-semibold text-white bg-gradient-to-r from-violet-500 to-indigo-600

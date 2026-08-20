@@ -86,7 +86,7 @@
 
         <div class="flex items-center gap-3 flex-wrap">
             {{-- Кнопка создания задачи --}}
-            <button @click="showCreateModal = true"
+            <button @click="openCreateModal()"
                     class="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 transition-colors shadow-sm">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
                 Добавить задачу
@@ -3067,7 +3067,16 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 // а ответ уже нет: упал php-fpm, 502/504, обрезал прокси. Записать в
                 // базу при этом могло успеть, поэтому не «ошибка», а предупреждение:
                 // иначе пользователь жмёт кнопку повторно и плодит дубли.
-                return { success: false, message: 'Сервер не ответил (код ' + r.status + '). ' + hint };
+                // Различаем два разных случая. Код 5xx — сервер не смог ответить.
+                // Код 2xx с неразобранным телом — сервер ответил нормально, а до нас
+                // ответ дошёл повреждённым (оборвался канал, прокси обрезал). Именно
+                // так выглядел инцидент 19.08: nginx записал 200 и 855 байт, а браузер
+                // получил обрывок и показал «Unexpected end of JSON input».
+                const broken = r.ok
+                    ? 'Ответ сервера не дошёл целиком (код ' + r.status + '). '
+                    : 'Сервер не ответил (код ' + r.status + '). ';
+
+                return { success: false, message: broken + hint };
             }
         },
 
@@ -3459,6 +3468,18 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             const data = await this.post(this.actionUrl(this.tasks[idx], 'reset'));
             if (data.success) this.applyResult(idx, data.log);
             else this.patch(idx, { loading: false });
+        },
+
+        // Открытие модалки, а не голое showCreateModal = true.
+        //
+        // createError раньше не сбрасывался нигде, кроме самой отправки: сообщение
+        // о неудаче оставалось в плашке и всплывало при следующем открытии формы —
+        // спустя часы, уже неактуальное. Именно так разбор инцидента 19.08 увёл нас
+        // на несколько часов в сторону: на скриншоте была ошибка, случившаяся утром,
+        // а искали мы поломку во времени скриншота.
+        openCreateModal() {
+            this.createError = '';
+            this.showCreateModal = true;
         },
 
         resetNewTask() {

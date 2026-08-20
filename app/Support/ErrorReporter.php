@@ -7,7 +7,6 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Throwable;
@@ -114,11 +113,14 @@ class ErrorReporter
 
             // Сначала пробуем засчитать повтор — это самый частый случай.
             // resolved_at сбрасываем: раз ошибка вернулась, разобранной она не была.
-            $updated = ErrorReport::where('fingerprint', $fingerprint)->update([
-                'count'        => DB::raw('`count` + 1'),
+            //
+            // increment(), а не update() с DB::raw: боевая база — PostgreSQL, а тесты
+            // и разработка идут на MySQL. Обратные кавычки вокруг имени колонки MySQL
+            // понимает, а PostgreSQL — нет, и запрос упал бы только на проде. Здесь
+            // имя квотирует грамматика соединения, каждая на свой лад.
+            $updated = ErrorReport::where('fingerprint', $fingerprint)->increment('count', 1, [
                 'last_seen_at' => $now,
                 'resolved_at'  => null,
-                'updated_at'   => $now,
             ]);
 
             if ($updated > 0) {
@@ -151,8 +153,7 @@ class ErrorReporter
             }
 
             try {
-                ErrorReport::where('fingerprint', $fingerprint)->update([
-                    'count'        => DB::raw('`count` + 1'),
+                ErrorReport::where('fingerprint', $fingerprint)->increment('count', 1, [
                     'last_seen_at' => now(),
                 ]);
             } catch (Throwable $fatal) {

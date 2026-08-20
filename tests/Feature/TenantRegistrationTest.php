@@ -97,6 +97,39 @@ class TenantRegistrationTest extends TestCase
         $this->assertAuthenticatedAs($admin, 'employee');
     }
 
+    /**
+     * Галочка «Я руководитель фирмы» — единственный способ получить роль
+     * руководителя: в админке её в списке ролей нет.
+     */
+    public function test_owner_who_ticked_the_box_becomes_a_manager(): void
+    {
+        $form = $this->form(['as_manager' => '1']);
+
+        $this->post('/onboarding', $form)
+            ->assertRedirect('/')
+            ->assertSessionHasNoErrors();
+
+        $tenant = $this->tenantByName($form['company_name']);
+        $owner  = TenantContext::for($tenant, fn () => Employee::where('email', $form['email'])->first());
+
+        $this->assertNotNull($owner, 'Первый сотрудник фирмы не создан');
+        $this->assertTrue($owner->isManager(), 'С галочкой первый сотрудник должен быть руководителем');
+        $this->assertFalse($owner->isAdmin());
+        $this->assertSame('Руководитель', $owner->position);
+        // Роль без прав не стоит ничего: руководителю нужны те же модули, что и админу.
+        $this->assertTrue($owner->hasAccessToModule('employees'));
+
+        $this->assertAuthenticatedAs($owner, 'employee');
+    }
+
+    /** Руководителя после входа встречает его дашборд, а не список сотрудников. */
+    public function test_manager_lands_on_his_dashboard(): void
+    {
+        $this->post('/onboarding', $this->form(['as_manager' => '1']))->assertSessionHasNoErrors();
+
+        $this->get('/')->assertRedirect(route('dashboard.index'));
+    }
+
     public function test_new_account_gets_the_starter_catalog(): void
     {
         $marker = 'Метка образца ' . uniqid();

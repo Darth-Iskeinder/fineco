@@ -39,7 +39,13 @@ class EmployeeController extends Controller
         return view('employees.show', [
             'employee' => $employee,
             'clients' => $this->clientsOfEmployee($employee),
-            'roles' => Role::where('name', '!=', Role::MANAGER)->get(),
+            // «Руководитель» в выборе роли не предлагается — её выдаёт только
+            // регистрация фирмы. Но если сотрудник уже руководитель, роль обязана
+            // быть в списке: иначе селект встанет на чужое значение и первое же
+            // сохранение карточки молча снимет роль.
+            'roles' => Role::where('name', '!=', Role::MANAGER)
+                ->orWhere('id', $employee->role_id)
+                ->get(),
             'modules' => Module::active()->ordered()->get(),
         ]);
     }

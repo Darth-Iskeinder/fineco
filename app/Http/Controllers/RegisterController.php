@@ -41,6 +41,10 @@ class RegisterController extends Controller
             'email'        => ['required', 'email', 'max:255', 'unique:employees,email'],
             'phone'        => ['nullable', 'string', 'max:50'],
             'password'     => ['required', 'string', 'min:8', 'confirmed'],
+            // Кем становится тот, кто регистрирует фирму: с галочкой —
+            // руководитель (у него, сверх прав админа, свой дашборд), без неё —
+            // администратор.
+            'as_manager'   => ['nullable', 'boolean'],
         ], [
             'company_name.required' => 'Введите название фирмы',
             'company_name.min'      => 'Название фирмы должно быть минимум 2 символа',
@@ -54,9 +58,11 @@ class RegisterController extends Controller
             'password.confirmed'    => 'Пароли не совпадают',
         ]);
 
-        $admin = $registrar->register($data);
+        $data['as_manager'] = $request->boolean('as_manager');
 
-        Auth::guard('employee')->login($admin);
+        $owner = $registrar->register($data);
+
+        Auth::guard('employee')->login($owner);
         $request->session()->regenerate();
 
         return redirect('/');

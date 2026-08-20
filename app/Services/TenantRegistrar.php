@@ -19,6 +19,12 @@ use RuntimeException;
  *
  * Пробного периода нет (решение 03.08.2026): аккаунт сразу рабочий. Статус
  * `trial` в таблице остаётся на будущее, под подписку.
+ *
+ * Первый сотрудник получает роль в зависимости от галочки в форме: без неё —
+ * администратор (заводит людей и настраивает систему), с ней — руководитель
+ * (то же самое плюс свой дашборд). Роль руководителя в админке не назначается
+ * (её нет в списке ролей), поэтому регистрация — единственное место, где фирма
+ * может выбрать её сама, не заходя в базу.
  */
 class TenantRegistrar
 {
@@ -27,19 +33,22 @@ class TenantRegistrar
     }
 
     /**
-     * Заводит фирму и возвращает её первого сотрудника — администратора.
+     * Заводит фирму и возвращает её первого сотрудника — владельца аккаунта.
      *
-     * @param array{company_name: string, full_name: string, email: string, phone?: ?string, password: string} $data
+     * @param array{company_name: string, full_name: string, email: string, phone?: ?string, password: string, as_manager?: bool} $data
      */
     public function register(array $data): Employee
     {
-        $adminRole = Role::where('name', Role::ADMIN)->first();
+        $roleName = !empty($data['as_manager']) ? Role::MANAGER : Role::ADMIN;
+        $role = Role::where('name', $roleName)->first();
 
-        if (!$adminRole) {
-            throw new RuntimeException('Роль admin не найдена — некому отдать новый аккаунт');
+        if (!$role) {
+            throw new RuntimeException("Роль {$roleName} не найдена — некому отдать новый аккаунт");
         }
 
-        return DB::transaction(function () use ($data, $adminRole) {
+        $position = $roleName === Role::MANAGER ? 'Руководитель' : 'Администратор';
+
+        return DB::transaction(function () use ($data, $role, $position) {
             $tenant = Tenant::create([
                 'name'   => $data['company_name'],
                 'slug'   => $this->uniqueSlug($data['company_name']),
@@ -52,11 +61,11 @@ class TenantRegistrar
             // трейт BelongsToTenant, в $fillable его нет и руками он не задаётся.
             return TenantContext::for($tenant, fn () => Employee::create([
                 'full_name' => $data['full_name'],
-                'position'  => 'Администратор',
+                'position'  => $position,
                 'email'     => $data['email'],
                 'phone'     => $data['phone'] ?? null,
                 'password'  => $data['password'],
-                'role_id'   => $adminRole->id,
+                'role_id'   => $role->id,
                 'status'    => Employee::STATUS_ACTIVE,
             ]));
         });
