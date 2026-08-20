@@ -386,7 +386,7 @@
                 <thead>
                     <tr class="bg-slate-50/80 border-b border-slate-200/50">
                         <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                            ID
+                            №
                         </th>
                         <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                             <button type="button" @click="toggleSort('name')"
@@ -404,6 +404,9 @@
                         </th>
                         <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                             ИНН
+                        </th>
+                        <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                            ID
                         </th>
                         <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                             СНО
@@ -434,10 +437,12 @@
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
-                    <template x-for="client in sortedClients" :key="client.id">
+                    {{-- Номер — порядковый в текущем показе: при сортировке он остаётся
+                         сверху вниз 1, 2, 3, а не привязан к клиенту. --}}
+                    <template x-for="(client, index) in sortedClients" :key="client.id">
                         <tr class="hover:bg-slate-50/50 transition-colors duration-150">
                             <td class="px-6 py-4 whitespace-nowrap">
-                                <div class="text-sm text-slate-500 font-mono" x-text="client.id"></div>
+                                <div class="text-sm text-slate-400 tabular-nums" x-text="index + 1"></div>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
                                 <div class="flex items-center gap-2">
@@ -461,6 +466,9 @@
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
                                 <div class="text-sm text-slate-600 font-mono" x-text="client.inn"></div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                                <div class="text-sm text-slate-500 font-mono" x-text="client.id"></div>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
                                 <div class="text-sm text-slate-600" x-text="client.tax_system_name"></div>
