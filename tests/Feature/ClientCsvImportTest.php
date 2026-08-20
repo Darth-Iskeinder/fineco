@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\ActivityType;
 use App\Models\Client;
+use App\Models\ClientStatus;
 use App\Models\ClientImport;
 use App\Models\ClientImportRow;
 use App\Models\Employee;
@@ -206,6 +207,87 @@ class ClientCsvImportTest extends TestCase
         $plan = $response->viewData('plan');
 
         $this->assertSame('create', $plan[0]['verdict'], 'Строка отбита из-за тарифа: ' . $plan[0]['reason']);
+    }
+
+    /**
+     * Статус клиента и признак активности — про одно и то же.
+     *
+     * Раньше импорт заполнял только флаг: в списке клиент значился активным, а в
+     * карточке статус стоял пустым — два экрана про одного клиента говорили разное.
+     */
+    public function test_status_column_fills_the_client_status(): void
+    {
+        $who    = $this->importer();
+        $inn    = $this->inn();
+        $active = ClientStatus::where('closes_service', false)->orderBy('sort_order')->firstOrFail();
+
+        [, $token] = $this->preview($who, $this->csv(
+            [";Клиент {$inn};{$inn};{$active->name};да;;"],
+            'id;Название;ИНН;Статус клиента;Активен;Телефон;Заметка',
+        ));
+
+        $this->actingAs($who, 'employee')->post("/clients/import/{$token}/apply", ['update_existing' => 0]);
+
+        $client = Client::where('inn', $inn)->firstOrFail();
+
+        $this->assertSame($active->id, $client->client_status_id);
+        $this->assertTrue((bool) $client->is_active);
+    }
+
+    /** Завершающий статус закрывает обслуживание: снимает активность и ставит дату. */
+    public function test_closing_status_ends_the_service(): void
+    {
+        $who     = $this->importer();
+        $inn     = $this->inn();
+        $closing = ClientStatus::where('closes_service', true)->orderBy('sort_order')->firstOrFail();
+
+        [, $token] = $this->preview($who, $this->csv(
+            [";Клиент {$inn};{$inn};{$closing->name};да;;"],
+            'id;Название;ИНН;Статус клиента;Активен;Телефон;Заметка',
+        ));
+
+        $this->actingAs($who, 'employee')->post("/clients/import/{$token}/apply", ['update_existing' => 0]);
+
+        $client = Client::where('inn', $inn)->firstOrFail();
+
+        $this->assertSame($closing->id, $client->client_status_id);
+        $this->assertFalse((bool) $client->is_active, 'Завершённый клиент остался активным');
+        $this->assertSame(now()->toDateString(), $client->service_end_date?->toDateString());
+    }
+
+    /** Колонки статуса в файле нет, но «Активен: да» — случай однозначный. */
+    public function test_active_without_status_column_still_gets_a_status(): void
+    {
+        $who = $this->importer();
+        $inn = $this->inn();
+
+        [, $token] = $this->preview($who, $this->csv([";Клиент {$inn};{$inn};;;да;;"]));
+
+        $this->actingAs($who, 'employee')->post("/clients/import/{$token}/apply", ['update_existing' => 0]);
+
+        $client = Client::where('inn', $inn)->firstOrFail();
+
+        $this->assertNotNull($client->client_status_id, 'Статус в карточке остался пустым');
+        $this->assertFalse((bool) $client->clientStatus->closes_service);
+    }
+
+    /**
+     * «Активен: нет» без статуса не трогаем: приостановлен клиент или завершён —
+     * из файла не следует, а разница велика (второе закрывает обслуживание).
+     */
+    public function test_inactive_without_status_column_is_left_alone(): void
+    {
+        $who = $this->importer();
+        $inn = $this->inn();
+
+        [, $token] = $this->preview($who, $this->csv([";Клиент {$inn};{$inn};;;нет;;"]));
+
+        $this->actingAs($who, 'employee')->post("/clients/import/{$token}/apply", ['update_existing' => 0]);
+
+        $client = Client::where('inn', $inn)->firstOrFail();
+
+        $this->assertNull($client->client_status_id);
+        $this->assertFalse((bool) $client->is_active);
     }
 
     public function test_rows_without_name_or_inn_are_rejected(): void

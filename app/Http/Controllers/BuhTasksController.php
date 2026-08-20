@@ -275,7 +275,7 @@ class BuhTasksController extends Controller
                 if ($serviceEnd->lt($clientHorizon)) {
                     $clientHorizon = $serviceEnd;
                 }
-            }20103200250454
+            }
 
             foreach ($items as $item) {
                 // Исполнитель позиции: assignee_id, при пустом — ответственный клиента.

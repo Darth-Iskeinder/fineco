@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\ActivityType;
 use App\Models\Client;
+use App\Models\ClientStatus;
 use App\Models\Employee;
 use App\Models\OrganizationForm;
 use App\Models\TaxSystem;
@@ -34,6 +35,9 @@ final class ClientImportPlanner
     /** @var array<string, int> ИНН => id клиента, уже существующего в базе */
     private array $innTaken = [];
 
+    /** @var \Illuminate\Support\Collection<int, ClientStatus> Статусы по id: нужен флаг closes_service */
+    private $statuses;
+
     /**
      * @param  array<int, array{line: int, values: array<string, string>}>  $rows
      * @return array<int, array<string, mixed>>
@@ -41,6 +45,7 @@ final class ClientImportPlanner
     public function plan(array $rows): array
     {
         $this->loadBooks();
+        $this->loadStatuses();
         $this->loadExistingInns();
 
         $plan = [];
@@ -167,6 +172,8 @@ final class ClientImportPlanner
             $attributes['is_active'] = $this->isYes($active);
         }
 
+        $this->syncStatus($attributes);
+
         if (($phone = trim($values['phone'] ?? '')) !== '') {
             $attributes['contacts'] = [['type' => 'phone', 'value' => $phone, 'note' => null]];
         }
@@ -214,6 +221,7 @@ final class ClientImportPlanner
             'organization_form' => ['organization_forms', 'organization_form_id', 'Форма организации'],
             'activity_type'     => ['activity_types', 'activity_type_id', 'Вид деятельности'],
             'tax_system'        => ['tax_systems', 'tax_system_id', 'Режим налогообложения'],
+            'client_status'     => ['client_statuses', 'client_status_id', 'Статус клиента'],
             // Тарифа здесь нет намеренно: в чужих таблицах в этой колонке лежит
             // ставка налога («0.02»), а не название тарифа, и строка отбивалась
             // целиком из-за поля, которое ни на что не влияет. Колонку «Тариф» в
@@ -229,6 +237,7 @@ final class ClientImportPlanner
             'organization_forms' => $this->book(OrganizationForm::query()->pluck('id', 'name')),
             'activity_types'     => $this->book(ActivityType::query()->pluck('id', 'name')),
             'tax_systems'        => $this->book(TaxSystem::query()->pluck('id', 'name')),
+            'client_statuses'    => $this->book(ClientStatus::query()->pluck('id', 'name')),
             // Ответственного ищем и по имени, и по почте: в чужих таблицах
             // встречается и то, и другое.
             'employees'          => $this->book(Employee::query()->pluck('id', 'full_name'))
@@ -239,6 +248,56 @@ final class ClientImportPlanner
     private function book(\Illuminate\Support\Collection $pairs): array
     {
         return $pairs->mapWithKeys(fn ($id, $name) => [mb_strtolower(trim((string) $name)) => $id])->all();
+    }
+
+    /**
+     * Сводит статус клиента и признак активности — так же, как карточка клиента.
+     *
+     * Это два поля об одном: «Завершён» и «активен» вместе не бывают. Раньше
+     * импорт заполнял только флаг, и клиент попадал в список как активный, а в
+     * карточке статус стоял пустым — два экрана про одного клиента говорили
+     * разное.
+     *
+     * @param  array<string, mixed>  $attributes
+     */
+    private function syncStatus(array &$attributes): void
+    {
+        $status = isset($attributes['client_status_id'])
+            ? $this->statuses->get($attributes['client_status_id'])
+            : null;
+
+        if ($status) {
+            if ($status->closes_service) {
+                // Завершающий статус закрывает обслуживание: без даты завершения
+                // задачи по смете продолжали бы считаться вперёд.
+                $attributes['is_active'] = false;
+                $attributes['service_end_date'] ??= now()->toDateString();
+            } else {
+                $attributes['is_active'] = true;
+                $attributes['service_end_date'] = null;
+            }
+
+            return;
+        }
+
+        // Статус в файле не указан. «Активен: да» — случай однозначный, ставим его
+        // сами. Из «нет» же не следует, приостановлен клиент или завершён, а разница
+        // между ними велика (второе закрывает обслуживание) — угадывать не будем.
+        if (($attributes['is_active'] ?? null) === true) {
+            $active = $this->statuses->first(fn (ClientStatus $s) => mb_strtolower($s->name) === 'активен')
+                ?? $this->statuses->first(fn (ClientStatus $s) => !$s->closes_service);
+
+            if ($active) {
+                $attributes['client_status_id'] = $active->id;
+            }
+        }
+    }
+
+    private function loadStatuses(): void
+    {
+        // Порядок важен: по нему выбирается статус «по умолчанию» для активных,
+        // если в файле колонки статуса нет.
+        $this->statuses = ClientStatus::query()->orderBy('sort_order')->get()->keyBy('id');
     }
 
     private function loadExistingInns(): void

@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\ActivityType;
+use App\Models\ClientStatus;
 use App\Models\Client;
 use App\Models\OrganizationForm;
 use App\Models\TaxSystem;
@@ -49,6 +50,7 @@ final class ClientCsvTemplate
         'activity_type',
         'tax_system',
         'service_start_date',
+        'client_status',
         'is_active',
         'phone',
         'contact_person',
@@ -69,6 +71,7 @@ final class ClientCsvTemplate
         $form     = OrganizationForm::query()->orderBy('id')->value('name');
         $activity = ActivityType::query()->active()->ordered()->value('name');
         $tax      = TaxSystem::query()->active()->ordered()->value('name');
+        $status   = ClientStatus::query()->where('closes_service', false)->orderBy('sort_order')->value('name');
 
         $inns = self::freeInns(3);
 
@@ -91,6 +94,7 @@ final class ClientCsvTemplate
                 'activity_type'      => $activity,
                 'tax_system'         => $tax,
                 'service_start_date' => now()->format('Y-m-d'),
+                'client_status'      => $status,
                 'is_active'          => 'да',
                 'phone'              => '+996555987654',
                 'contact_person'     => 'Иванова Мария',
