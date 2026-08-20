@@ -41,7 +41,7 @@ class EmployeeProfileClientsTest extends TestCase
 
     private function employee(string $name): Employee
     {
-        $role = Role::firstOrCreate(['name' => 'employee'], ['display_name' => 'Сотрудник']);
+        $role = Role::firstOrCreate(['name' => Role::ACCOUNTANT], ['display_name' => 'Бухгалтер']);
 
         return Employee::create([
             'full_name' => $name, 'position' => 'Бухгалтер',

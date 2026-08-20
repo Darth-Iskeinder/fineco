@@ -57,7 +57,7 @@ class TaskReassignmentTest extends TestCase
         parent::setUp();
 
         Periodicity::firstOrCreate(['name' => 'Ежемесячно'], ['kind' => 'monthly']);
-        $role = Role::firstOrCreate(['name' => Role::EMPLOYEE], ['display_name' => 'Сотрудник']);
+        $role = Role::firstOrCreate(['name' => Role::ACCOUNTANT], ['display_name' => 'Бухгалтер']);
         $module = Module::firstOrCreate(
             ['name' => 'buhtasks'],
             ['display_name' => 'БухЗадачник', 'is_active' => true],

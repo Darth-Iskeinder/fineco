@@ -48,7 +48,7 @@ class ForceCompleteTaskTest extends TestCase
         parent::setUp();
 
         Periodicity::firstOrCreate(['name' => 'Ежемесячно'], ['kind' => 'monthly']);
-        $employeeRole = Role::firstOrCreate(['name' => 'employee'], ['display_name' => 'Сотрудник']);
+        $employeeRole = Role::firstOrCreate(['name' => Role::ACCOUNTANT], ['display_name' => 'Бухгалтер']);
         $module = Module::firstOrCreate(
             ['name' => 'buhtasks'],
             ['display_name' => 'БухЗадачник', 'is_active' => true],

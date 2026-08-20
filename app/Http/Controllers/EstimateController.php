@@ -342,14 +342,14 @@ class EstimateController extends Controller
         $canAssign = $this->canAssign($client);
         $assigneeOptions = [];
         if ($canAssign) {
-            // Кандидаты: активные бухгалтеры + ответственный. Плюс уже назначенные исполнители
-            // сохранённых позиций (даже если неактивны) — иначе селект не сможет показать,
-            // на ком реально стоит задача.
+            // Кандидаты: работающие бухгалтеры + ответственный. Плюс уже назначенные
+            // исполнители сохранённых позиций (даже уволенные) — иначе селект не сможет
+            // показать, на ком реально стоит задача.
             $assigneeOptions = Employee::query()
                 ->with('role')
                 ->where(function ($q) use ($client, $savedAssigneeIds) {
                     $q->where(function ($q2) use ($client) {
-                        $q2->where('status', Employee::STATUS_ACTIVE)
+                        $q2->assignable()
                            ->where(function ($q3) use ($client) {
                                $q3->whereHas('role', fn ($r) => $r->where('name', Role::ACCOUNTANT))
                                   ->orWhere('id', $client->responsible_employee_id);
@@ -445,6 +445,19 @@ class EstimateController extends Controller
 
             $canAssign = $this->canAssign($client);
 
+            // Кого вообще можно поставить исполнителем присланным payload'ом.
+            // Селект показывает работающих бухгалтеров, ответственного и тех, на ком
+            // позиции уже стоят, — но форму можно отправить и мимо селекта, поэтому
+            // тот же круг проверяем на сервере. Уже назначенных оставляем: иначе
+            // смета с уволенным исполнителем перестала бы сохраняться, пока его не
+            // заменят, а замена — отдельное решение главбуха.
+            $assignable = Employee::assignable()->pluck('id')
+                ->merge($existingRoots->pluck('assignee_id')->filter())
+                ->push($client->responsible_employee_id)
+                ->filter()
+                ->map(fn ($id) => (int) $id)
+                ->flip();
+
             $pricing     = new PricingCalculator();
             $total       = 0;
             $sortOrder   = 0;
@@ -466,7 +479,7 @@ class EstimateController extends Controller
 
                 // Исполнитель БП. Главбух может задать явно (payload); иначе сохраняем прежнего
                 // (при обновлении на месте он уже стоит), по умолчанию — ответственный клиента.
-                if ($canAssign && !empty($bpData['assignee_id'])) {
+                if ($canAssign && !empty($bpData['assignee_id']) && $assignable->has((int) $bpData['assignee_id'])) {
                     $assigneeId = (int) $bpData['assignee_id'];
                 } else {
                     $assigneeId = $existing?->assignee_id ?? $client->responsible_employee_id;
@@ -567,7 +580,7 @@ class EstimateController extends Controller
 
                 // Исполнителя может задать только главбух клиента/админ; иначе оставляем
                 // прежнего. Пусто — задача уйдёт ответственному (см. BuhTasksController).
-                if ($canAssign && !empty($extraData['assignee_id'])) {
+                if ($canAssign && !empty($extraData['assignee_id']) && $assignable->has((int) $extraData['assignee_id'])) {
                     $extraAssigneeId = (int) $extraData['assignee_id'];
                 } else {
                     $extraAssigneeId = $existing?->assignee_id;

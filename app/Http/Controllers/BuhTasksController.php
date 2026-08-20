@@ -845,8 +845,8 @@ class BuhTasksController extends Controller
 
         $assignedDoneDays = self::ASSIGNED_DONE_DAYS;
 
-        // Активные сотрудники — для назначения произвольной задачи (по умолчанию текущий)
-        $employees = Employee::where('status', 'active')
+        // Работающие сотрудники — для назначения произвольной задачи (по умолчанию текущий)
+        $employees = Employee::assignable()
             ->orderBy('full_name')
             ->get(['id', 'full_name']);
 
@@ -1223,7 +1223,8 @@ class BuhTasksController extends Controller
         ]);
 
         $author   = auth('employee')->user();
-        $assignee = Employee::where('status', 'active')->findOrFail($validated['employee_id']);
+        // Тот же отбор, что и в списке: форму можно отправить и в обход него.
+        $assignee = Employee::assignable()->findOrFail($validated['employee_id']);
         $due      = CarbonImmutable::parse($validated['due_date']);
 
         // Из каталога забираем название, описание и подпункты — СНИМКОМ, а не ссылкой:

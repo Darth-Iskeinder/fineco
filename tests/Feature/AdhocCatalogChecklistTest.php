@@ -50,7 +50,7 @@ class AdhocCatalogChecklistTest extends TestCase
             ['name' => 'buhtasks'],
             ['display_name' => 'БухЗадачник', 'is_active' => true],
         );
-        $role = Role::firstOrCreate(['name' => Role::EMPLOYEE], ['display_name' => 'Сотрудник']);
+        $role = Role::firstOrCreate(['name' => Role::ACCOUNTANT], ['display_name' => 'Бухгалтер']);
 
         $this->employee = Employee::create([
             'full_name' => 'Тест Бухгалтер', 'position' => 'Бухгалтер',

@@ -59,7 +59,7 @@ class DocumentDownloadTest extends TestCase
         Storage::fake('local');
 
         Periodicity::firstOrCreate(['name' => 'Ежемесячно'], ['kind' => 'monthly']);
-        $role = Role::firstOrCreate(['name' => Role::EMPLOYEE], ['display_name' => 'Сотрудник']);
+        $role = Role::firstOrCreate(['name' => Role::ACCOUNTANT], ['display_name' => 'Бухгалтер']);
         $tasksModule = Module::firstOrCreate(
             ['name' => 'buhtasks'],
             ['display_name' => 'БухЗадачник', 'is_active' => true],
@@ -264,7 +264,7 @@ class DocumentDownloadTest extends TestCase
     {
         [, $doc] = $this->makeTaskDocument();
 
-        $role = Role::firstOrCreate(['name' => Role::EMPLOYEE], ['display_name' => 'Сотрудник']);
+        $role = Role::firstOrCreate(['name' => Role::ACCOUNTANT], ['display_name' => 'Бухгалтер']);
         $stranger = Employee::create([
             'full_name' => 'Тест Посторонний', 'position' => 'Менеджер',
             'email' => 'doc_str_' . uniqid() . '@test.kg', 'password' => bcrypt('x'),

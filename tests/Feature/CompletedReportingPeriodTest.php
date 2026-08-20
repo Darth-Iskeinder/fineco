@@ -59,7 +59,7 @@ class CompletedReportingPeriodTest extends TestCase
         Periodicity::firstOrCreate(['name' => 'Ежегодно'], ['kind' => 'yearly']);
         Periodicity::firstOrCreate(['name' => 'Еженедельно'], ['kind' => 'weekly']);
 
-        $role   = Role::firstOrCreate(['name' => Role::EMPLOYEE], ['display_name' => 'Сотрудник']);
+        $role   = Role::firstOrCreate(['name' => Role::ACCOUNTANT], ['display_name' => 'Бухгалтер']);
         $module = Module::firstOrCreate(
             ['name' => 'buhtasks'],
             ['display_name' => 'БухЗадачник', 'is_active' => true],

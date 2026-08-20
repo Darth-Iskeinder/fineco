@@ -51,7 +51,7 @@ class GenerateTaskRemindersTest extends TestCase
         Periodicity::firstOrCreate(['name' => 'Ежеквартально'], ['kind' => 'quarterly']);
         Periodicity::firstOrCreate(['name' => 'Ежемесячно'], ['kind' => 'monthly']);
 
-        $role = Role::firstOrCreate(['name' => 'employee'], ['display_name' => 'Сотрудник']);
+        $role = Role::firstOrCreate(['name' => Role::ACCOUNTANT], ['display_name' => 'Бухгалтер']);
         $this->employee = Employee::create([
             'full_name' => 'Тест Бухгалтер', 'position' => 'Бухгалтер',
             'email' => 'worker_' . uniqid() . '@test.kg', 'password' => bcrypt('x'),

@@ -56,7 +56,7 @@ class EmployeePhoneTest extends TestCase
 
     private function employeeRoleId(): int
     {
-        return Role::firstOrCreate(['name' => 'employee'], ['display_name' => 'Сотрудник'])->id;
+        return Role::firstOrCreate(['name' => Role::ACCOUNTANT], ['display_name' => 'Бухгалтер'])->id;
     }
 
     /** @return array<string, mixed> Заполненная форма создания сотрудника. */

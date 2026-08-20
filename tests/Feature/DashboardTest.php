@@ -50,7 +50,7 @@ class DashboardTest extends TestCase
             ['name' => Role::MANAGER],
             ['display_name' => 'Руководитель'],
         );
-        $employeeRole = Role::firstOrCreate(['name' => 'employee'], ['display_name' => 'Сотрудник']);
+        $employeeRole = Role::firstOrCreate(['name' => Role::ACCOUNTANT], ['display_name' => 'Бухгалтер']);
 
         $this->manager = Employee::create([
             'full_name' => 'Тест Руководитель', 'position' => 'Директор',

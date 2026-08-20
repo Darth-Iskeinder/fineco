@@ -53,7 +53,7 @@ class AuditModuleTest extends TestCase
     {
         parent::setUp();
 
-        $role    = Role::firstOrCreate(['name' => 'employee'], ['display_name' => 'Сотрудник']);
+        $role    = Role::firstOrCreate(['name' => Role::ACCOUNTANT], ['display_name' => 'Бухгалтер']);
         $manager = Role::firstOrCreate(['name' => Role::MANAGER], ['display_name' => 'Руководитель']);
         $module  = Module::firstOrCreate(['name' => 'audit'], ['display_name' => 'Аудит', 'is_active' => true]);
 

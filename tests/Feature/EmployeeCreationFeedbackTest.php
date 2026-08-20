@@ -52,7 +52,7 @@ class EmployeeCreationFeedbackTest extends TestCase
 
     private function employeeRoleId(): int
     {
-        return Role::firstOrCreate(['name' => 'employee'], ['display_name' => 'Сотрудник'])->id;
+        return Role::firstOrCreate(['name' => Role::ACCOUNTANT], ['display_name' => 'Бухгалтер'])->id;
     }
 
     public function test_password_mismatch_shows_error_and_keeps_input(): void

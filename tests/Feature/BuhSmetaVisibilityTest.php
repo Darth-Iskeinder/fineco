@@ -53,7 +53,7 @@ class BuhSmetaVisibilityTest extends TestCase
         $roles = [
             'admin'    => Role::firstOrCreate(['name' => Role::ADMIN], ['display_name' => 'Админ']),
             'manager'  => Role::firstOrCreate(['name' => Role::MANAGER], ['display_name' => 'Руководитель']),
-            'employee' => Role::firstOrCreate(['name' => Role::EMPLOYEE], ['display_name' => 'Сотрудник']),
+            'accountant' => Role::firstOrCreate(['name' => Role::ACCOUNTANT], ['display_name' => 'Бухгалтер']),
         ];
 
         $make = fn (string $role, string $prefix) => Employee::create([
@@ -64,8 +64,8 @@ class BuhSmetaVisibilityTest extends TestCase
 
         $this->admin      = $make('admin', 'admin');
         $this->manager    = $make('manager', 'manager');
-        $this->head       = $make('employee', 'head');
-        $this->accountant = $make('employee', 'acc');
+        $this->head       = $make('accountant', 'head');
+        $this->accountant = $make('accountant', 'acc');
 
         foreach ([$this->head, $this->accountant] as $e) {
             $e->modules()->attach($module->id);

@@ -60,7 +60,7 @@ class ErrorJournalTest extends TestCase
             'password' => 'secret123',
         ]);
 
-        $role = Role::firstOrCreate(['name' => Role::EMPLOYEE], ['display_name' => 'Сотрудник']);
+        $role = Role::firstOrCreate(['name' => Role::ACCOUNTANT], ['display_name' => 'Бухгалтер']);
 
         $this->employee = Employee::create([
             'full_name' => 'Тест Сотрудник', 'position' => 'Бухгалтер',

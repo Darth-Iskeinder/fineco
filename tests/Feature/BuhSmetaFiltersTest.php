@@ -64,7 +64,7 @@ class BuhSmetaFiltersTest extends TestCase
 
         $this->admin   = $make(Role::ADMIN, 'admin');
         $this->manager = $make(Role::MANAGER, 'manager');
-        $this->head    = $make(Role::EMPLOYEE, 'head');
+        $this->head    = $make(Role::ACCOUNTANT, 'head');
     }
 
     private function clientWithEstimate(?int $responsibleId, int $items = 0, ?int $taxSystemId = null): Client

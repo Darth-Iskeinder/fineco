@@ -30,7 +30,6 @@ class VendorPanelController extends Controller
         Role::HEAD_ACCOUNTANT,
         Role::AUDITOR,
         Role::ACCOUNTANT,
-        Role::EMPLOYEE,
     ];
 
 

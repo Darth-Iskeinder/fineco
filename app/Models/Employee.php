@@ -124,6 +124,20 @@ class Employee extends Authenticatable
         return $query->where('status', self::STATUS_PENDING);
     }
 
+    /**
+     * Кому можно поручить работу: аккаунт открыт И человек не уволен.
+     *
+     * Два разных поля, и путать их дорого: `status` — про вход в систему,
+     * `employment_status` — про то, работает ли человек в фирме. Увольнение через
+     * карточку меняет второе, аккаунт при этом остаётся активным, поэтому отбор
+     * по одному лишь `status` предлагает уволенных в исполнители.
+     */
+    public function scopeAssignable($query)
+    {
+        return $query->where('status', self::STATUS_ACTIVE)
+                     ->where('employment_status', '!=', self::EMPLOYMENT_FIRED);
+    }
+
     public function scopeSearch($query, ?string $search)
     {
         if (!$search) {

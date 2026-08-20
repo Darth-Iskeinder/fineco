@@ -52,7 +52,7 @@ class AssignedTasksTest extends TestCase
             ['name' => 'buhtasks'],
             ['display_name' => 'БухЗадачник', 'is_active' => true],
         );
-        $role = Role::firstOrCreate(['name' => Role::EMPLOYEE], ['display_name' => 'Сотрудник']);
+        $role = Role::firstOrCreate(['name' => Role::ACCOUNTANT], ['display_name' => 'Бухгалтер']);
 
         $make = fn (string $prefix) => Employee::create([
             'full_name' => 'Тест ' . $prefix, 'position' => $prefix,

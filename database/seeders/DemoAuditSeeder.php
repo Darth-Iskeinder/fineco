@@ -42,7 +42,7 @@ class DemoAuditSeeder extends Seeder
         }
 
         $accountant = $this->employee('buh@fineco.kg', 'ДЕМО Марина Соколова', 'Бухгалтер', Role::ACCOUNTANT, ['buhtasks', 'clients']);
-        $auditor    = $this->employee('auditor@fineco.kg', 'ДЕМО Айгерим Шерова', 'Аудитор', Role::EMPLOYEE, ['audit', 'clients']);
+        $auditor    = $this->employee('auditor@fineco.kg', 'ДЕМО Айгерим Шерова', 'Аудитор', Role::AUDITOR, ['audit', 'clients']);
 
         $client = Client::firstOrCreate(
             ['name' => 'ДЕМО ОсОО Северный Ветер'],

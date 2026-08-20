@@ -29,7 +29,7 @@ class DemoTaskRemindersSeeder extends Seeder
         Periodicity::firstOrCreate(['name' => 'Ежемесячно'], ['kind' => 'monthly']);
         Periodicity::firstOrCreate(['name' => 'Ежеквартально'], ['kind' => 'quarterly']);
 
-        $role = Role::firstOrCreate(['name' => 'employee'], ['display_name' => 'Сотрудник']);
+        $role = Role::firstOrCreate(['name' => Role::ACCOUNTANT], ['display_name' => 'Бухгалтер']);
 
         $employee = Employee::firstOrCreate(
             ['email' => 'demo@fineco.kg'],

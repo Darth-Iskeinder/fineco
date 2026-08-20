@@ -9,7 +9,6 @@ class Role extends Model
 {
     // Имена ролей (roles.name)
     const ADMIN = 'admin';
-    const EMPLOYEE = 'employee';
     const AUDITOR = 'auditor';
     const HEAD_ACCOUNTANT = 'head_accountant';
     const ACCOUNTANT = 'accountant';

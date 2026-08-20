@@ -201,7 +201,7 @@ class ClientCsvExportTest extends TestCase
 
     public function test_export_needs_the_clients_module(): void
     {
-        $role = Role::firstOrCreate(['name' => 'employee'], ['display_name' => 'Сотрудник']);
+        $role = Role::firstOrCreate(['name' => Role::ACCOUNTANT], ['display_name' => 'Бухгалтер']);
 
         $outsider = Employee::create([
             'full_name' => 'Без доступа', 'position' => 'Курьер',

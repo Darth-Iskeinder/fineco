@@ -159,8 +159,7 @@ class AuditController extends Controller
             ],
             'sectionHints' => \App\Models\ServiceGroup::orderBy('name')->pluck('name'),
             'transfer'     => $this->transferList($audit),
-            'employees'    => Employee::active()
-                ->where('employment_status', '!=', Employee::EMPLOYMENT_FIRED)
+            'employees'    => Employee::assignable()
                 ->orderBy('full_name')
                 ->get(['id', 'full_name']),
         ]);
@@ -464,8 +463,7 @@ class AuditController extends Controller
         return view('audit.findings', [
             'reviews'   => $reviews,
             'filter'    => $filter,
-            'employees' => Employee::active()
-                ->where('employment_status', '!=', Employee::EMPLOYMENT_FIRED)
+            'employees' => Employee::assignable()
                 ->orderBy('full_name')
                 ->get(['id', 'full_name']),
             'counts' => [
