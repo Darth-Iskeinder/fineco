@@ -209,7 +209,7 @@
                                     </template>
                                 </select>
                                 <template x-if="form.status.client_status_id && clientStatuses.find(cs => String(cs.id) === form.status.client_status_id)?.closes_service">
-                                    <p class="mt-1 text-xs text-amber-600">Этот статус завершает обслуживание. is_active будет снят автоматически.</p>
+                                    <p class="mt-1 text-xs text-amber-600">Этот статус завершает обслуживание: клиент станет неактивным, а новые задачи по смете перестанут появляться.</p>
                                 </template>
                             </div>
                             <div>
@@ -1662,6 +1662,57 @@
 
     <!-- ==================== ПРЕДПРОСМОТР ДОКУМЕНТА ==================== -->
     <template x-teleport="body">
+        {{-- Подтверждение завершения обслуживания: последствия не видны в самой карточке,
+             поэтому проговариваем их до сохранения. --}}
+        <div x-show="showEndServiceWarning" x-cloak
+             class="fixed inset-0 z-[70] flex items-center justify-center p-4"
+             @keydown.escape.window="showEndServiceWarning = false">
+            <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" @click="showEndServiceWarning = false"></div>
+
+            <div class="relative z-10 w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden">
+                <div class="px-6 py-5 flex items-start gap-4">
+                    <div class="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+                        <svg class="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                        </svg>
+                    </div>
+                    <div class="text-sm text-slate-600 space-y-3">
+                        <p class="text-base font-semibold text-slate-800">Завершить обслуживание клиента?</p>
+                        <p>
+                            Задачи по смете считаются до
+                            <span class="font-medium text-slate-800" x-text="formatDate(form.status.service_end_date) || 'сегодняшнего дня'"></span>.
+                            Дальше по этому клиенту не появится ничего — ни в БухЗадачнике, ни ночным напоминанием.
+                        </p>
+                        <ul class="space-y-1.5">
+                            <li class="flex gap-2">
+                                <span class="text-emerald-600">•</span>
+                                <span>Незакрытые задачи со сроком <b>до</b> этой даты останутся: просрочку видно, доделать хвосты можно.</span>
+                            </li>
+                            <li class="flex gap-2">
+                                <span class="text-amber-600">•</span>
+                                <span>Незакрытые задачи со сроком <b>после</b> неё пропадут из списка — вместе с уже созданными напоминаниями по ним.</span>
+                            </li>
+                            <li class="flex gap-2">
+                                <span class="text-emerald-600">•</span>
+                                <span>Выполненные задачи остаются все: это история работы, её ничто не стирает.</span>
+                            </li>
+                        </ul>
+                        <p class="text-xs text-slate-400">Если вернуть статус «Активен», дата снимется и задачи пойдут дальше — ничего не теряется навсегда.</p>
+                    </div>
+                </div>
+                <div class="px-6 py-4 bg-slate-50 flex justify-end gap-2">
+                    <button type="button" @click="showEndServiceWarning = false"
+                            class="px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
+                        Отмена
+                    </button>
+                    <button type="button" @click="showEndServiceWarning = false; saveSection('status', true)"
+                            class="px-4 py-2 text-sm font-semibold text-white bg-amber-600 rounded-xl hover:bg-amber-700 transition-colors">
+                        Завершить обслуживание
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <div x-show="showPreview" x-cloak
              class="fixed inset-0 z-[60] flex items-center justify-center p-4"
              @keydown.escape.window="closePreview()">
@@ -2501,6 +2552,10 @@ function clientShow() {
             notes: false,
         },
 
+        // Завершение обслуживания меняет не только карточку: с этой даты клиенту
+        // перестают заводиться задачи по смете. Спрашиваем до сохранения.
+        showEndServiceWarning: false,
+
         saving: {
             basic: false,
             status: false,
@@ -2777,7 +2832,21 @@ function clientShow() {
             this.resetForm(section);
         },
 
-        async saveSection(section) {
+        /** Секция «Статус» переводит клиента в завершённые — и это стоит подтвердить. */
+        serviceWillEnd() {
+            const status = this.clientStatuses.find(cs => String(cs.id) === this.form.status.client_status_id);
+            const closing = Boolean(status?.closes_service) || Boolean(this.form.status.service_end_date);
+
+            // Уже завершённого второй раз не переспрашиваем.
+            return closing && !this.client.service_end_date;
+        },
+
+        async saveSection(section, confirmed = false) {
+            if (section === 'status' && !confirmed && this.serviceWillEnd()) {
+                this.showEndServiceWarning = true;
+                return;
+            }
+
             this.saving[section] = true;
 
             // Отбрасываем пустые строки филиалов (без кода НО), чтобы не падала валидация

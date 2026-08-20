@@ -268,6 +268,15 @@ class BuhTasksController extends Controller
                 $lookbackStart = $estimate->tasksStartFrom();
             }
 
+            // Верхняя граница — конец обслуживания, если он назначен. У действующих
+            // клиентов дата пуста, и окно остаётся прежним.
+            $clientHorizon = $horizonEnd;
+            if ($serviceEnd = $client->serviceEndsAt()) {
+                if ($serviceEnd->lt($clientHorizon)) {
+                    $clientHorizon = $serviceEnd;
+                }
+            }20103200250454
+
             foreach ($items as $item) {
                 // Исполнитель позиции: assignee_id, при пустом — ответственный клиента.
                 // Свои БП идут в основной список; во вкладку «задачи бухгалтеров» — БП моих
@@ -289,10 +298,10 @@ class BuhTasksController extends Controller
                 // Экземпляры задачи: [year, month, dueDateString|null, dueDay|null, Carbon|null]
                 $occurrences = [];
                 if ($hasSchedule) {
-                    foreach ($service->dueDatesForClient($override, $lookbackStart, $horizonEnd) as $due) {
+                    foreach ($service->dueDatesForClient($override, $lookbackStart, $clientHorizon) as $due) {
                         $occurrences[] = [$due->year, $due->month, $due->toDateString(), (int) $due->day, $due];
                     }
-                } elseif ($curStart->gte($lookbackStart)) {
+                } elseif ($curStart->gte($lookbackStart) && $curStart->lte($clientHorizon)) {
                     // Позиции без расписания — задача текущего месяца. В холостой месяц
                     // (смета только что заведена) их тоже не показываем.
                     $dueDay = $item->due_day ? min((int) $item->due_day, $curStart->daysInMonth) : null;

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToTenant;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -380,6 +381,26 @@ class Client extends Model
     public static function canBeManagedBy(Employee $employee): bool
     {
         return $employee->isAdmin() || $employee->isManager();
+    }
+
+    /**
+     * Последний день, за который клиенту ещё положены задачи по смете.
+     *
+     * Обслуживание — это отрезок: `service_start_date` уже работает нижней
+     * границей, это его верхняя. Дату проставляет завершающий статус
+     * (ClientController: `closes_service`), поэтому у действующих клиентов здесь
+     * null — и окно задач у них остаётся ровно таким, каким было.
+     *
+     * Смотрим именно на дату, а не на `is_active`: флаг не помнит, когда его
+     * сняли, и по нему пришлось бы разом спрятать всю накопленную просрочку.
+     * По дате незакрытые хвосты внутри периода обслуживания остаются на виду,
+     * а на будущее новых задач не появляется.
+     */
+    public function serviceEndsAt(): ?CarbonImmutable
+    {
+        return $this->service_end_date
+            ? CarbonImmutable::parse($this->service_end_date)->endOfDay()
+            : null;
     }
 
     public function scopeActive($query)

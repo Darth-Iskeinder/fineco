@@ -132,7 +132,18 @@ class GenerateTaskReminders extends Command
             $activeKeys = [];        // "employee|service|office|due", которые должны существовать
             $clientHadWork = false;
 
-            foreach ($estimate->rootItems as $item) {
+            // За конец обслуживания задачи не заводим. Окно прунинга при этом остаётся
+            // общим: напоминания после этой даты не попадут в $activeKeys и уйдут как
+            // устаревшие — а всё, что внутри периода, продолжает жить по прежним правилам.
+            $clientTo = $client->serviceEndsAt();
+            $clientTo = $clientTo && $clientTo->lt($to) ? $clientTo : $to;
+
+            // Обслуживание закончилось раньше окна — заводить нечего. Из цикла при этом
+            // не выходим: клиенту нужен прунинг, иначе напоминания, созданные до
+            // завершения, остались бы висеть навсегда.
+            $serviceOver = $clientTo->lt($from);
+
+            foreach ($serviceOver ? [] : $estimate->rootItems as $item) {
                 // Исполнитель позиции: assignee_id, при пустом — ответственный клиента.
                 $assigneeId = $item->assignee_id ?? $client->responsible_employee_id;
                 $employee = $employees->get($assigneeId);
@@ -146,7 +157,7 @@ class GenerateTaskReminders extends Command
                 }
 
                 $override = $overrides->get($item->service_id);
-                $dates = $service->dueDatesForClient($override, $from, $to);
+                $dates = $service->dueDatesForClient($override, $from, $clientTo);
                 if (empty($dates)) {
                     continue; // нет расписания → не плодим пустые задачи
                 }
