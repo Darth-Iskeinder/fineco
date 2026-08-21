@@ -959,13 +959,44 @@
                         Компания
                         <span class="text-slate-400 font-normal">(необязательно)</span>
                     </label>
-                    <select x-model="newTask.client_id"
-                            class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 bg-white">
-                        <option value="">Выберите компанию...</option>
-                        <template x-for="client in allClients" :key="client.id">
-                            <option :value="client.id" x-text="client.name"></option>
-                        </template>
-                    </select>
+                    {{-- Поиск вместо селекта: компаний сотни, прокруткой нужную не найти.
+                         Список уже на странице, поэтому фильтруем на месте, без запросов. --}}
+                    <div class="relative" @click.outside="closePicker('client')">
+                        <input type="text"
+                               :value="picker.client.open ? picker.client.q : selectedClientName"
+                               @focus="openPicker('client')"
+                               @click="openPicker('client')"
+                               @input="picker.client.q = $event.target.value; picker.client.open = true; picker.client.hi = 0"
+                               @keydown.arrow-down.prevent="movePicker('client', 1)"
+                               @keydown.arrow-up.prevent="movePicker('client', -1)"
+                               @keydown.enter.prevent="chooseHighlighted('client')"
+                               @keydown.escape.stop="closePicker('client')"
+                               :placeholder="selectedClientName || 'Начните вводить название...'"
+                               class="block w-full px-3 py-2.5 pr-9 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 bg-white">
+
+                        <button type="button" x-show="newTask.client_id" @click="clearPick('client')"
+                                class="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600"
+                                title="Сбросить компанию" style="display:none">
+                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+
+                        <div x-show="picker.client.open" style="display:none"
+                             class="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
+                            <template x-if="clientOptions.rows.length === 0">
+                                <div class="px-3 py-2.5 text-sm text-slate-400">Ничего не найдено</div>
+                            </template>
+                            <template x-for="(c, i) in clientOptions.rows" :key="c.id">
+                                <button type="button" @click="pickClient(c)" @mouseenter="picker.client.hi = i"
+                                        :class="i === picker.client.hi ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-50'"
+                                        class="block w-full text-left px-3 py-2 text-sm" x-text="c.name"></button>
+                            </template>
+                            <template x-if="clientOptions.total > clientOptions.rows.length">
+                                <div class="px-3 py-2 text-xs text-slate-400 border-t border-slate-100">
+                                    Показаны первые <span x-text="clientOptions.rows.length"></span> из <span x-text="clientOptions.total"></span> — уточните запрос
+                                </div>
+                            </template>
+                        </div>
+                    </div>
                 </div>
 
                 {{-- Источник задачи: из каталога (берём только название) или своя --}}
@@ -982,13 +1013,43 @@
                     {{-- Из каталога: выбор услуги, переносим ТОЛЬКО название --}}
                     <div x-show="newTask.source === 'catalog'">
                         <label class="block text-sm font-medium text-slate-700 mb-1.5">Услуга из каталога</label>
-                        <select x-model="newTask.service_id" @change="onCatalogPick()"
-                                class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 bg-white">
-                            <option value="">Выберите услугу...</option>
-                            <template x-for="s in catalog" :key="s.id">
-                                <option :value="s.id" x-text="s.name"></option>
-                            </template>
-                        </select>
+                        {{-- Тот же поиск, что и по компаниям: в каталоге под две сотни БП. --}}
+                        <div class="relative" @click.outside="closePicker('catalog')">
+                            <input type="text"
+                                   :value="picker.catalog.open ? picker.catalog.q : selectedServiceName"
+                                   @focus="openPicker('catalog')"
+                                   @click="openPicker('catalog')"
+                                   @input="picker.catalog.q = $event.target.value; picker.catalog.open = true; picker.catalog.hi = 0"
+                                   @keydown.arrow-down.prevent="movePicker('catalog', 1)"
+                                   @keydown.arrow-up.prevent="movePicker('catalog', -1)"
+                                   @keydown.enter.prevent="chooseHighlighted('catalog')"
+                                   @keydown.escape.stop="closePicker('catalog')"
+                                   :placeholder="selectedServiceName || 'Начните вводить название...'"
+                                   class="block w-full px-3 py-2.5 pr-9 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 bg-white">
+
+                            <button type="button" x-show="newTask.service_id" @click="clearPick('catalog')"
+                                    class="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600"
+                                    title="Сбросить услугу" style="display:none">
+                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                            </button>
+
+                            <div x-show="picker.catalog.open" style="display:none"
+                                 class="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
+                                <template x-if="catalogOptions.rows.length === 0">
+                                    <div class="px-3 py-2.5 text-sm text-slate-400">Ничего не найдено</div>
+                                </template>
+                                <template x-for="(svc, i) in catalogOptions.rows" :key="svc.id">
+                                    <button type="button" @click="pickService(svc)" @mouseenter="picker.catalog.hi = i"
+                                            :class="i === picker.catalog.hi ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-50'"
+                                            class="block w-full text-left px-3 py-2 text-sm" x-text="svc.name"></button>
+                                </template>
+                                <template x-if="catalogOptions.total > catalogOptions.rows.length">
+                                    <div class="px-3 py-2 text-xs text-slate-400 border-t border-slate-100">
+                                        Показаны первые <span x-text="catalogOptions.rows.length"></span> из <span x-text="catalogOptions.total"></span> — уточните запрос
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
                         <p class="text-xs text-slate-400 mt-1">Название, описание и подпункты возьмутся из услуги.</p>
                     </div>
 
@@ -2012,6 +2073,8 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
     // File-объекты держим вне реактивного state — Alpine оборачивает объекты в Proxy,
     // что ломает внутренние методы File/Blob при передаче в FormData
     const pendingFiles = new Map();
+    // Сколько строк рисуем в полях с поиском (компания, услуга) до уточнения запроса.
+    const PICKER_LIMIT = 50;
     // Кэш окна видимости вне реактивного state (чтобы геттер не пересобирал Set на каждую строку)
     let visibleCache = { key: null, list: [] };
     // Кэш матрицы чеклиста: тяжёлый расчёт (проход по всем задачам) не должен повторяться
@@ -2091,6 +2154,14 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             client_id: '', name: '', description: '', clarification: '', requires_review: false,
             employee_id: currentEmployeeId, due_date: '',
         },
+        // Поиск в попапе «Добавить задачу»: компаний и услуг в списках сотни, прокруткой
+        // нужную не найти. Оба списка уже на странице — фильтруем на месте, без запросов.
+        // hi — подсвеченная строка, по ней работают ↑/↓ и Enter.
+        picker: {
+            client:  { open: false, q: '', hi: 0 },
+            catalog: { open: false, q: '', hi: 0 },
+        },
+
         newTaskFileName: null,      // имя выбранного документа (сам File — в pendingFiles)
         creating: false,
         createError: '',
@@ -3479,7 +3550,16 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         // а искали мы поломку во времени скриншота.
         openCreateModal() {
             this.createError = '';
+            this.resetPickers();
             this.showCreateModal = true;
+        },
+
+        /** Открытые списки и набранный поиск в форме новой задачи не должны переживать её. */
+        resetPickers() {
+            this.picker = {
+                client:  { open: false, q: '', hi: 0 },
+                catalog: { open: false, q: '', hi: 0 },
+            };
         },
 
         resetNewTask() {
@@ -3490,6 +3570,79 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             };
             pendingFiles.delete('create');
             this.newTaskFileName = null;
+            this.resetPickers();
+        },
+
+        // --- Поля с поиском в форме новой задачи (компания и услуга) ---
+
+        /**
+         * Отфильтрованный список: {rows, total}. Рисуем не больше PICKER_LIMIT строк —
+         * иначе на каждый набранный символ браузер перерисовывал бы сотни узлов.
+         * total нужен, чтобы честно сказать, что показано не всё.
+         */
+        filterOptions(list, q) {
+            const needle = (q || '').trim().toLowerCase();
+            const found  = needle
+                ? (list || []).filter(o => (o.name || '').toLowerCase().includes(needle))
+                : (list || []);
+
+            return { rows: found.slice(0, PICKER_LIMIT), total: found.length };
+        },
+
+        get clientOptions()  { return this.filterOptions(this.allClients, this.picker.client.q); },
+        get catalogOptions() { return this.filterOptions(this.catalog, this.picker.catalog.q); },
+
+        get selectedClientName() {
+            const c = (this.allClients || []).find(x => String(x.id) === String(this.newTask.client_id));
+            return c ? c.name : '';
+        },
+
+        get selectedServiceName() {
+            return this.pickedService ? this.pickedService.name : '';
+        },
+
+        // Открываем с пустым запросом: выбранное видно в подсказке поля, а печатать
+        // человек начинает с чистого листа, не стирая предыдущее название.
+        openPicker(kind) {
+            this.picker[kind].open = true;
+            this.picker[kind].q    = '';
+            this.picker[kind].hi   = 0;
+        },
+
+        closePicker(kind) { this.picker[kind].open = false; },
+
+        pickerRows(kind) {
+            return kind === 'client' ? this.clientOptions.rows : this.catalogOptions.rows;
+        },
+
+        movePicker(kind, delta) {
+            const rows = this.pickerRows(kind);
+            if (!rows.length) return;
+            this.picker[kind].open = true;
+            this.picker[kind].hi   = (this.picker[kind].hi + delta + rows.length) % rows.length;
+        },
+
+        chooseHighlighted(kind) {
+            const row = this.pickerRows(kind)[this.picker[kind].hi];
+            if (!row) return;
+            kind === 'client' ? this.pickClient(row) : this.pickService(row);
+        },
+
+        pickClient(client) {
+            this.newTask.client_id = client.id;
+            this.closePicker('client');
+        },
+
+        pickService(service) {
+            this.newTask.service_id = service.id;
+            this.onCatalogPick();
+            this.closePicker('catalog');
+        },
+
+        clearPick(kind) {
+            if (kind === 'client') this.newTask.client_id = '';
+            else                   this.newTask.service_id = '';
+            this.picker[kind] = { open: false, q: '', hi: 0 };
         },
 
         // При выборе услуги из каталога подставляем её название (берём только имя).

@@ -92,6 +92,28 @@ class TaskClientSelectorTest extends TestCase
         return $response->viewData('allClients')->pluck('name')->all();
     }
 
+    /**
+     * Компанию и услугу в модалке выбирают полем с поиском, а не длинным селектом:
+     * и компаний, и БП в каталоге сотни, прокруткой нужную не найти.
+     */
+    public function test_company_and_catalog_are_picked_by_search(): void
+    {
+        $this->client('ОсОО Поисковая', $this->accountant->id);
+
+        $page = $this->actingAs($this->accountant, 'employee')
+            ->get(route('buhtasks.index'))
+            ->assertOk();
+
+        // Поля с поиском на месте: подсказка ввода и обработчики выбора.
+        $page->assertSee('Начните вводить название...', false);
+        $page->assertSee("pickClient(c)", false);
+        $page->assertSee("pickService(svc)", false);
+
+        // Старых выпадающих списков в форме не осталось.
+        $page->assertDontSee('>Выберите компанию...<', false);
+        $page->assertDontSee('>Выберите услугу...<', false);
+    }
+
     public function test_admin_and_manager_see_all_active_clients(): void
     {
         $foreign  = $this->client('ТОО Чужой Актив ' . uniqid(), $this->head->id);
