@@ -215,6 +215,86 @@ class TenantTemplateTest extends TestCase
         ]);
     }
 
+    /**
+     * Обратное наполнение образца: живая фирма помечает отжившие БП прямо
+     * в названии, и такие в стартовый набор новых фирм попадать не должны.
+     */
+    public function test_fill_from_drops_services_marked_in_the_name(): void
+    {
+        $source = $this->newTenant();
+
+        TenantContext::for($source, function () {
+            $keep = Service::create([
+                'name' => 'Расчет НДС', 'periodicity' => 'Ежемесячно',
+                'start_day' => [5], 'is_active' => true,
+            ]);
+            Service::create([
+                'parent_id' => $keep->id,
+                'name' => 'Подпункт (УДАЛИТЬ)', 'periodicity' => 'Ежемесячно',
+                'start_day' => [5], 'is_active' => true,
+            ]);
+
+            $drop = Service::create([
+                'name' => 'Сводная карточка (удалить)', 'periodicity' => 'Ежемесячно',
+                'start_day' => [5], 'is_active' => true,
+            ]);
+            Service::create([
+                'parent_id' => $drop->id,
+                'name' => 'Подпункт отжившего БП', 'periodicity' => 'Ежемесячно',
+                'start_day' => [5], 'is_active' => true,
+            ]);
+        });
+
+        $this->copier->clearTemplate();
+        $copied = $this->copier->fillFrom($source, ['удалить']);
+
+        $names = Service::acrossTenants()->where('tenant_id', $this->template->id)->pluck('name')->all();
+
+        $this->assertSame(['Расчет НДС'], $names, 'В образец попало не то, что должно было');
+        $this->assertSame(1, $copied['services']);
+    }
+
+    /** Список отсеиваемых показываем до копирования — чтобы было что проверить глазами. */
+    public function test_skip_preview_lists_matches_regardless_of_case(): void
+    {
+        $source = $this->newTenant();
+
+        TenantContext::for($source, function () {
+            foreach (['Расчет НДС', 'Сводная карточка (удалить)', 'Экспресс-аудит ОСВ (УДАЛИТЬ)'] as $name) {
+                Service::create([
+                    'name' => $name, 'periodicity' => 'Ежемесячно',
+                    'start_day' => [5], 'is_active' => true,
+                ]);
+            }
+        });
+
+        $this->assertSame(
+            ['Сводная карточка (удалить)', 'Экспресс-аудит ОСВ (УДАЛИТЬ)'],
+            $this->copier->servicesToSkip($source, ['удалить']),
+        );
+        $this->assertSame([], $this->copier->servicesToSkip($source, []), 'Без фильтра отсеивать нечего');
+    }
+
+    /** Без фильтра поведение прежнее — переносим каталог целиком. */
+    public function test_without_filter_everything_is_copied(): void
+    {
+        $source = $this->newTenant();
+
+        TenantContext::for($source, function () {
+            foreach (['Расчет НДС', 'Сводная карточка (удалить)'] as $name) {
+                Service::create([
+                    'name' => $name, 'periodicity' => 'Ежемесячно',
+                    'start_day' => [5], 'is_active' => true,
+                ]);
+            }
+        });
+
+        $this->copier->clearTemplate();
+        $copied = $this->copier->fillFrom($source);
+
+        $this->assertSame(2, $copied['services']);
+    }
+
     public function test_template_cannot_copy_into_itself(): void
     {
         $this->expectException(\RuntimeException::class);

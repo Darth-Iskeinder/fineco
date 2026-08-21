@@ -70,14 +70,45 @@ class TenantTemplate
     /**
      * Наполнить образец каталогом действующей фирмы. Нужно один раз, чтобы
      * образцу было что отдавать новым аккаунтам; дальше набор правится руками.
+     *
+     * $skipNames — куски названий БП, которые в образец не переносим. Живая фирма
+     * помечает отжившие БП прямо в названии («… (удалить)»), и в стартовый набор
+     * новых фирм такому попадать незачем. Сравнение — вхождение подстроки без
+     * учёта регистра; подпункты отсеянного БП уезжают вместе с ним.
+     *
+     * @param string[] $skipNames
      */
-    public function fillFrom(Tenant $source): array
+    public function fillFrom(Tenant $source, array $skipNames = []): array
     {
         if ($source->isTemplate()) {
             throw new RuntimeException('Образец нельзя наполнить из самого себя');
         }
 
-        return $this->copy($source, $this->template());
+        return $this->copy($source, $this->template(), $skipNames);
+    }
+
+    /**
+     * Названия БП источника, которые фильтр отсеет — показать до копирования.
+     *
+     * Подпунктов отсеянных родителей здесь нет: они отваливаются уже при
+     * копировании, потому что родителя в образце не окажется.
+     *
+     * @param  string[] $skipNames
+     * @return string[]
+     */
+    public function servicesToSkip(Tenant $source, array $skipNames): array
+    {
+        if (!$skipNames) {
+            return [];
+        }
+
+        return DB::table('services')
+            ->where('tenant_id', $source->id)
+            ->orderBy('id')
+            ->pluck('name')
+            ->filter(fn ($name) => $this->nameMatches($name, $skipNames))
+            ->values()
+            ->all();
     }
 
     /** Очистить образец: только справочники, рабочих данных в нём нет. */
@@ -100,7 +131,8 @@ class TenantTemplate
         });
     }
 
-    private function copy(Tenant $source, Tenant $target): array
+    /** @param string[] $skipNames */
+    private function copy(Tenant $source, Tenant $target, array $skipNames = []): array
     {
         if ($this->alreadyFilled($target)) {
             throw new RuntimeException(
@@ -108,14 +140,14 @@ class TenantTemplate
             );
         }
 
-        return DB::transaction(function () use ($source, $target) {
+        return DB::transaction(function () use ($source, $target, $skipNames) {
             $copied = [];
 
             foreach (self::SIMPLE_TABLES as $table) {
                 $copied[$table] = $this->copyTable($table, $source->id, $target->id);
             }
 
-            $copied['services'] = $this->copyServices($source->id, $target->id);
+            $copied['services'] = $this->copyServices($source->id, $target->id, $skipNames);
 
             return $copied;
         });
@@ -150,8 +182,13 @@ class TenantTemplate
      * родителя. Ссылка на ставку снимается: ставки не копируем, это цены.
      * Привязка к режимам налогообложения переносится как есть — режимы общие
      * для всех аккаунтов, их id одинаковы.
+     *
+     * $skipNames отсеивает БП по названию: сам БП не переносится, а его подпункты
+     * отваливаются следом — родителя в новом аккаунте для них нет.
+     *
+     * @param string[] $skipNames
      */
-    private function copyServices(int $fromTenant, int $toTenant): int
+    private function copyServices(int $fromTenant, int $toTenant, array $skipNames = []): int
     {
         $idMap = [];
         $count = 0;
@@ -163,6 +200,10 @@ class TenantTemplate
                 ->get();
 
             foreach ($rows as $row) {
+                if ($this->nameMatches($row->name, $skipNames)) {
+                    continue;
+                }
+
                 $data = $this->rowFor($row, $toTenant, ['parent_id', 'rate_id']);
 
                 $data['parent_id'] = $row->parent_id ? ($idMap[$row->parent_id] ?? null) : null;
@@ -183,6 +224,27 @@ class TenantTemplate
         }
 
         return $count;
+    }
+
+    /**
+     * Название БП попадает под фильтр отсева.
+     *
+     * Регистр не учитываем и сравниваем в PHP, а не через SQL LIKE: пометка в живом
+     * каталоге пишется как придётся («(удалить)», «( Удалить)», «(УДАЛИТЬ)»), а LIKE
+     * в PostgreSQL регистрозависим, в MySQL — нет. Промахнувшийся фильтр протащил бы
+     * отжившие БП в стартовый набор каждой новой фирмы.
+     *
+     * @param string[] $skipNames
+     */
+    private function nameMatches(?string $name, array $skipNames): bool
+    {
+        foreach ($skipNames as $needle) {
+            if ($needle !== '' && mb_stripos((string) $name, $needle) !== false) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** Привязка БП к режимам налогообложения: от неё зависит подтягивание в смету. */
