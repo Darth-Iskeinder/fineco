@@ -114,6 +114,25 @@ class TaskClientSelectorTest extends TestCase
         $page->assertDontSee('>Выберите услугу...<', false);
     }
 
+    /**
+     * Поиск в модалке и фильтр компаний над таблицей — разные списки с разной формой.
+     *
+     * Одноимённый геттер уже ломал страницу: дубликат ключа в объекте компонента
+     * молча перетирает первый, и фильтр начинал перебирать {rows, total}, показывая
+     * «undefined undefined». Имена должны оставаться разными.
+     */
+    public function test_picker_and_filter_lists_do_not_clash(): void
+    {
+        $html = $this->actingAs($this->accountant, 'employee')
+            ->get(route('buhtasks.index'))
+            ->assertOk()
+            ->getContent();
+
+        $this->assertSame(1, substr_count($html, 'get clientOptions()'), 'Геттер списка компаний объявлен не один раз');
+        $this->assertSame(1, substr_count($html, 'get clientPickerOptions()'), 'Геттер поиска компаний объявлен не один раз');
+        $this->assertStringContainsString('x-for="c in clientOptions"', $html, 'Фильтр перестал брать свой список');
+    }
+
     public function test_admin_and_manager_see_all_active_clients(): void
     {
         $foreign  = $this->client('ТОО Чужой Актив ' . uniqid(), $this->head->id);

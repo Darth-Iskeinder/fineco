@@ -982,17 +982,17 @@
 
                         <div x-show="picker.client.open" style="display:none"
                              class="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
-                            <template x-if="clientOptions.rows.length === 0">
+                            <template x-if="clientPickerOptions.rows.length === 0">
                                 <div class="px-3 py-2.5 text-sm text-slate-400">Ничего не найдено</div>
                             </template>
-                            <template x-for="(c, i) in clientOptions.rows" :key="c.id">
+                            <template x-for="(c, i) in clientPickerOptions.rows" :key="c.id">
                                 <button type="button" @click="pickClient(c)" @mouseenter="picker.client.hi = i"
                                         :class="i === picker.client.hi ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-50'"
                                         class="block w-full text-left px-3 py-2 text-sm" x-text="c.name"></button>
                             </template>
-                            <template x-if="clientOptions.total > clientOptions.rows.length">
+                            <template x-if="clientPickerOptions.total > clientPickerOptions.rows.length">
                                 <div class="px-3 py-2 text-xs text-slate-400 border-t border-slate-100">
-                                    Показаны первые <span x-text="clientOptions.rows.length"></span> из <span x-text="clientOptions.total"></span> — уточните запрос
+                                    Показаны первые <span x-text="clientPickerOptions.rows.length"></span> из <span x-text="clientPickerOptions.total"></span> — уточните запрос
                                 </div>
                             </template>
                         </div>
@@ -1035,17 +1035,17 @@
 
                             <div x-show="picker.catalog.open" style="display:none"
                                  class="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
-                                <template x-if="catalogOptions.rows.length === 0">
+                                <template x-if="catalogPickerOptions.rows.length === 0">
                                     <div class="px-3 py-2.5 text-sm text-slate-400">Ничего не найдено</div>
                                 </template>
-                                <template x-for="(svc, i) in catalogOptions.rows" :key="svc.id">
+                                <template x-for="(svc, i) in catalogPickerOptions.rows" :key="svc.id">
                                     <button type="button" @click="pickService(svc)" @mouseenter="picker.catalog.hi = i"
                                             :class="i === picker.catalog.hi ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-50'"
                                             class="block w-full text-left px-3 py-2 text-sm" x-text="svc.name"></button>
                                 </template>
-                                <template x-if="catalogOptions.total > catalogOptions.rows.length">
+                                <template x-if="catalogPickerOptions.total > catalogPickerOptions.rows.length">
                                     <div class="px-3 py-2 text-xs text-slate-400 border-t border-slate-100">
-                                        Показаны первые <span x-text="catalogOptions.rows.length"></span> из <span x-text="catalogOptions.total"></span> — уточните запрос
+                                        Показаны первые <span x-text="catalogPickerOptions.rows.length"></span> из <span x-text="catalogPickerOptions.total"></span> — уточните запрос
                                     </div>
                                 </template>
                             </div>
@@ -3589,8 +3589,10 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             return { rows: found.slice(0, PICKER_LIMIT), total: found.length };
         },
 
-        get clientOptions()  { return this.filterOptions(this.allClients, this.picker.client.q); },
-        get catalogOptions() { return this.filterOptions(this.catalog, this.picker.catalog.q); },
+        // Имена намеренно длинные: clientOptions уже занят списком компаний для
+        // фильтра над таблицей, и одноимённый геттер молча перетёр бы его.
+        get clientPickerOptions()  { return this.filterOptions(this.allClients, this.picker.client.q); },
+        get catalogPickerOptions() { return this.filterOptions(this.catalog, this.picker.catalog.q); },
 
         get selectedClientName() {
             const c = (this.allClients || []).find(x => String(x.id) === String(this.newTask.client_id));
@@ -3612,7 +3614,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         closePicker(kind) { this.picker[kind].open = false; },
 
         pickerRows(kind) {
-            return kind === 'client' ? this.clientOptions.rows : this.catalogOptions.rows;
+            return kind === 'client' ? this.clientPickerOptions.rows : this.catalogPickerOptions.rows;
         },
 
         movePicker(kind, delta) {
