@@ -37,6 +37,31 @@ class TenantTemplate
     /** Колонки, которые при копировании строки задаются заново, а не переносятся. */
     private const SKIP_COLUMNS = ['id', 'tenant_id', 'created_at', 'updated_at'];
 
+    /**
+     * Где остаётся след, если БП взяли в работу. Тот же набор, что проверяет
+     * интерфейс перед удалением БП (SettingsController::serviceIsInUse).
+     */
+    private const USAGE_TABLES = [
+        'estimate_items'           => 'позиции смет',
+        'client_service_schedules' => 'индивидуальные расписания',
+        'task_reminders'           => 'напоминания',
+        'buh_adhoc_tasks'          => 'разовые задачи',
+    ];
+
+    /**
+     * Строковые поля БП и справочники, откуда берутся их значения.
+     *
+     * Это не внешние ключи, а тексты: БП хранит название режима, сферы и группы.
+     * Приехавший в чужую фирму БП с названием, которого нет в её справочнике,
+     * ошибки не даст — просто перестанет находиться по фильтрам, а режим
+     * тарификации не разрешится в код, и цена молча посчитается по cost.
+     */
+    private const SERVICE_DICTIONARIES = [
+        'billing'       => 'billings',
+        'sphere'        => 'spheres',
+        'service_group' => 'service_groups',
+    ];
+
     /** Аккаунт-образец. */
     public function template(): Tenant
     {
@@ -111,24 +136,165 @@ class TenantTemplate
             ->all();
     }
 
+    /**
+     * Взяты ли БП фирмы хоть где-нибудь в работу: [что нашли => сколько].
+     *
+     * Пустой массив — каталог можно сносить целиком, никто на него не смотрит.
+     *
+     * @return array<string,int>
+     */
+    public function servicesInUse(Tenant $target): array
+    {
+        $ids = DB::table('services')->where('tenant_id', $target->id)->pluck('id');
+
+        if ($ids->isEmpty()) {
+            return [];
+        }
+
+        $found = [];
+
+        foreach (self::USAGE_TABLES as $table => $label) {
+            $count = DB::table($table)->whereIn('service_id', $ids)->count();
+
+            if ($count > 0) {
+                $found[$label] = $count;
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * Пересобрать каталог БП действующей фирмы по образцу: свои удалить, набор
+     * образца залить. Нужно фирме, которую завели, но ещё не запускали в работу.
+     *
+     * Отказываемся, если БП уже взяты в работу, — по той же причине, по которой
+     * интерфейс не даёт удалить работающий БП: у позиций сметы ссылка снимется
+     * (внешний ключ nullOnDelete), позиция останется без расписания и превратится
+     * в разовую задачу текущего месяца, а индивидуальные расписания клиентов
+     * уйдут каскадом. Для работающего каталога есть архивация, а не снос.
+     *
+     * $resetCost — обнулить цену: в образце лежат суммы фирмы-донора, и переносить
+     * их другой фирме нельзя (ставки не переносятся ровно по той же причине).
+     * $fillDictionaries — досоздать недостающие группы, сферы и режимы, чтобы
+     * приехавшие БП не остались с названиями, которых у фирмы нет.
+     *
+     * @return array{deleted:int, copied:int, dictionaries:array<string,int>, unresolved:string[]}
+     */
+    public function refillServices(Tenant $target, bool $resetCost = true, bool $fillDictionaries = true): array
+    {
+        if ($target->isTemplate()) {
+            throw new RuntimeException('Образец пересобирается командой tenant:fill-template, а не этой');
+        }
+
+        $template = $this->template();
+        $inUse    = $this->servicesInUse($target);
+
+        if ($inUse) {
+            $details = collect($inUse)->map(fn ($count, $label) => "{$label}: {$count}")->implode(', ');
+
+            throw new RuntimeException(
+                "БП фирмы «{$target->name}» уже взяты в работу ({$details}) — сносить каталог нельзя. "
+                . 'Отжившие БП архивируются, а не удаляются.'
+            );
+        }
+
+        return DB::transaction(function () use ($template, $target, $resetCost, $fillDictionaries) {
+            $deleted = $this->deleteServices($target->id);
+            $copied  = $this->copyServices($template->id, $target->id, [], $resetCost);
+
+            $dictionaries = ['added' => [], 'unresolved' => []];
+
+            if ($fillDictionaries) {
+                $dictionaries = $this->fillMissingDictionaries($template, $target);
+            }
+
+            return [
+                'deleted'      => $deleted,
+                'copied'       => $copied,
+                'dictionaries' => $dictionaries['added'],
+                'unresolved'   => $dictionaries['unresolved'],
+            ];
+        });
+    }
+
     /** Очистить образец: только справочники, рабочих данных в нём нет. */
     public function clearTemplate(): void
     {
         $template = $this->template();
 
         DB::transaction(function () use ($template) {
-            $serviceIds = DB::table('services')->where('tenant_id', $template->id)->pluck('id');
-
-            DB::table('service_tax_system')->whereIn('service_id', $serviceIds)->delete();
-
-            // Сперва подпункты: у родителя на них ссылка.
-            DB::table('services')->where('tenant_id', $template->id)->whereNotNull('parent_id')->delete();
-            DB::table('services')->where('tenant_id', $template->id)->delete();
+            $this->deleteServices($template->id);
 
             foreach (self::SIMPLE_TABLES as $table) {
                 DB::table($table)->where('tenant_id', $template->id)->delete();
             }
         });
+    }
+
+    /** Удалить БП аккаунта вместе с их привязками к режимам налогообложения. */
+    private function deleteServices(int $tenantId): int
+    {
+        $serviceIds = DB::table('services')->where('tenant_id', $tenantId)->pluck('id');
+
+        if ($serviceIds->isEmpty()) {
+            return 0;
+        }
+
+        DB::table('service_tax_system')->whereIn('service_id', $serviceIds)->delete();
+
+        // Сперва подпункты: у родителя на них ссылка.
+        DB::table('services')->where('tenant_id', $tenantId)->whereNotNull('parent_id')->delete();
+        DB::table('services')->where('tenant_id', $tenantId)->delete();
+
+        return $serviceIds->count();
+    }
+
+    /**
+     * Досоздать фирме недостающие группы, сферы и режимы тарификации — те, что
+     * стоят в приехавших БП, но в справочниках фирмы отсутствуют.
+     *
+     * Строку берём из справочника источника целиком: у режима тарификации важно
+     * не название, а код — по нему считается цена. Название, которого нет и у
+     * источника, придумать не из чего — возвращаем его отдельным списком.
+     *
+     * @return array{added:array<string,int>, unresolved:string[]}
+     */
+    private function fillMissingDictionaries(Tenant $source, Tenant $target): array
+    {
+        $added      = [];
+        $unresolved = [];
+
+        foreach (self::SERVICE_DICTIONARIES as $column => $table) {
+            $used = DB::table('services')
+                ->where('tenant_id', $target->id)
+                ->whereNotNull($column)
+                ->distinct()
+                ->pluck($column)
+                ->filter()
+                ->values();
+
+            $have    = DB::table($table)->where('tenant_id', $target->id)->pluck('name');
+            $missing = $used->diff($have);
+
+            foreach ($missing as $name) {
+                $row = DB::table($table)
+                    ->where('tenant_id', $source->id)
+                    ->where('name', $name)
+                    ->first();
+
+                if (!$row) {
+                    $unresolved[] = "{$table}: {$name}";
+
+                    continue;
+                }
+
+                DB::table($table)->insert($this->rowFor($row, $target->id));
+                $added[$table] = ($added[$table] ?? 0) + 1;
+            }
+        }
+
+        return ['added' => $added, 'unresolved' => $unresolved];
     }
 
     /** @param string[] $skipNames */
@@ -186,9 +352,12 @@ class TenantTemplate
      * $skipNames отсеивает БП по названию: сам БП не переносится, а его подпункты
      * отваливаются следом — родителя в новом аккаунте для них нет.
      *
+     * $resetCost обнуляет цену: при переносе в другую фирму собственная стоимость
+     * БП — такие же чужие деньги, как ставка, и ехать с каталогом не должна.
+     *
      * @param string[] $skipNames
      */
-    private function copyServices(int $fromTenant, int $toTenant, array $skipNames = []): int
+    private function copyServices(int $fromTenant, int $toTenant, array $skipNames = [], bool $resetCost = false): int
     {
         $idMap = [];
         $count = 0;
@@ -208,6 +377,10 @@ class TenantTemplate
 
                 $data['parent_id'] = $row->parent_id ? ($idMap[$row->parent_id] ?? null) : null;
                 $data['rate_id']   = null;
+
+                if ($resetCost) {
+                    $data['cost'] = 0;
+                }
 
                 // Подпункт без перенесённого родителя копировать некуда:
                 // такой БП стал бы висеть сам по себе.
