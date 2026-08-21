@@ -157,7 +157,18 @@ class GenerateTaskReminders extends Command
                 }
 
                 $override = $overrides->get($item->service_id);
-                $dates = $service->dueDatesForClient($override, $from, $clientTo);
+
+                // Пересечение трёх окон: прогона, обслуживания клиента и рабочего
+                // периода БП. У действующих БП период не ограничен и ничего не режет.
+                [$bpFrom, $bpTo] = $service->workPeriod();
+                $itemFrom = $bpFrom && $bpFrom->gt($from) ? $bpFrom : $from;
+                $itemTo   = $bpTo && $bpTo->lt($clientTo) ? $bpTo : $clientTo;
+
+                if ($itemTo->lt($itemFrom)) {
+                    continue; // БП вне работы в этом окне — заводить нечего
+                }
+
+                $dates = $service->dueDatesForClient($override, $itemFrom, $itemTo);
                 if (empty($dates)) {
                     continue; // нет расписания → не плодим пустые задачи
                 }

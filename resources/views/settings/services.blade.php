@@ -32,6 +32,8 @@ $servicesJson = $services->map(fn($s) => array_merge([
     'billing'           => $s->billing,
     'comment'           => $s->comment,
     'is_active'         => $s->is_active,
+    'archived_at'       => $s->archived_at?->toDateString(),
+    'active_from'       => $s->active_from?->toDateString(),
     'allows_quantity'   => $s->allows_quantity,
     'splits_by_branch'  => $s->splits_by_branch,
     'sort_order'        => $s->sort_order,
@@ -142,7 +144,13 @@ $servicesJson = $services->map(fn($s) => array_merge([
                             <td class="px-4 py-3 text-sm font-semibold text-slate-900 sticky left-0 z-10 border-r border-slate-200"
                                 :class="selectedRowId === 's' + row.svc.id ? 'bg-indigo-50' : 'bg-white group-hover:bg-slate-50'">
                                 <div class="flex flex-wrap items-center gap-1 w-64">
-                                    <span class="truncate max-w-full" :title="row.svc.name" x-text="row.svc.name"></span>
+                                    <span class="truncate max-w-full" :class="row.svc.archived_at ? 'text-slate-400' : ''" :title="row.svc.name" x-text="row.svc.name"></span>
+                                    {{-- Архивный БП остаётся в списке: он часть истории, по нему
+                                         доделывают незакрытое. Отличаем пометкой, а не пряча. --}}
+                                    <span x-show="row.svc.archived_at" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-slate-200 text-slate-600">архивный</span>
+                                    <span x-show="row.svc.active_from" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700"
+                                          :title="'Задачи по нему пойдут с ' + formatDate(row.svc.active_from)"
+                                          x-text="'с ' + formatDate(row.svc.active_from)"></span>
                                     <span x-show="row.svc.allows_quantity" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">кол-во</span>
                                     <span x-show="row.svc.splits_by_branch" class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
                                         <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 6h4"/></svg>
@@ -192,8 +200,16 @@ $servicesJson = $services->map(fn($s) => array_merge([
                             <td class="px-4 py-3 text-sm text-slate-500 max-w-[160px] truncate" x-text="row.svc.comment || '—'"></td>
                             <td class="px-4 py-3 whitespace-nowrap text-right">
                                 <div class="flex items-center justify-end gap-1">
-                                    <button @click="openServiceModal(row.svc)" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Редактировать">
+                                    {{-- Архивный не редактируем: расписание читается живьём, и правка
+                                         задним числом сдвинула бы уже посчитанные задачи. --}}
+                                    <button x-show="!row.svc.archived_at" @click="openServiceModal(row.svc)" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Редактировать">
                                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                                    </button>
+                                    <button x-show="!row.svc.archived_at" @click="openArchiveModal(row.svc)" class="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors" title="Архивировать">
+                                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>
+                                    </button>
+                                    <button x-show="row.svc.archived_at" @click="openRestoreModal(row.svc)" class="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" title="Вернуть в работу">
+                                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
                                     </button>
                                     <button @click="openDeleteModal(row.svc)" class="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Удалить">
                                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
@@ -568,6 +584,90 @@ $servicesJson = $services->map(fn($s) => array_merge([
         </div>
     </template>
 
+    {{-- Каждой модалке — свой x-teleport: Alpine переносит в body только ПЕРВЫЙ
+         элемент такого шаблона, и соседи в нём просто не попадают в DOM. --}}
+    <template x-teleport="body">
+        {{-- Архивация: последствия наступают у всех клиентов сразу, поэтому проговариваем их
+             до нажатия и показываем, скольких это коснётся. --}}
+        <div x-show="showArchiveModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto">
+            <div class="flex items-center justify-center min-h-screen px-4">
+                <div class="fixed inset-0 bg-slate-500/75" @click="showArchiveModal = false"></div>
+                <div class="relative w-full max-w-md bg-white rounded-2xl shadow-xl p-6 z-10">
+                    <div class="flex items-center gap-4 mb-4">
+                        <div class="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center flex-shrink-0">
+                            <svg class="w-6 h-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-semibold text-slate-900" x-text="archiveBlockedDelete ? 'Удалить нельзя — процесс в работе' : 'Архивировать бизнес-процесс?'"></h3>
+                            <p class="text-sm text-slate-500" x-text="archiveItem?.name"></p>
+                        </div>
+                    </div>
+                    <div class="text-sm text-slate-600 space-y-2 mb-6">
+                        <p x-show="archiveBlockedDelete">
+                            Процесс уже ведут, поэтому удалить его нельзя: вместе с ним исчезло бы расписание,
+                            по которому считаются задачи у клиентов. Вместо удаления — архив.
+                        </p>
+                        <p x-show="archiveUsage === null">Считаем, скольких клиентов это коснётся…</p>
+                        <p x-show="archiveUsage !== null && archiveUsage > 0">
+                            Процесс ведут у <span class="font-medium text-slate-800" x-text="archiveUsage"></span> клиентов.
+                            Текущий месяц они доработают, со следующего задачи по нему заводиться не будут.
+                        </p>
+                        <p x-show="archiveUsage === 0">Сейчас его никто не ведёт — работу это не затронет.</p>
+                        <p>Незакрытые задачи внутри текущего месяца останутся: их всё равно сдавать.</p>
+                        <p class="text-xs text-slate-400">Архивный процесс остаётся в списке и не редактируется. Вернуть в работу можно в любой момент.</p>
+                    </div>
+                    <p x-show="archiveParentId" class="text-sm text-amber-700 bg-amber-50 rounded-lg px-3 py-2 mb-4">
+                        Это подпункт. Он живёт вместе со своим процессом — архивировать нужно процесс целиком.
+                    </p>
+                    <div class="flex justify-end gap-3">
+                        <button @click="showArchiveModal = false" class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50">
+                            <span x-text="archiveParentId ? 'Понятно' : 'Отмена'"></span>
+                        </button>
+                        <button x-show="!archiveParentId" @click="confirmArchive()" :disabled="archiving" class="px-4 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50">
+                            Архивировать
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </template>
+
+    <template x-teleport="body">
+        {{-- Возврат в работу: со следующего месяца, иначе расписание досчитало бы
+             слоты за время простоя и высыпало бы просрочку задним числом. --}}
+        <div x-show="showRestoreModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto">
+            <div class="flex items-center justify-center min-h-screen px-4">
+                <div class="fixed inset-0 bg-slate-500/75" @click="showRestoreModal = false"></div>
+                <div class="relative w-full max-w-md bg-white rounded-2xl shadow-xl p-6 z-10">
+                    <div class="flex items-center gap-4 mb-4">
+                        <div class="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center flex-shrink-0">
+                            <svg class="w-6 h-6 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-semibold text-slate-900">Вернуть в работу?</h3>
+                            <p class="text-sm text-slate-500" x-text="restoreItem?.name"></p>
+                        </div>
+                    </div>
+                    <div class="text-sm text-slate-600 space-y-2 mb-6">
+                        <p>
+                            Процесс снова станет активным, но задачи по нему пойдут
+                            <span class="font-medium text-slate-800" x-text="'с ' + formatDate(nextMonthStart())"></span>.
+                        </p>
+                        <p>За время, пока он был в архиве, задачи задним числом не появятся.</p>
+                    </div>
+                    <div class="flex justify-end gap-3">
+                        <button @click="showRestoreModal = false" class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50">Отмена</button>
+                        <button @click="confirmRestore()" :disabled="restoring" class="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+                            Вернуть в работу
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </template>
+
     {{-- Delete modal --}}
     <template x-teleport="body">
         <div x-show="showDeleteModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto">
@@ -575,18 +675,46 @@ $servicesJson = $services->map(fn($s) => array_merge([
                 <div class="fixed inset-0 bg-slate-500/75" @click="showDeleteModal = false"></div>
                 <div class="relative w-full max-w-md bg-white rounded-2xl shadow-xl p-6 z-10">
                     <div class="flex items-center gap-4 mb-4">
-                        <div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
-                            <svg class="w-6 h-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                        <div class="w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0"
+                             :class="deleteUsage?.in_use ? 'bg-amber-100' : 'bg-red-100'">
+                            <svg x-show="!deleteUsage?.in_use" class="w-6 h-6 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                            <svg x-show="deleteUsage?.in_use" x-cloak class="w-6 h-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>
                         </div>
                         <div>
-                            <h3 class="text-lg font-semibold text-slate-900">Удаление</h3>
-                            <p class="text-sm text-slate-500">Это действие нельзя отменить</p>
+                            <h3 class="text-lg font-semibold text-slate-900" x-text="deleteUsage?.in_use ? 'Удалить нельзя — процесс в работе' : 'Удаление'"></h3>
+                            <p class="text-sm text-slate-500" x-text="deleteItem?.name"></p>
                         </div>
                     </div>
-                    <p class="text-slate-700 mb-6">Вы уверены, что хотите удалить «<span class="font-medium" x-text="deleteItem?.name"></span>»?</p>
+
+                    {{-- Три состояния: проверяем — можно удалить — нельзя удалить.
+                         Окно открывается сразу, поэтому первое видно доли секунды,
+                         но экран не выглядит мёртвым, пока идёт запрос. --}}
+                    <div class="text-sm text-slate-600 space-y-2 mb-6">
+                        <p x-show="deleteUsage === null" class="flex items-center gap-2 text-slate-500">
+                            <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                            Проверяем, ведут ли этот процесс…
+                        </p>
+                        <template x-if="deleteUsage && !deleteUsage.in_use">
+                            <p class="text-slate-700">Процесс нигде не используется — удаление безопасно. Это действие нельзя отменить.</p>
+                        </template>
+                        <template x-if="deleteUsage?.in_use">
+                            <div class="space-y-2">
+                                <p>Процесс уже ведут, поэтому удалить его нельзя: вместе с ним исчезло бы расписание, по которому считаются задачи у клиентов.</p>
+                                <p x-show="deleteUsage.clients > 0">
+                                    Сейчас он стоит у <span class="font-medium text-slate-800" x-text="deleteUsage.clients"></span> клиентов.
+                                </p>
+                                <p>Вместо удаления — архив: текущий месяц клиенты доработают, со следующего задачи по нему заводиться не будут.</p>
+                            </div>
+                        </template>
+                    </div>
+
                     <div class="flex justify-end gap-3">
                         <button @click="showDeleteModal = false" class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50">Отмена</button>
-                        <button @click="confirmDelete()" :disabled="deleting" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50">
+                        <button x-show="deleteUsage?.in_use && !deleteParentId" x-cloak @click="archiveFromDelete()"
+                                class="px-4 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700">
+                            Архивировать
+                        </button>
+                        <button x-show="!deleteUsage?.in_use" @click="confirmDelete()" :disabled="deleting || deleteUsage === null" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50">
                             <svg x-show="deleting" class="w-4 h-4 mr-2 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
                             Удалить
                         </button>
@@ -598,7 +726,7 @@ $servicesJson = $services->map(fn($s) => array_merge([
 
     {{-- Toast --}}
     <template x-teleport="body">
-        <div x-show="toast.show" x-cloak x-transition:enter="ease-out duration-300" x-transition:enter-start="opacity-0 translate-y-2" x-transition:enter-end="opacity-100 translate-y-0" x-transition:leave="ease-in duration-200" x-transition:leave-start="opacity-100 translate-y-0" x-transition:leave-end="opacity-0 translate-y-2" class="fixed bottom-4 right-4 z-50">
+        <div x-show="toast.show" x-cloak x-transition:enter="ease-out duration-300" x-transition:enter-start="opacity-0 translate-y-2" x-transition:enter-end="opacity-100 translate-y-0" x-transition:leave="ease-in duration-200" x-transition:leave-start="opacity-100 translate-y-0" x-transition:leave-end="opacity-0 translate-y-2" class="fixed bottom-4 right-4 z-[60]">
             <div :class="toast.type === 'success' ? 'bg-emerald-500' : 'bg-red-500'" class="px-4 py-3 rounded-lg text-white text-sm font-medium shadow-lg flex items-center gap-2">
                 <svg x-show="toast.type === 'success'" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                 <svg x-show="toast.type === 'error'" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -739,12 +867,29 @@ function servicesPage() {
         },
 
         showDeleteModal: false,
+        showArchiveModal: false,
+        showRestoreModal: false,
+        archiveItem: null,
+        restoreItem: null,
+        archiveUsage: null,   // null — счётчик ещё едет с сервера
+        archiveParentId: null,
+        deleteUsage: null,   // null — проверка ещё идёт
+        archiveBlockedDelete: false,   // окно открыто из-за отказа в удалении
+        archiving: false,
+        restoring: false,
         deleteItem: null,
         deleteParentId: null,
         deleting: false,
         toast: { show: false, message: '', type: 'success' },
 
         openServiceModal(svc = null) {
+            // Архивный открывается только на чтение — правка расписания сдвинула бы
+            // уже посчитанные задачи. Двойной клик по строке сюда тоже приходит.
+            if (svc?.archived_at) {
+                this.showToast('Процесс в архиве. Чтобы менять его, верните в работу', 'error');
+                return;
+            }
+
             this.serviceFormErrors = { tax_systems: false };
             if (svc) {
                 const rules = svc.pricing_rules || [];
@@ -778,10 +923,128 @@ function servicesPage() {
             this.showServiceModal = true;
         },
 
-        openDeleteModal(svc, parentId = null) {
+        /**
+         * Удаление начинается с вопроса «а его уже ведут?».
+         *
+         * Если ведут — удалять нельзя, и вместо окна удаления сразу показываем
+         * окно архивации с объяснением. Раньше отказ прилетал уже после нажатия
+         * «Удалить», окно оставалось открытым и выглядело неработающим.
+         */
+        async openDeleteModal(svc, parentId = null) {
             this.deleteItem = svc;
             this.deleteParentId = parentId;
+            this.deleteUsage = null;   // ещё не знаем, ведут ли процесс
             this.showDeleteModal = true;
+
+            // Окно открываем сразу, а «ведут ли его» выясняем следом: ждать ответа
+            // молча — значит показывать мёртвый экран, будто кнопка не сработала.
+            try {
+                const r = await fetch(`/settings/services/${svc.id}/usage`, { headers: { 'Accept': 'application/json' } });
+                const usage = await r.json();
+
+                // Пока ходили на сервер, окно могли закрыть или открыть для другого БП.
+                if (!this.showDeleteModal || this.deleteItem?.id !== svc.id) return;
+
+                this.deleteUsage = usage;
+            } catch {
+                // Не достучались — оставляем обычное удаление: отказ придёт с сервера.
+                this.deleteUsage = { in_use: false, clients: 0 };
+            }
+        },
+
+        /** Из окна удаления — сразу в архивацию, без лишних переходов. */
+        archiveFromDelete() {
+            const svc = this.deleteItem;
+            const usage = this.deleteUsage;
+
+            this.showDeleteModal = false;
+            this.archiveItem = svc;
+            this.archiveParentId = this.deleteParentId;
+            this.archiveUsage = usage?.clients ?? 0;
+            this.archiveBlockedDelete = true;
+            this.showArchiveModal = true;
+        },
+
+        /**
+         * Первое число следующего месяца — с него архивный процесс вернётся в работу.
+         *
+         * Строку собираем сами: toISOString() переводит время в UTC, и у нас (+06)
+         * полночь первого числа уезжает на последний день предыдущего месяца.
+         */
+        nextMonthStart() {
+            const now = new Date();
+            const year = now.getMonth() === 11 ? now.getFullYear() + 1 : now.getFullYear();
+            const month = (now.getMonth() + 1) % 12 + 1;
+
+            return `${year}-${String(month).padStart(2, '0')}-01`;
+        },
+
+        formatDate(value) {
+            if (!value) return '';
+
+            // С сервера дата может прийти полным ISO («2026-09-01T00:00:00.000000Z»),
+            // из вёрстки — короткой строкой. Берём первые десять символов: и там, и там
+            // это YYYY-MM-DD.
+            const [y, m, d] = String(value).slice(0, 10).split('-');
+
+            return `${d}.${m}.${y}`;
+        },
+
+        async openArchiveModal(svc, parentId = null) {
+            this.archiveItem = svc;
+            this.archiveParentId = parentId;
+            this.archiveBlockedDelete = false;
+            this.archiveUsage = null;
+            this.showArchiveModal = true;
+
+            try {
+                const r = await fetch(`/settings/services/${svc.id}/usage`, { headers: { 'Accept': 'application/json' } });
+                const d = await r.json();
+                this.archiveUsage = d.clients ?? 0;
+            } catch {
+                this.archiveUsage = 0;
+            }
+        },
+
+        async confirmArchive() {
+            this.archiving = true;
+            try {
+                const r = await fetch(`/settings/services/${this.archiveItem.id}/archive`, {
+                    method: 'POST',
+                    headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content, 'Accept': 'application/json' },
+                });
+                const d = await r.json();
+                if (d.success) {
+                    const svc = this.services.find(s => s.id === this.archiveItem.id);
+                    if (svc) { svc.archived_at = d.item.archived_at; svc.active_from = null; svc.is_active = false; }
+                    this.showToast(d.message, 'success');
+                    this.showArchiveModal = false;
+                } else { this.showToast(d.message || 'Ошибка', 'error'); }
+            } catch { this.showToast('Не удалось заархивировать', 'error'); }
+            this.archiving = false;
+        },
+
+        openRestoreModal(svc) {
+            this.restoreItem = svc;
+            this.showRestoreModal = true;
+        },
+
+        async confirmRestore() {
+            this.restoring = true;
+            try {
+                const r = await fetch(`/settings/services/${this.restoreItem.id}/restore`, {
+                    method: 'POST',
+                    headers: { 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content, 'Accept': 'application/json' },
+                });
+                const d = await r.json();
+                if (d.success) {
+                    const svc = this.services.find(s => s.id === this.restoreItem.id);
+                    if (svc) { svc.archived_at = null; svc.active_from = d.item.active_from; svc.is_active = true; }
+                    this.showToast(d.message, 'success');
+                    this.showRestoreModal = false;
+                } else { this.showToast(d.message || 'Ошибка', 'error'); }
+            } catch { this.showToast('Не удалось вернуть в работу', 'error'); }
+            this.restoring = false;
         },
 
         addChildForm() { this.serviceForm.children.push({ id: null, name: '', cost: 0, periodicity: '' }); },

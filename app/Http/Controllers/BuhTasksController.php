@@ -298,7 +298,14 @@ class BuhTasksController extends Controller
                 // Экземпляры задачи: [year, month, dueDateString|null, dueDay|null, Carbon|null]
                 $occurrences = [];
                 if ($hasSchedule) {
-                    foreach ($service->dueDatesForClient($override, $lookbackStart, $clientHorizon) as $due) {
+                    // Окно клиента пересекаем с рабочим периодом самого БП: у архивного
+                    // он закрыт концом месяца архивации, у вернувшегося — открыт началом
+                    // месяца после возврата. У действующих БП обе границы пусты.
+                    [$bpFrom, $bpTo] = $service->workPeriod();
+                    $itemStart = $bpFrom && $bpFrom->gt($lookbackStart) ? $bpFrom : $lookbackStart;
+                    $itemEnd   = $bpTo && $bpTo->lt($clientHorizon) ? $bpTo : $clientHorizon;
+
+                    foreach ($itemEnd->lt($itemStart) ? [] : $service->dueDatesForClient($override, $itemStart, $itemEnd) as $due) {
                         $occurrences[] = [$due->year, $due->month, $due->toDateString(), (int) $due->day, $due];
                     }
                 } elseif ($curStart->gte($lookbackStart) && $curStart->lte($clientHorizon)) {

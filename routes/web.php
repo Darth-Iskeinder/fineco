@@ -289,6 +289,10 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/services', [SettingsController::class, 'storeService'])->name('services.store');
         Route::put('/services/{service}', [SettingsController::class, 'updateService'])->name('services.update');
         Route::delete('/services/{service}', [SettingsController::class, 'destroyService'])->name('services.destroy');
+        // Архивация вместо удаления: БП, который уже ведут, удалять нельзя.
+        Route::get('/services/{service}/usage', [SettingsController::class, 'serviceUsage'])->name('services.usage');
+        Route::post('/services/{service}/archive', [SettingsController::class, 'archiveService'])->name('services.archive');
+        Route::post('/services/{service}/restore', [SettingsController::class, 'restoreService'])->name('services.restore');
 
         // Форма/тип организации и статус клиента настройками не являются — разделов
         // нет намеренно. Форма организации задаётся государством. Статус клиента —

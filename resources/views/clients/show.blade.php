@@ -222,7 +222,7 @@
                                 <div class="flex gap-2">
                                     <input type="date" x-model="form.status.service_end_date"
                                            class="flex-1 min-w-0 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                                    <button type="button" @click="form.status.service_end_date = new Date().toISOString().split('T')[0]"
+                                    <button type="button" @click="form.status.service_end_date = today()"
                                             class="px-3 py-2 text-xs text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors whitespace-nowrap">
                                         Сегодня
                                     </button>
@@ -2812,6 +2812,13 @@ function clientShow() {
         resetForm(section) {
             this.form[section] = this.buildForms()[section];
             this.snapshot[section] = JSON.stringify(this.form[section]);
+        },
+
+        /** Сегодняшняя дата местного дня: toISOString() отдаёт UTC и вечером даёт вчера. */
+        today() {
+            const now = new Date();
+
+            return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
         },
 
         startEdit(section) {

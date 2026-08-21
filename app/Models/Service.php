@@ -116,6 +116,8 @@ class Service extends Model
         'billing',
         'comment',
         'is_active',
+        'archived_at',
+        'active_from',
         'allows_quantity',
         'is_pvt',
         'is_pki',
@@ -152,6 +154,8 @@ class Service extends Model
         'cost' => 'decimal:2',
         'pricing_rules' => 'array',
         'is_active' => 'boolean',
+        'archived_at' => 'date',
+        'active_from' => 'date',
         'allows_quantity' => 'boolean',
         'requires_document' => 'boolean',
         'requires_review' => 'boolean',
@@ -226,6 +230,31 @@ class Service extends Model
     public function scopeRoots($query)
     {
         return $query->whereNull('parent_id');
+    }
+
+    /**
+     * Рабочий период БП: [с какого дня ведём, по какой включительно].
+     *
+     * Обе границы необязательны и у действующего каталога пусты — тогда период
+     * не ограничен, и задачи считаются ровно как раньше. Границы появляются
+     * только у архивации: `archived_at` — конец месяца, в котором заархивировали
+     * (текущий месяц клиенты дорабатывают), `active_from` — начало месяца после
+     * возврата в работу (за время простоя задачи задним числом не появляются).
+     *
+     * @return array{0: ?CarbonImmutable, 1: ?CarbonImmutable}
+     */
+    public function workPeriod(): array
+    {
+        return [
+            $this->active_from ? CarbonImmutable::parse($this->active_from)->startOfDay() : null,
+            $this->archived_at ? CarbonImmutable::parse($this->archived_at)->endOfDay() : null,
+        ];
+    }
+
+    /** Архивный — тот, у кого проставлен конец рабочего периода. */
+    public function isArchived(): bool
+    {
+        return $this->archived_at !== null;
     }
 
     public function scopeActive($query)

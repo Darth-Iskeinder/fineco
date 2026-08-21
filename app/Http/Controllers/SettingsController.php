@@ -3,6 +3,10 @@
 namespace App\Http\Controllers;
 
 use App\Models\ActivityType;
+use App\Models\TaskReminder;
+use App\Models\EstimateItem;
+use App\Models\ClientServiceSchedule;
+use App\Models\BuhAdhocTask;
 use App\Models\Billing;
 use App\Models\Category;
 use App\Models\Periodicity;
@@ -544,8 +548,25 @@ class SettingsController extends Controller
         ]);
     }
 
+    /**
+     * Удаление БП — только пока его никто не успел взять в работу.
+     *
+     * Раньше удаляли молча и всегда. Внешние ключи это переживали (в сметах
+     * позиция оставалась со снятой ссылкой), но расписание жило в самом БП:
+     * квартальная декларация у трёх десятков клиентов тихо превращалась в
+     * ежемесячную задачу, а индивидуальные расписания уходили каскадом. Взамен
+     * у работающего БП есть архивация — она закрывает будущее, не трогая прошлое.
+     */
     public function destroyService(Service $service)
     {
+        if ($this->serviceIsInUse($service)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Бизнес-процесс уже используется в работе, удалить его нельзя. '
+                    . 'Заархивируйте: текущий месяц клиенты доработают, со следующего задачи по нему заводиться не будут.',
+            ], 422);
+        }
+
         $service->children()->each(fn($c) => $c->tariffs()->detach());
         $service->children()->delete();
         $service->tariffs()->detach();
@@ -554,6 +575,100 @@ class SettingsController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Бизнес-процесс удалён',
+        ]);
+    }
+
+    /**
+     * Взят ли БП в работу хоть где-нибудь.
+     *
+     * Достаточно одного следа, поэтому не считаем, а спрашиваем «есть ли» —
+     * запрос по индексу внешнего ключа и остановка на первой строке.
+     * Подпункты проверяем вместе с родителем: удаление родителя уносит и их.
+     */
+    private function serviceIsInUse(Service $service): bool
+    {
+        $ids = $service->children()->pluck('id')->push($service->id);
+
+        return EstimateItem::whereIn('service_id', $ids)->exists()
+            || TaskReminder::whereIn('service_id', $ids)->exists()
+            || BuhAdhocTask::whereIn('service_id', $ids)->exists()
+            || ClientServiceSchedule::whereIn('service_id', $ids)->exists();
+    }
+
+    /**
+     * В архив: БП больше не ведут.
+     *
+     * Режем по месяцам, а не по сегодняшнему числу: месяц — единица бухгалтерской
+     * работы, и отчётность за текущий сдавать всё равно. Поэтому границей ставим
+     * конец текущего месяца — незакрытые задачи внутри него остаются, со
+     * следующего новых не появляется.
+     */
+    public function archiveService(Service $service)
+    {
+        $service->update([
+            'is_active'   => false,
+            'archived_at' => now()->endOfMonth()->toDateString(),
+            'active_from' => null,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Бизнес-процесс заархивирован',
+            // Даты — короткой строкой, как их отдаёт страница при загрузке: иначе
+            // сюда уезжает полный ISO со временем, и разбор на странице ломается.
+            'item'    => $this->servicePeriod($service->fresh()),
+        ]);
+    }
+
+    /**
+     * Обратно в работу — со следующего месяца.
+     *
+     * Снять архив задним числом нельзя: расписание тут же досчитало бы все слоты
+     * за время простоя, и у бухгалтеров разом всплыла бы просрочка за месяцы,
+     * когда процесс осознанно не вели.
+     */
+    public function restoreService(Service $service)
+    {
+        $service->update([
+            'is_active'   => true,
+            'archived_at' => null,
+            'active_from' => now()->addMonth()->startOfMonth()->toDateString(),
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Бизнес-процесс возвращён в работу',
+            'item'    => $this->servicePeriod($service->fresh()),
+        ]);
+    }
+
+    /** @return array{is_active: bool, archived_at: ?string, active_from: ?string} */
+    private function servicePeriod(Service $service): array
+    {
+        return [
+            'is_active'   => (bool) $service->is_active,
+            'archived_at' => $service->archived_at?->toDateString(),
+            'active_from' => $service->active_from?->toDateString(),
+        ];
+    }
+
+    /**
+     * Взят ли БП в работу и скольких клиентов затронет архивация.
+     *
+     * Спрашивается до открытия окна удаления: если процесс уже ведут, показываем
+     * не «удалить», а «заархивировать» — иначе человек жмёт удаление, получает
+     * отказ и видит окно, которое будто не сработало.
+     */
+    public function serviceUsage(Service $service)
+    {
+        $ids = $service->children()->pluck('id')->push($service->id);
+
+        return response()->json([
+            'in_use'  => $this->serviceIsInUse($service),
+            'clients' => EstimateItem::whereIn('service_id', $ids)
+                ->join('estimates', 'estimates.id', '=', 'estimate_items.estimate_id')
+                ->distinct()
+                ->count('estimates.client_id'),
         ]);
     }
 
