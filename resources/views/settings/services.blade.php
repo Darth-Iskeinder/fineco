@@ -144,6 +144,20 @@ $servicesJson = $services->map(fn($s) => array_merge([
                             <td class="px-4 py-3 text-sm font-semibold text-slate-900 sticky left-0 z-10 border-r border-slate-200"
                                 :class="selectedRowId === 's' + row.svc.id ? 'bg-indigo-50' : 'bg-white group-hover:bg-slate-50'">
                                 <div class="flex flex-wrap items-center gap-1 w-64">
+                                    {{-- Подпункты свёрнуты: у БП их бывает по пять штук, и раскрытыми
+                                         они раздували список так, что сами БП терялись. Цифра у стрелки
+                                         показывает, сколько внутри, чтобы не раскрывать ради проверки. --}}
+                                    <button type="button" x-show="(row.svc.children || []).length > 0"
+                                            @click.stop="toggleChildren(row.svc.id)"
+                                            :title="childrenVisible(row.svc) ? 'Свернуть подпункты' : 'Показать подпункты'"
+                                            class="flex items-center gap-0.5 -ml-1 px-1 py-0.5 rounded text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors flex-shrink-0">
+                                        <svg class="w-3.5 h-3.5 transition-transform" :class="childrenVisible(row.svc) ? 'rotate-90' : ''"
+                                             fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                                        <span class="text-xs font-medium" x-text="(row.svc.children || []).length"></span>
+                                    </button>
+                                    {{-- У БП без подпунктов место под стрелку остаётся: иначе названия
+                                         в колонке скакали бы влево-вправо от строки к строке. --}}
+                                    <span x-show="(row.svc.children || []).length === 0" class="w-3.5 flex-shrink-0"></span>
                                     <span class="truncate max-w-full" :class="row.svc.archived_at ? 'text-slate-400' : ''" :title="row.svc.name" x-text="row.svc.name"></span>
                                     {{-- Архивный БП остаётся в списке: он часть истории, по нему
                                          доделывают незакрытое. Отличаем пометкой, а не пряча. --}}
@@ -218,7 +232,7 @@ $servicesJson = $services->map(fn($s) => array_merge([
                             </td>
                         </tr>
 
-                        <template x-for="child in (row.type === 'service' ? (row.svc.children || []) : [])" :key="child.id">
+                        <template x-for="child in (row.type === 'service' && childrenVisible(row.svc) ? (row.svc.children || []) : [])" :key="child.id">
                             <tr @click="selectedRowId = (selectedRowId === 'c' + child.id ? null : 'c' + child.id)"
                                 @dblclick="openServiceModal(child)"
                                 :class="selectedRowId === 'c' + child.id ? 'bg-indigo-100/70 ring-1 ring-inset ring-indigo-200' : 'bg-slate-50/50 hover:bg-slate-50'"
@@ -806,10 +820,41 @@ function servicesPage() {
             return [...new Set(this.services.map(s => s.sphere).filter(Boolean))]
                 .sort((a, b) => a.localeCompare(b, 'ru'));
         },
+        childMatchesSearch(s, q) {
+            return (s.children || []).some(c => (c.name || '').toLowerCase().includes(q));
+        },
         serviceMatchesSearch(s, q) {
             const fields = [s.name, s.sphere, s.service_group, s.category, s.business_process];
             if (fields.some(f => (f || '').toLowerCase().includes(q))) return true;
-            return (s.children || []).some(c => (c.name || '').toLowerCase().includes(q));
+            return this.childMatchesSearch(s, q);
+        },
+
+        // --- Раскрытие подпунктов ---
+        // По умолчанию свёрнуты все: список из полутора сотен БП с раскрытыми
+        // подпунктами не читается. Состояние живёт до перезагрузки страницы.
+        expandedServices: {},
+
+        toggleChildren(serviceId) {
+            this.expandedServices = {
+                ...this.expandedServices,
+                [serviceId]: !this.expandedServices[serviceId],
+            };
+        },
+
+        /**
+         * Показывать ли подпункты этого БП.
+         *
+         * Во время поиска БП находится и по названию подпункта — такой раскрываем
+         * сами, иначе непонятно, почему строка вообще нашлась.
+         */
+        childrenVisible(svc) {
+            const q = this.searchQuery.trim().toLowerCase();
+
+            if (q && this.childMatchesSearch(svc, q)) {
+                return true;
+            }
+
+            return !!this.expandedServices[svc.id];
         },
         get visibleServices() {
             let list = this.services;
@@ -1085,7 +1130,13 @@ function servicesPage() {
                     } else {
                         if (item.parent_id) {
                             const parent = this.services.find(s => s.id === item.parent_id);
-                            if (parent) { if (!parent.children) parent.children = []; parent.children.push(item); }
+                            if (parent) {
+                                if (!parent.children) parent.children = [];
+                                parent.children.push(item);
+                                // Только что добавленный подпункт должен быть виден,
+                                // иначе кажется, что сохранение ничего не сделало.
+                                this.expandedServices = { ...this.expandedServices, [parent.id]: true };
+                            }
                         } else { this.services.unshift(item); }
                     }
                     this.showServiceModal = false; this.showDueDayPicker = false;
