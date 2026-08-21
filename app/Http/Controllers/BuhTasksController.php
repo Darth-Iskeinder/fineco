@@ -296,19 +296,28 @@ class BuhTasksController extends Controller
                 $kind = $resolved ? Service::kindForPeriodicity($resolved['periodicity']) : null;
 
                 // Экземпляры задачи: [year, month, dueDateString|null, dueDay|null, Carbon|null]
+                // Своя граница позиции: БП, добавленный в смету в середине месяца,
+                // начинает работать со следующего — иначе он тут же выдал бы просрочку
+                // за срок, который в этом месяце уже прошёл. У позиций, заведённых до
+                // появления границы, и у разовых доп. услуг она пуста.
+                $itemFloor = $lookbackStart;
+                if ($addedFrom = $item->tasksStartFrom()) {
+                    $itemFloor = $addedFrom->gt($itemFloor) ? $addedFrom : $itemFloor;
+                }
+
                 $occurrences = [];
                 if ($hasSchedule) {
                     // Окно клиента пересекаем с рабочим периодом самого БП: у архивного
                     // он закрыт концом месяца архивации, у вернувшегося — открыт началом
                     // месяца после возврата. У действующих БП обе границы пусты.
                     [$bpFrom, $bpTo] = $service->workPeriod();
-                    $itemStart = $bpFrom && $bpFrom->gt($lookbackStart) ? $bpFrom : $lookbackStart;
+                    $itemStart = $bpFrom && $bpFrom->gt($itemFloor) ? $bpFrom : $itemFloor;
                     $itemEnd   = $bpTo && $bpTo->lt($clientHorizon) ? $bpTo : $clientHorizon;
 
                     foreach ($itemEnd->lt($itemStart) ? [] : $service->dueDatesForClient($override, $itemStart, $itemEnd) as $due) {
                         $occurrences[] = [$due->year, $due->month, $due->toDateString(), (int) $due->day, $due];
                     }
-                } elseif ($curStart->gte($lookbackStart) && $curStart->lte($clientHorizon)) {
+                } elseif ($curStart->gte($itemFloor) && $curStart->lte($clientHorizon)) {
                     // Позиции без расписания — задача текущего месяца. В холостой месяц
                     // (смета только что заведена) их тоже не показываем.
                     $dueDay = $item->due_day ? min((int) $item->due_day, $curStart->daysInMonth) : null;

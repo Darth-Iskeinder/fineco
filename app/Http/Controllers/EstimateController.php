@@ -375,9 +375,16 @@ class EstimateController extends Controller
             ->map(fn ($p) => ['name' => $p->name, 'kind' => $p->kind])
             ->values()->toArray();
 
+        // Подпись для предупреждения перед сохранением: с какого дня пойдут задачи
+        // по тому, что добавят сейчас. Локаль приложения — en, месяц склоняем сами.
+        $tasksStart = EstimateItem::tasksStartForNew();
+        $months     = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+                       'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+        $tasksStartLabel = $tasksStart->day . ' ' . $months[$tasksStart->month - 1] . ' ' . $tasksStart->year;
+
         return view('clients.estimate', compact(
             'client', 'estimate', 'tariffBPs', 'extras', 'allServices', 'specialFlags',
-            'estimateHasItems', 'periodicities', 'canAssign', 'assigneeOptions'
+            'estimateHasItems', 'periodicities', 'canAssign', 'assigneeOptions', 'tasksStartLabel'
         ));
     }
 
@@ -500,10 +507,16 @@ class EstimateController extends Controller
                 ];
 
                 if ($existing) {
+                    // Обновление на месте: границу задач не трогаем — БП уже ведут.
                     $existing->update($attrs);
                     $parent = $existing;
                 } else {
-                    $parent = $estimate->items()->create($attrs + ['total' => 0]);
+                    // Новая позиция: задачи по ней пойдут со следующего месяца, а не
+                    // задним числом за сроки, которые в этом месяце уже прошли.
+                    $parent = $estimate->items()->create($attrs + [
+                        'total'            => 0,
+                        'tasks_start_from' => EstimateItem::tasksStartForNew()->toDateString(),
+                    ]);
                 }
 
                 $childTotal = 0;
@@ -603,7 +616,12 @@ class EstimateController extends Controller
                     $existing->update($attrs);
                     $parent = $existing;
                 } else {
-                    $parent = $estimate->items()->create($attrs);
+                    // Постоянная доп. услуга — такой же повторяющийся БП, как тарифный:
+                    // задачи по ней идут со следующего месяца. Временную (разовую)
+                    // добавляют, чтобы сделать сейчас, — её не откладываем.
+                    $parent = $estimate->items()->create($attrs + ($extraType === 'recurring'
+                        ? ['tasks_start_from' => EstimateItem::tasksStartForNew()->toDateString()]
+                        : []));
                 }
 
                 $childTotal = 0;

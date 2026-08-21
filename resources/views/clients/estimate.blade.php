@@ -503,6 +503,46 @@
         </div>
     </div>
 
+    {{-- Предупреждение перед сохранением: по добавленным БП задачи пойдут не сейчас,
+         а с 1 числа следующего месяца. Показывается только когда что-то добавили. --}}
+    <div x-show="showTasksStartModal" class="fixed inset-0 z-50 overflow-y-auto" style="display:none">
+        <div class="flex items-center justify-center min-h-screen px-4 py-8">
+            <div @click="showTasksStartModal = false" class="fixed inset-0 bg-slate-500/75"></div>
+            <div class="relative bg-white rounded-2xl shadow-xl w-full max-w-lg p-6">
+                <div class="flex items-start gap-3 mb-4">
+                    <div class="flex-shrink-0 w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center">
+                        <svg class="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                    </div>
+                    <div class="min-w-0">
+                        <h3 class="text-lg font-semibold text-slate-900">
+                            Задачи по новым БП начнутся с {{ $tasksStartLabel }}
+                        </h3>
+                        <p class="text-sm text-slate-500 mt-1">В текущем месяце задач по ним не будет.</p>
+                    </div>
+                </div>
+
+                <ul class="mb-5 max-h-56 overflow-y-auto rounded-xl border border-slate-200 divide-y divide-slate-100">
+                    <template x-for="name in newlyAddedNames" :key="name">
+                        <li class="px-3 py-2 text-sm text-slate-700" x-text="name"></li>
+                    </template>
+                </ul>
+
+                <div class="flex items-center justify-end gap-2">
+                    <button type="button" @click="showTasksStartModal = false"
+                            class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
+                        Отмена
+                    </button>
+                    <button type="button" @click="confirmTasksStart()" :disabled="saving"
+                            class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-60 transition-colors">
+                        Сохранить
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast -->
     <div x-show="toastShow"
          x-transition:enter="ease-out duration-300" x-transition:enter-start="opacity-0 translate-y-2" x-transition:enter-end="opacity-100 translate-y-0"
@@ -544,6 +584,39 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
         scheduleBp: null,
         scheduleSaving: false,
         scheduleForm: { periodicity: '', start_month: [], start_day: [] },
+
+        // Снимок состояния тумблеров на момент загрузки: по нему отличаем БП,
+        // включённые прямо сейчас, от тех, что уже стояли в смете. Нужен для
+        // предупреждения — задачи по новым пойдут только со следующего месяца.
+        savedEnabled: {},
+        showTasksStartModal: false,
+
+        init() {
+            this.rememberEnabled();
+        },
+
+        rememberEnabled() {
+            const snapshot = {};
+            this.tariffBPs.forEach(bp => { snapshot[bp.row_key] = !!bp.enabled; });
+            this.savedEnabled = snapshot;
+            // Доп. услуги пришли с сервера — значит уже сохранены и новыми не считаются.
+            this.extras.forEach(ex => { ex.is_new = false; });
+        },
+
+        /** Что добавили в этой сессии: включённые тумблеры и новые постоянные доп. услуги. */
+        get newlyAddedNames() {
+            const names = this.tariffBPs
+                .filter(bp => bp.enabled && !this.savedEnabled[bp.row_key])
+                .map(bp => bp.branch_label ? (bp.name + ' — ' + bp.branch_label) : bp.name);
+
+            // Временная (разовая) доп. услуга задачу выдаёт сразу — её не откладываем
+            // и в предупреждении не показываем.
+            this.extras
+                .filter(ex => ex.is_new && ex.type === 'recurring')
+                .forEach(ex => names.push(ex.name));
+
+            return names;
+        },
 
         showExtraModal: false,
         catalogSearch: '',
@@ -680,6 +753,7 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
 
         addExtra(svc) {
             this.extras.push({
+                is_new:          true,
                 service_id:      svc.id,
                 type:            this.newExtraType,
                 name:            svc.name,
@@ -700,6 +774,7 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
 
         addCustomExtra() {
             this.extras.push({
+                is_new:          true,
                 service_id:      null,
                 type:            this.newExtraType,
                 name:            this.customForm.name,
@@ -835,7 +910,21 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
             this.scheduleSaving = false;
         },
 
-        async save() {
+        /** Кнопка «Сохранить»: сперва предупреждаем про новые БП, если они есть. */
+        save() {
+            if (this.newlyAddedNames.length > 0) {
+                this.showTasksStartModal = true;
+                return;
+            }
+            return this.doSave();
+        },
+
+        confirmTasksStart() {
+            this.showTasksStartModal = false;
+            return this.doSave();
+        },
+
+        async doSave() {
             this.saving = true;
             try {
                 const res = await fetch('/clients/' + this.clientId + '/estimate', {
@@ -854,6 +943,8 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
                 const data = await res.json();
                 if (data.success) {
                     this.updatedAt = data.updated_at;
+                    // Сохранённое стало прежним: второй раз про те же БП не предупреждаем.
+                    this.rememberEnabled();
                     this.showToast('Смета сохранена', 'success');
                 } else {
                     this.showToast(data.message || 'Ошибка', 'error');

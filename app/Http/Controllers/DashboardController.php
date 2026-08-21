@@ -146,6 +146,14 @@ class DashboardController extends Controller
             foreach ($items as $item) {
                 $assigneeId = (int) ($item->assignee_id ?? $client->responsible_employee_id);
 
+                // Своя граница позиции: БП, добавленный в смету в середине месяца,
+                // начинает работать со следующего. У позиций, заведённых до появления
+                // границы, и у разовых доп. услуг она пуста — окно остаётся клиентским.
+                $itemFrom = $clientFrom;
+                if ($itemStart = $item->tasksStartFrom()) {
+                    $itemFrom = $itemStart->gt($itemFrom) ? $itemStart : $itemFrom;
+                }
+
                 $service     = $item->service_id ? $services->get($item->service_id) : null;
                 $override    = $service ? $overrides->get($item->service_id) : null;
                 $resolved    = $service ? $service->resolveForClient($override) : null;
@@ -155,10 +163,10 @@ class DashboardController extends Controller
                 // Экземпляры задачи: [год, месяц, срок|null]
                 $occurrences = [];
                 if ($hasSchedule) {
-                    foreach ($service->dueDatesForClient($override, $clientFrom, $scanTo) as $due) {
+                    foreach ($service->dueDatesForClient($override, $itemFrom, $scanTo) as $due) {
                         $occurrences[] = [$due->year, $due->month, $due];
                     }
-                } elseif ($today->startOfMonth()->gte($clientFrom)) {
+                } elseif ($today->startOfMonth()->gte($itemFrom)) {
                     // Позиции без расписания — задача текущего месяца (как в задачнике),
                     // но не в холостой месяц только что заведённой сметы
                     $dueDay = $item->due_day ? min((int) $item->due_day, $today->daysInMonth) : null;

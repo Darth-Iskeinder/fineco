@@ -158,11 +158,18 @@ class GenerateTaskReminders extends Command
 
                 $override = $overrides->get($item->service_id);
 
-                // Пересечение трёх окон: прогона, обслуживания клиента и рабочего
-                // периода БП. У действующих БП период не ограничен и ничего не режет.
+                // Пересечение четырёх окон: прогона, обслуживания клиента, рабочего
+                // периода БП и границы самой позиции сметы. У действующих БП период
+                // не ограничен, у давних позиций граница пуста — тогда ничего не режет.
                 [$bpFrom, $bpTo] = $service->workPeriod();
                 $itemFrom = $bpFrom && $bpFrom->gt($from) ? $bpFrom : $from;
                 $itemTo   = $bpTo && $bpTo->lt($clientTo) ? $bpTo : $clientTo;
+
+                // БП, добавленный в смету в середине месяца, начинает работать
+                // со следующего — напоминания за уже прошедшие сроки не заводим.
+                if ($addedFrom = $item->tasksStartFrom()) {
+                    $itemFrom = $addedFrom->gt($itemFrom) ? $addedFrom : $itemFrom;
+                }
 
                 if ($itemTo->lt($itemFrom)) {
                     continue; // БП вне работы в этом окне — заводить нечего
