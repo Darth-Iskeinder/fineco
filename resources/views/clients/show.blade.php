@@ -757,7 +757,20 @@
                             <dl class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-4">
                                 <div>
                                     <dt class="text-sm font-medium text-slate-500">Тип обслуживания</dt>
-                                    <dd class="mt-1 text-sm text-slate-900" x-text="serviceTypes[client.service_type] || '—'"></dd>
+                                    <dd class="mt-1">
+                                        {{-- Все отметки и ни одной означают одно и то же, поэтому
+                                             и пишем одинаково: клиента ведём целиком. --}}
+                                        <template x-if="clientServesEverything">
+                                            <span class="text-sm text-slate-900">Полное обслуживание</span>
+                                        </template>
+                                        <template x-if="!clientServesEverything">
+                                            <div class="flex flex-wrap gap-1">
+                                                <template x-for="label in clientServiceScopeLabels" :key="label">
+                                                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700" x-text="label"></span>
+                                                </template>
+                                            </div>
+                                        </template>
+                                    </dd>
                                 </div>
                                 <div>
                                     <dt class="text-sm font-medium text-slate-500">Тариф</dt>
@@ -803,16 +816,33 @@
                     </template>
                     <template x-if="editing.contract">
                         <div class="space-y-4">
-                            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-4">
-                                <div>
-                                    <label class="block text-sm font-medium text-slate-700 mb-1">Тип обслуживания</label>
-                                    <select x-model="form.contract.service_type" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                                        <option value="">Не указан</option>
-                                        <template x-for="(label, key) in serviceTypes" :key="key">
-                                            <option :value="key" :selected="key === form.contract.service_type" x-text="label"></option>
-                                        </template>
-                                    </select>
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-1">Тип обслуживания</label>
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <template x-for="opt in serviceScopeOptions" :key="opt.column">
+                                        <button type="button" @click="form.contract[opt.column] = !form.contract[opt.column]"
+                                                :class="form.contract[opt.column]
+                                                    ? 'bg-indigo-600 text-white border-indigo-600'
+                                                    : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'"
+                                                class="px-3 py-1.5 border rounded-full text-sm font-medium transition-colors"
+                                                x-text="opt.label"></button>
+                                    </template>
+                                    <span class="w-px h-6 bg-slate-200"></span>
+                                    {{-- Кнопка не отдельный тип, а быстрый способ отметить все три сразу. --}}
+                                    <button type="button" @click="setFullService()"
+                                            class="px-3 py-1.5 border border-slate-200 rounded-full text-sm text-slate-600 hover:border-indigo-300 transition-colors">
+                                        Полное обслуживание
+                                    </button>
                                 </div>
+                                <p class="mt-1 text-xs text-slate-400" x-show="contractServesEverything">
+                                    Ведём клиента целиком: подтягиваются бизнес-процессы всех типов.
+                                </p>
+                                <p class="mt-1 text-xs text-amber-600" x-show="!contractServesEverything">
+                                    Подтягиваться будут только процессы отмеченных типов и процессы без типа.
+                                    Уже сохранённые позиции сметы при снятии отметки не исчезнут, их убирают вручную.
+                                </p>
+                            </div>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-4">
                                 <div>
                                     <label class="block text-sm font-medium text-slate-700 mb-1">Тариф</label>
                                     <select x-model="form.contract.tariff_id" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
@@ -2471,7 +2501,10 @@ function clientShow() {
         activityTypes: @json(\App\Models\ActivityType::active()->ordered()->get()),
         tariffs: @json(\App\Models\Tariff::active()->ordered()->get()),
         allEmployees: @json(\App\Models\Employee::active()->orderBy('full_name')->get()),
-        serviceTypes: @json(\App\Models\Client::$serviceTypes),
+        {{-- [{column, label}]: колонка отметки у клиента и название типа из каталога БП. --}}
+        serviceScopeOptions: @json(collect(\App\Models\Client::SERVICE_SCOPE_COLUMNS)
+            ->map(fn ($column, $key) => ['column' => $column, 'label' => \App\Models\Service::SERVICE_TYPES[$key]])
+            ->values()),
         accountingMethods: @json(\App\Models\Client::$accountingMethods),
         taxpayerCategoriesLegacy: @json(\App\Models\Client::$taxpayerCategories),
         taxpayerCategories: @json(\App\Models\TaxpayerCategory::orderBy('name')->get()),
@@ -2757,7 +2790,9 @@ function clientShow() {
                     taxpayer_category_id: this.client.taxpayer_category_id ? String(this.client.taxpayer_category_id) : '',
                 },
                 contract: {
-                    service_type: this.client.service_type || '',
+                    serves_accounting: !!this.client.serves_accounting,
+                    serves_tax: !!this.client.serves_tax,
+                    serves_payroll: !!this.client.serves_payroll,
                     tariff_id: this.client.tariff_id ? String(this.client.tariff_id) : '',
                     contract_with: this.client.contract_with,
                     contract_url: this.client.contract_url,
@@ -2819,6 +2854,35 @@ function clientShow() {
             const now = new Date();
 
             return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        },
+
+        // === Тип обслуживания ===
+        // Отметок нет и отметки все — одно и то же состояние: ведём клиента целиком.
+        // Поэтому «Полное обслуживание» это кнопка, а не четвёртый тип.
+
+        /** Названия отмеченных типов у сохранённого клиента (для режима просмотра). */
+        get clientServiceScopeLabels() {
+            return this.serviceScopeOptions
+                .filter(opt => !!this.client[opt.column])
+                .map(opt => opt.label);
+        },
+
+        get clientServesEverything() {
+            const selected = this.clientServiceScopeLabels.length;
+
+            return selected === 0 || selected === this.serviceScopeOptions.length;
+        },
+
+        /** То же самое, но по несохранённой форме (для подсказки под тегами). */
+        get contractServesEverything() {
+            const selected = this.serviceScopeOptions
+                .filter(opt => !!this.form.contract[opt.column]).length;
+
+            return selected === 0 || selected === this.serviceScopeOptions.length;
+        },
+
+        setFullService() {
+            this.serviceScopeOptions.forEach(opt => this.form.contract[opt.column] = true);
         },
 
         startEdit(section) {

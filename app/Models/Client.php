@@ -79,7 +79,9 @@ class Client extends Model
         'has_currency_operations',
         'edo_operator',
         // Договор и обслуживание
-        'service_type',
+        'serves_accounting',
+        'serves_tax',
+        'serves_payroll',
         'price',
         'tariff_id',
         'responsible_employee_id',
@@ -120,11 +122,25 @@ class Client extends Model
         'notes',
     ];
 
+    /**
+     * Новый клиент заводится на полном обслуживании: все три отметки.
+     * То же значение стоит умолчанием у колонок в базе — держим их согласованными,
+     * чтобы модель в памяти и свежая запись показывали одно и то же.
+     */
+    protected $attributes = [
+        'serves_accounting' => true,
+        'serves_tax' => true,
+        'serves_payroll' => true,
+    ];
+
     protected $casts = [
         'is_active' => 'boolean',
         'its_enabled' => 'boolean',
         // Boolean флаги
         'is_zero_movement' => 'boolean',
+        'serves_accounting' => 'boolean',
+        'serves_tax' => 'boolean',
+        'serves_payroll' => 'boolean',
         'has_employees' => 'boolean',
         'has_kkm' => 'boolean',
         'has_marketplaces' => 'boolean',
@@ -206,18 +222,18 @@ class Client extends Model
     // =============================================
     // КОНСТАНТЫ - Типы обслуживания
     // =============================================
-    const SERVICE_FULL = 'full';
-    const SERVICE_ACCOUNTING = 'accounting';
-    const SERVICE_TAX = 'tax';
-    const SERVICE_PAYROLL = 'payroll';
-    const SERVICE_CONSULTING = 'consulting';
 
-    public static array $serviceTypes = [
-        self::SERVICE_FULL => 'Полное обслуживание',
-        self::SERVICE_ACCOUNTING => 'Бухгалтерский учёт',
-        self::SERVICE_TAX => 'Налоговый учёт',
-        self::SERVICE_PAYROLL => 'Расчёт зарплаты',
-        self::SERVICE_CONSULTING => 'Консалтинг',
+    /**
+     * Что мы ведём у клиента: тип обслуживания => колонка с отметкой.
+     * Названия типов общие с каталогом БП, лежат в Service::SERVICE_TYPES.
+     *
+     * Полное обслуживание — это все три отметки; отдельного значения под него нет.
+     * Ни одной отметки означает то же самое, что все три: не сузили ничего.
+     */
+    public const SERVICE_SCOPE_COLUMNS = [
+        'accounting' => 'serves_accounting',
+        'tax'        => 'serves_tax',
+        'payroll'    => 'serves_payroll',
     ];
 
     // =============================================
@@ -478,16 +494,50 @@ class Client extends Model
     }
 
     // =============================================
+    // ТИП ОБСЛУЖИВАНИЯ
+    // =============================================
+
+    /**
+     * Отмеченные типы обслуживания: ['tax', 'payroll'].
+     * Пустой массив — не отмечено ничего, то есть сужения нет.
+     */
+    public function serviceTypeKeys(): array
+    {
+        return collect(self::SERVICE_SCOPE_COLUMNS)
+            ->filter(fn ($column) => (bool) $this->{$column})
+            ->keys()
+            ->all();
+    }
+
+    /**
+     * Ведём ли клиента целиком: отмечено всё или не отмечено ничего.
+     *
+     * Оба случая означают одно и то же и дают одинаковое поведение: БП любого
+     * типа проходит. «Не отмечено ничего» — это состояние всех клиентов до того,
+     * как теги начали проставлять, поэтому старые клиенты работают как раньше.
+     */
+    public function servesEverything(): bool
+    {
+        $selected = count($this->serviceTypeKeys());
+
+        return $selected === 0 || $selected === count(self::SERVICE_SCOPE_COLUMNS);
+    }
+
+    /** Названия отмеченных типов для показа. */
+    public function serviceTypeLabels(): array
+    {
+        return array_map(
+            fn ($key) => Service::SERVICE_TYPES[$key] ?? $key,
+            $this->serviceTypeKeys(),
+        );
+    }
+
+    // =============================================
     // АКСЕССОРЫ
     // =============================================
     public function getOwnershipFormLabelAttribute(): string
     {
         return self::$ownershipForms[$this->ownership_form] ?? $this->ownership_form ?? '—';
-    }
-
-    public function getServiceTypeLabelAttribute(): string
-    {
-        return self::$serviceTypes[$this->service_type] ?? $this->service_type ?? '—';
     }
 
     public function getAccountingMethodLabelAttribute(): string

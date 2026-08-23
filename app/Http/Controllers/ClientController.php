@@ -208,7 +208,11 @@ class ClientController extends Controller
                 'taxpayer_category_id' => ['nullable', 'exists:taxpayer_categories,id'],
             ],
             'contract' => [
-                'service_type' => ['nullable', 'string', Rule::in(array_keys(Client::$serviceTypes))],
+                // Тип обслуживания: любое сочетание отметок. Ни одной отметки и все три
+                // означают одно и то же — ведём клиента целиком.
+                'serves_accounting' => ['boolean'],
+                'serves_tax' => ['boolean'],
+                'serves_payroll' => ['boolean'],
                 'tariff_id' => ['nullable', 'exists:tariffs,id'],
                 'contract_with' => ['nullable', 'string', 'max:255'],
                 'contract_url' => ['nullable', 'string', 'max:500'],
