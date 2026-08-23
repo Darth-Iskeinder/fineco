@@ -329,9 +329,14 @@ class EstimateController extends Controller
                        'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
         $tasksStartLabel = $tasksStart->day . ' ' . $months[$tasksStart->month - 1] . ' ' . $tasksStart->year;
 
+        // Урезанный тип обслуживания объясняет, почему БП меньше, чем ожидали.
+        // У клиента на полном обслуживании список пуст, и подсказка не показывается.
+        $serviceScopeLabels = $client->servesEverything() ? [] : $client->serviceTypeLabels();
+
         return view('clients.estimate', compact(
             'client', 'estimate', 'tariffBPs', 'extras', 'allServices', 'specialFlags',
-            'estimateHasItems', 'periodicities', 'canAssign', 'assigneeOptions', 'tasksStartLabel'
+            'estimateHasItems', 'periodicities', 'canAssign', 'assigneeOptions', 'tasksStartLabel',
+            'serviceScopeLabels'
         ));
     }
 

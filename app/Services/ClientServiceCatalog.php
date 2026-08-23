@@ -22,6 +22,25 @@ use Illuminate\Support\Collection;
 class ClientServiceCatalog
 {
     /**
+     * Проходит ли БП по типу обслуживания клиента.
+     *
+     * Это калитка перед тремя проходами: она только сужает список, к самим
+     * правилам подтягивания не имеет отношения. Поэтому тип обслуживания сильнее
+     * и категории «Обязательная», и особых условий: до них дело просто не доходит.
+     *
+     * Не отсекаем никогда: у клиента отмечено всё (или ничего, что то же самое),
+     * либо у БП нет типа — такой БП общий и нужен при любом обслуживании.
+     */
+    public function passesScope(Client $client, Service $service): bool
+    {
+        if ($client->servesEverything() || !$service->service_type) {
+            return true;
+        }
+
+        return in_array($service->service_type, $client->serviceTypeKeys(), true);
+    }
+
+    /**
      * БП клиента, в порядке подтягивания.
      *
      * Три прохода, как и было:
@@ -35,11 +54,18 @@ class ClientServiceCatalog
      *
      * Каталог читаем один раз и дальше фильтруем в памяти: три прохода идут по
      * одному и тому же списку активных корневых БП.
+     *
+     * $applyScope = false отключает калитку по типу обслуживания и даёт прежний,
+     * несуженный список. Нужен одному отчёту — чтобы показать разницу.
      */
-    public function rootsFor(Client $client): Collection
+    public function rootsFor(Client $client, bool $applyScope = true): Collection
     {
         $catalog = Service::with(['taxSystems', 'children.rate', 'rate'])
             ->roots()->active()->ordered()->get();
+
+        if ($applyScope) {
+            $catalog = $catalog->filter(fn ($s) => $this->passesScope($client, $s))->values();
+        }
 
         $clientIsZero      = (bool) $client->is_zero_movement;
         $clientTaxSystemId = $client->tax_system_id;
@@ -91,7 +117,8 @@ class ClientServiceCatalog
      * отмечен. БП без типа не отсекается никогда, клиент на полном обслуживании
      * не теряет ничего.
      *
-     * Пока сужение не включено, метод ни на что не влияет и служит отчёту.
+     * Считаем от несуженного списка: это ровно те БП, которые клиент получил бы,
+     * не будь у него урезан тип обслуживания.
      */
     public function narrowedAwayFor(Client $client): Collection
     {
@@ -99,10 +126,8 @@ class ClientServiceCatalog
             return collect();
         }
 
-        $allowed = $client->serviceTypeKeys();
-
-        return $this->rootsFor($client)
-            ->filter(fn ($s) => $s->service_type && !in_array($s->service_type, $allowed, true))
+        return $this->rootsFor($client, applyScope: false)
+            ->reject(fn ($s) => $this->passesScope($client, $s))
             ->values();
     }
 }

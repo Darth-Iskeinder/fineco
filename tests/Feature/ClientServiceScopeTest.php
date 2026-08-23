@@ -164,19 +164,43 @@ class ClientServiceScopeTest extends TestCase
     }
 
     /**
-     * Граница второго этапа: отметки уже есть, а смета собирается как раньше.
+     * Клиент на полном обслуживании не теряет ничего.
      *
-     * Бухгалтерский БП обязательной категории подтягивается клиенту, у которого
-     * отмечен только налоговый учёт. После третьего этапа этот тест надо будет
-     * переписать — там такой БП перестанет подтягиваться, и это будет правильно.
+     * Главная защита от регрессии: у Fineco и подобных фирм состав сметы не должен
+     * измениться ни на строку, чем бы ни был размечен каталог.
      */
-    public function test_estimate_is_not_narrowed_yet(): void
+    public function test_full_service_client_gets_everything(): void
+    {
+        $client = $this->client();
+
+        $accounting = Service::create([
+            'name' => 'Разноска выписки ' . uniqid(), 'cost' => 100, 'is_active' => true,
+            'category' => 'Обязательная', 'service_type' => 'accounting',
+        ]);
+
+        $pulled = collect(
+            $this->actingAs($this->admin, 'employee')
+                ->get(route('clients.estimate.edit', $client))
+                ->assertSuccessful()
+                ->viewData('tariffBPs')
+        )->pluck('service_id')->all();
+
+        $this->assertContains($accounting->id, $pulled);
+    }
+
+    /**
+     * Сужение работает в самой смете, а не только в отчёте.
+     *
+     * Бухгалтерский БП обязательной категории клиенту, у которого отмечен один
+     * налоговый учёт, не подтягивается. БП без типа подтягивается по-прежнему.
+     */
+    public function test_estimate_is_narrowed_by_service_type(): void
     {
         $client = $this->client([
             'serves_accounting' => false, 'serves_tax' => true, 'serves_payroll' => false,
         ]);
 
-        $service = Service::create([
+        $accounting = Service::create([
             'name'         => 'Разноска выписки ' . uniqid(),
             'cost'         => 100,
             'is_active'    => true,
@@ -184,15 +208,22 @@ class ClientServiceScopeTest extends TestCase
             'service_type' => 'accounting',
         ]);
 
-        $tariffBPs = $this->actingAs($this->admin, 'employee')
-            ->get(route('clients.estimate.edit', $client))
-            ->assertSuccessful()
-            ->viewData('tariffBPs');
+        $general = Service::create([
+            'name'         => 'Приём первички ' . uniqid(),
+            'cost'         => 100,
+            'is_active'    => true,
+            'category'     => 'Обязательная',
+            'service_type' => null,
+        ]);
 
-        $this->assertContains(
-            $service->id,
-            collect($tariffBPs)->pluck('service_id')->all(),
-            'Бухгалтерский БП должен подтягиваться: сужение включается только на третьем этапе',
-        );
+        $pulled = collect(
+            $this->actingAs($this->admin, 'employee')
+                ->get(route('clients.estimate.edit', $client))
+                ->assertSuccessful()
+                ->viewData('tariffBPs')
+        )->pluck('service_id')->all();
+
+        $this->assertNotContains($accounting->id, $pulled, 'Чужой тип не подтягивается');
+        $this->assertContains($general->id, $pulled, 'БП без типа подтягивается как раньше');
     }
 }

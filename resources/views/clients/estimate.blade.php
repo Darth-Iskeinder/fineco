@@ -107,6 +107,14 @@
             <template x-if="tariffBPs.length === 0">
                 <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 px-6 py-8 text-center text-slate-400 text-sm">
                     У клиента не выбран тариф или в тарифе нет бизнес-процессов.
+                    @if (!empty($serviceScopeLabels))
+                        {{-- Пустой список у клиента с урезанным обслуживанием почти всегда
+                             означает не поломку, а неразмеченный каталог. --}}
+                        <div class="mt-2 text-slate-500">
+                            Обслуживание сужено: {{ implode(' + ', $serviceScopeLabels) }}.
+                            Подтягиваются только процессы этих типов и процессы без типа.
+                        </div>
+                    @endif
                 </div>
             </template>
 
