@@ -8,6 +8,7 @@ use App\Models\Estimate;
 use App\Models\EstimateItem;
 use App\Models\Role;
 use App\Models\Service;
+use App\Services\ClientServiceCatalog;
 use App\Services\PricingCalculator;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
@@ -171,64 +172,10 @@ class EstimateController extends Controller
             }
         };
 
-        // Клиент-нулёвка: обязательные БП ему не подтягиваются (см. фильтр ниже).
-        $clientIsZero = (bool) $client->is_zero_movement;
-
-        // БП совпадает с клиентом по РН, если РН клиента указан в списке РН у БП.
-        $clientTaxSystemId = $client->tax_system_id;
-        $matchesTaxSystem  = fn($s) => $clientTaxSystemId
-            && $s->taxSystems->contains('id', $clientTaxSystemId);
-
-        // Первый проход. БП подтягивается, если:
-        //  - совпал РН клиента с РН у БП (категория роли не играет — напр. «Условная по профилю»), ИЛИ
-        //  - это категория «Обязательная» (тянется и без совпадения РН).
-        // При этом клиенту-нулёвке БП категории «Обязательная» не тянем вообще,
-        // даже если РН совпал. Особые условия — отдельным проходом ниже.
-        $includedServiceIds = [];
-        $rootServices = Service::with(['taxSystems', 'children.rate', 'rate'])
-            ->roots()->active()->ordered()->get()
-            ->filter(function ($s) use ($matchesTaxSystem, $clientIsZero) {
-                if ($clientIsZero && Service::isMandatoryCategory($s->category)) {
-                    return false;
-                }
-                return $matchesTaxSystem($s) || Service::isMandatoryCategory($s->category);
-            })
-            ->values();
-
-        foreach ($rootServices as $bp) {
+        // Какие БП подтягиваются этому клиенту — см. ClientServiceCatalog.
+        // Порядок ответа значим: в нём БП и встают в смету.
+        foreach ((new ClientServiceCatalog())->rootsFor($client) as $bp) {
             $pushBp($bp);
-            $includedServiceIds[$bp->id] = true;
-        }
-
-        // БП по особым условиям: для каждого условия, включённого у клиента, подтягиваем
-        // помеченные этим условием активные БП, которые ещё не добавлены. Без РН-фильтра.
-        foreach (Service::SPECIAL_FLAGS as $col => $cfg) {
-            if (!$client->{$cfg['client']}) {
-                continue;
-            }
-
-            $flagServices = Service::with(['children.rate', 'rate'])
-                ->roots()->active()->where($col, true)->ordered()->get()
-                ->filter(fn($s) => !isset($includedServiceIds[$s->id]))
-                ->values();
-
-            foreach ($flagServices as $bp) {
-                $pushBp($bp);
-                $includedServiceIds[$bp->id] = true;
-            }
-        }
-
-        // Рекомендательные/контрольные БП: тянутся независимо от РН и особых условий
-        // (тумблер выключен — состояние задаётся в buildBpData по категории).
-        $recommendedServices = Service::with(['children.rate', 'rate'])
-            ->roots()->active()->ordered()->get()
-            ->filter(fn($s) => Service::isRecommendedCategory($s->category)
-                && !isset($includedServiceIds[$s->id]))
-            ->values();
-
-        foreach ($recommendedServices as $bp) {
-            $pushBp($bp);
-            $includedServiceIds[$bp->id] = true;
         }
 
         // Тарифная позиция — только та, чей БП реально подтянулся клиенту в этот раз
