@@ -14,6 +14,7 @@ $servicesJson = $services->map(fn($s) => array_merge([
     'service_group'    => $s->service_group,
     'business_process' => $s->business_process,
     'category'         => $s->category,
+    'service_type'     => $s->service_type,
     'cost'             => $s->cost,
     'rate_id'          => $s->rate_id,
     'rate'             => $s->rate ? ['id' => $s->rate->id, 'name' => $s->rate->name, 'unit' => $s->rate->unit, 'price' => $s->rate->price] : null,
@@ -90,11 +91,23 @@ $servicesJson = $services->map(fn($s) => array_merge([
                     </template>
                 </select>
             </div>
+            <div class="flex items-center gap-2">
+                <label class="text-sm text-slate-600">Тип обслуживания:</label>
+                {{-- «Без типа» вынесен в фильтр не для красоты: пока у БП типа нет, он
+                     подтягивается всем подряд, и разметка каталога идёт именно по этому списку. --}}
+                <select x-model="serviceTypeFilter" class="px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                    <option value="">Все типы</option>
+                    <template x-for="(label, key) in serviceTypeOptions" :key="key">
+                        <option :value="key" x-text="label"></option>
+                    </template>
+                    <option value="none" x-text="'Без типа (' + untypedCount + ')'"></option>
+                </select>
+            </div>
             <label class="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
                 <input type="checkbox" x-model="groupBySphere" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/20">
                 Группировать по сферам
             </label>
-            <span class="text-xs text-slate-400" x-show="sphereFilter || searchQuery.trim()" x-text="visibleServices.length + ' из ' + services.length"></span>
+            <span class="text-xs text-slate-400" x-show="sphereFilter || serviceTypeFilter || searchQuery.trim()" x-text="visibleServices.length + ' из ' + services.length"></span>
         </div>
         <div class="flex-1 min-h-0 overflow-auto">
             <table class="min-w-full divide-y divide-slate-200">
@@ -165,6 +178,8 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                     <span x-show="row.svc.active_from" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700"
                                           :title="'Задачи по нему пойдут с ' + formatDate(row.svc.active_from)"
                                           x-text="'с ' + formatDate(row.svc.active_from)"></span>
+                                    <span x-show="row.svc.service_type" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700"
+                                          title="Тип обслуживания" x-text="serviceTypeOptions[row.svc.service_type] || row.svc.service_type"></span>
                                     <span x-show="row.svc.allows_quantity" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">кол-во</span>
                                     <span x-show="row.svc.splits_by_branch" class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
                                         <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 6h4"/></svg>
@@ -340,6 +355,21 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                         </template>
                                     </select>
                                 </div>
+                                {{-- Типа нет у подпункта: он едет в смету вместе с родителем. --}}
+                                <template x-if="!serviceForm.parent_id">
+                                    <div>
+                                        <label class="block text-sm font-medium text-slate-700 mb-1">Тип обслуживания</label>
+                                        <select x-model="serviceForm.service_type" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
+                                            <option value="">— общий —</option>
+                                            <template x-for="(label, key) in serviceTypeOptions" :key="key">
+                                                <option :value="key" x-text="label"></option>
+                                            </template>
+                                        </select>
+                                        <p class="mt-1 text-xs text-slate-400" x-text="serviceForm.service_type
+                                            ? 'Поедет только тем клиентам, у кого отмечен этот тип обслуживания'
+                                            : 'Общий: поедет при любом типе обслуживания клиента'"></p>
+                                    </div>
+                                </template>
                                 <div>
                                     <label class="block text-sm font-medium text-slate-700 mb-1">План выполнения (мин.)</label>
                                     <input type="number" x-model="serviceForm.execution_minutes" min="0" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
@@ -758,6 +788,7 @@ function servicesPage() {
         specialFlags: @json($specialFlags),
         periodicities: @json($periodicities),
         categories: @json($categories),
+        serviceTypeOptions: @json($serviceTypes),
         spheres: @json($spheres),
         groups: @json($groups),
         billings: @json($billings),
@@ -765,6 +796,7 @@ function servicesPage() {
         selectedRowId: null,
 
         sphereFilter: '',
+        serviceTypeFilter: '',
         searchQuery: '',
         groupBySphere: false,
 
@@ -816,6 +848,9 @@ function servicesPage() {
         // При смене периодичности типы месяца/дня меняются — сбрасываем прежний выбор
         onPeriodicityChange() { this.serviceForm.start_month = []; this.serviceForm.start_day = []; },
 
+        get untypedCount() {
+            return this.services.filter(s => !s.service_type).length;
+        },
         get sphereOptions() {
             return [...new Set(this.services.map(s => s.sphere).filter(Boolean))]
                 .sort((a, b) => a.localeCompare(b, 'ru'));
@@ -861,6 +896,12 @@ function servicesPage() {
             if (this.sphereFilter) {
                 list = list.filter(s => (s.sphere || '') === this.sphereFilter);
             }
+            // 'none' — БП без типа: их и надо разметить в первую очередь.
+            if (this.serviceTypeFilter) {
+                list = this.serviceTypeFilter === 'none'
+                    ? list.filter(s => !s.service_type)
+                    : list.filter(s => s.service_type === this.serviceTypeFilter);
+            }
             const q = this.searchQuery.trim().toLowerCase();
             if (q) {
                 list = list.filter(s => this.serviceMatchesSearch(s, q));
@@ -893,7 +934,7 @@ function servicesPage() {
         serviceFormErrors: { tax_systems: false },
         serviceForm: {
             id: null, parent_id: null, tax_systems: [], name: '', description: '',
-            sphere: '', service_group: '', business_process: '', category: '',
+            sphere: '', service_group: '', business_process: '', category: '', service_type: '',
             cost: 0, rate_id: null, pricing_rules: [], use_tiered_pricing: false,
             periodicity: '', due_day: null, start_month: [], start_day: [], deadline_days: null, execution_minutes: null,
             closing_rule: '', requires_document: false, check_type: '', requires_review: false, billing: '', comment: '',
@@ -944,6 +985,7 @@ function servicesPage() {
                     name: svc.name, description: svc.description || '',
                     sphere: svc.sphere || '', service_group: svc.service_group || '',
                     business_process: svc.business_process || '', category: svc.category || '',
+                    service_type: svc.service_type || '',
                     cost: svc.cost, rate_id: svc.rate_id ?? null, pricing_rules: rules, use_tiered_pricing: rules.length > 0,
                     periodicity: svc.periodicity || '', due_day: svc.due_day || null,
                     start_month: Array.isArray(svc.start_month) ? svc.start_month : [], start_day: Array.isArray(svc.start_day) ? svc.start_day : [],
@@ -958,7 +1000,7 @@ function servicesPage() {
             } else {
                 this.serviceForm = {
                     id: null, parent_id: null, tax_systems: [], name: '', description: '',
-                    sphere: '', service_group: '', business_process: '', category: '',
+                    sphere: '', service_group: '', business_process: '', category: '', service_type: '',
                     cost: 0, rate_id: null, pricing_rules: [], use_tiered_pricing: false,
                     periodicity: '', due_day: null, start_month: [], start_day: [], deadline_days: null, execution_minutes: null,
                     closing_rule: '', requires_document: false, check_type: '', requires_review: false, billing: '', comment: '',

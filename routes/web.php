@@ -13,6 +13,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\EmployeeController;
 use App\Http\Controllers\ErrorReportController;
+use App\Http\Controllers\DocumentationController;
 use App\Http\Controllers\EstimateController;
 use App\Http\Controllers\RegisterController;
 use App\Http\Controllers\SettingsController;
@@ -53,6 +54,14 @@ Route::get('/', function () {
 // гостю здесь нечего увидеть, кроме самого текста. Всё остальное по-прежнему
 // закрыто auth:employee.
 Route::view('/welcome', 'welcome')->name('welcome');
+
+// Документация по системе: как что работает, бизнес-логика без внутренностей.
+// Открыта без входа по тем же правилам, что и витрина: в базу не ходит, ссылок
+// внутрь системы не даёт. От поисковиков закрыта мета-тегом — справка для своих.
+Route::prefix('documentation/kubik')->name('docs.')->group(function () {
+    Route::get('/', [DocumentationController::class, 'index'])->name('index');
+    Route::get('/{section}', [DocumentationController::class, 'show'])->name('section');
+});
 
 Route::get('/no-access', function () {
     return view('errors.no-access');
