@@ -1041,7 +1041,13 @@
                                 <template x-for="(svc, i) in catalogPickerOptions.rows" :key="svc.id">
                                     <button type="button" @click="pickService(svc)" @mouseenter="picker.catalog.hi = i"
                                             :class="i === picker.catalog.hi ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-50'"
-                                            class="block w-full text-left px-3 py-2 text-sm" x-text="svc.name"></button>
+                                            class="flex w-full items-center gap-2 text-left px-3 py-2 text-sm">
+                                        <span class="min-w-0 truncate" x-text="svc.name"></span>
+                                        {{-- Сразу видно, что у БП свой срок в днях: дата подставится сама --}}
+                                        <span x-show="svc.on_request && svc.deadline_days"
+                                              class="ml-auto flex-shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-50 text-indigo-600"
+                                              x-text="svc.deadline_days + ' дн.'"></span>
+                                    </button>
                                 </template>
                                 <template x-if="catalogPickerOptions.total > catalogPickerOptions.rows.length">
                                     <div class="px-3 py-2 text-xs text-slate-400 border-t border-slate-100">
@@ -1165,9 +1171,19 @@
                         <label class="block text-sm font-medium text-slate-700 mb-1.5">Дата</label>
                         <input type="date"
                                x-model="newTask.due_date"
+                               @input="dueDateTouched = true"
                                class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50">
                     </div>
                 </div>
+
+                {{-- БП «по запросу»: дата подставлена по сроку из каталога. Показываем всем,
+                     кто заводит задачу, чтобы правка даты была осознанной. --}}
+                <template x-if="onRequestDays">
+                    <p class="text-xs text-indigo-600 flex items-start gap-1.5">
+                        <svg class="w-3.5 h-3.5 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        <span x-text="'Срок по каталогу: ' + onRequestDays + ' дн. Дата подставлена автоматически, её можно изменить.'"></span>
+                    </p>
+                </template>
                 <p class="text-xs text-slate-400 flex items-center gap-1">
                     <span class="inline-block w-2 h-2 rounded-full bg-violet-500"></span>
                     Произвольная задача — не попадает в смету, напоминает назначенному сотруднику.
@@ -2163,6 +2179,8 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         },
 
         newTaskFileName: null,      // имя выбранного документа (сам File — в pendingFiles)
+        // Дату трогали руками: после этого срок из каталога её больше не перебивает
+        dueDateTouched: false,
         creating: false,
         createError: '',
 
@@ -3568,6 +3586,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 client_id: '', name: '', description: '', clarification: '', requires_review: false,
                 employee_id: this.currentEmployeeId, due_date: '',
             };
+            this.dueDateTouched = false;
             pendingFiles.delete('create');
             this.newTaskFileName = null;
             this.resetPickers();
@@ -3648,9 +3667,30 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         },
 
         // При выборе услуги из каталога подставляем её название (берём только имя).
+        // У БП «по запросу» дат в каталоге нет, зато есть срок в днях: считаем дату
+        // как сегодня плюс эти календарные дни. Если дату уже правили руками, не трогаем.
         onCatalogPick() {
             const svc = this.catalog.find(s => String(s.id) === String(this.newTask.service_id));
-            if (svc) this.newTask.name = svc.name;
+            if (!svc) return;
+            this.newTask.name = svc.name;
+            if (svc.on_request && svc.deadline_days && !this.dueDateTouched) {
+                this.newTask.due_date = this.dateFromToday(svc.deadline_days);
+            }
+        },
+
+        /** Дата через N календарных дней от сегодня, в формате поля type=date. */
+        dateFromToday(days) {
+            const d = new Date();
+            d.setDate(d.getDate() + parseInt(days));
+            return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        },
+
+        /** Срок в днях у выбранного БП «по запросу» (иначе null) — для подсказки под датой. */
+        get onRequestDays() {
+            const svc = this.pickedService;
+            return (this.newTask.source === 'catalog' && svc && svc.on_request && svc.deadline_days)
+                ? svc.deadline_days
+                : null;
         },
 
         // Услуга, выбранная в форме: из неё показываем описание и подпункты — то же,

@@ -336,8 +336,49 @@ class SettingsController extends Controller
      * никогда — молча, без ошибок. Так на проде «Контроль сдачи отчетов» простоял в 40 сметах.
      */
     private const SCHEDULE_MESSAGES = [
-        'start_day.required_with' => 'Выбрана периодичность — укажите день срока, иначе задачи по этому БП создаваться не будут.',
+        'start_day.required_with'  => 'Выбрана периодичность — укажите день срока, иначе задачи по этому БП создаваться не будут.',
+        'deadline_days.required'   => 'Выбрана периодичность «По запросу» — укажите срок выполнения в днях, от него считается дата задачи.',
+        'deadline_days.min'        => 'Срок выполнения — минимум 1 день.',
     ];
+
+    /**
+     * Правила расписания зависят от вида периодичности.
+     *
+     * У обычных периодичностей срок задаётся датами, и день обязателен: без него
+     * БП молча не порождает задач. У «По запросу» дат нет вовсе, вместо них
+     * обязателен срок в днях — от него считается дата при добавлении задачи руками.
+     */
+    private function scheduleRules(Request $request): array
+    {
+        $onRequest = Service::isOnRequestKind(
+            Service::kindForPeriodicity($request->input('periodicity'))
+        );
+
+        return [
+            'start_day'     => $onRequest ? 'nullable|array' : 'nullable|array|required_with:periodicity',
+            'deadline_days' => $onRequest ? 'required|integer|min:1' : 'nullable|integer|min:0',
+        ];
+    }
+
+    /**
+     * Поля расписания к записи. У «По запросу» дат не существует: месяц и день
+     * гасим, чтобы от прежней периодичности не осталось хвоста. У остальных,
+     * наоборот, гасим срок в днях — он относится только к «По запросу».
+     */
+    private function scheduleAttributes(Request $request): array
+    {
+        $onRequest = Service::isOnRequestKind(
+            Service::kindForPeriodicity($request->input('periodicity'))
+        );
+
+        return [
+            'periodicity'   => $request->periodicity,
+            'due_day'       => $request->input('due_day') ?: null,
+            'start_month'   => $onRequest ? null : ($request->input('start_month') ?: null),
+            'start_day'     => $onRequest ? null : ($request->input('start_day') ?: null),
+            'deadline_days' => $onRequest ? (int) $request->input('deadline_days') : null,
+        ];
+    }
 
     public function storeService(Request $request)
     {
@@ -356,10 +397,8 @@ class SettingsController extends Controller
             'due_day'                       => 'nullable|integer|min:1|max:31',
             'start_month'                   => 'nullable|array',
             'start_month.*'                 => 'integer|min:1|max:12',
-            // Периодичность без дня срока = БП молча не порождает задач (см. Service::computeDueDates)
-            'start_day'                     => 'nullable|array|required_with:periodicity',
+            // start_day и deadline_days зависят от вида периодичности — см. scheduleRules()
             'start_day.*'                   => 'integer|min:1|max:31',
-            'deadline_days'                 => 'nullable|integer|min:0',
             'execution_minutes'             => 'nullable|integer|min:0',
             'closing_rule'                  => 'nullable|string|max:255',
             'requires_document'             => 'boolean',
@@ -377,7 +416,7 @@ class SettingsController extends Controller
             'children.*.name'               => 'required|string|max:255',
             'children.*.cost'               => 'required|numeric|min:0',
             'children.*.periodicity'        => 'nullable|string|max:100',
-        ], self::SCHEDULE_MESSAGES);
+        ] + $this->scheduleRules($request), self::SCHEDULE_MESSAGES);
 
         // Новый бизнес-процесс ставим в начало списка (сортировка по sort_order ASC)
         $minSortOrder = (int) Service::roots()->min('sort_order');
@@ -393,11 +432,7 @@ class SettingsController extends Controller
             'cost'               => $request->cost,
             'rate_id'            => $this->resolveRateId($request),
             'pricing_rules'      => $request->input('pricing_rules') ?: null,
-            'periodicity'        => $request->periodicity,
-            'due_day'            => $request->input('due_day') ?: null,
-            'start_month'        => $request->input('start_month') ?: null,
-            'start_day'          => $request->input('start_day') ?: null,
-            'deadline_days'      => $request->input('deadline_days') ?: null,
+            ...$this->scheduleAttributes($request),
             'execution_minutes'  => $request->input('execution_minutes') ?: null,
             'closing_rule'       => $request->closing_rule ?: null,
             'requires_document'  => $request->boolean('requires_document', false),
@@ -453,10 +488,8 @@ class SettingsController extends Controller
             'due_day'                       => 'nullable|integer|min:1|max:31',
             'start_month'                   => 'nullable|array',
             'start_month.*'                 => 'integer|min:1|max:12',
-            // Периодичность без дня срока = БП молча не порождает задач (см. Service::computeDueDates)
-            'start_day'                     => 'nullable|array|required_with:periodicity',
+            // start_day и deadline_days зависят от вида периодичности — см. scheduleRules()
             'start_day.*'                   => 'integer|min:1|max:31',
-            'deadline_days'                 => 'nullable|integer|min:0',
             'execution_minutes'             => 'nullable|integer|min:0',
             'closing_rule'                  => 'nullable|string|max:255',
             'requires_document'             => 'boolean',
@@ -475,7 +508,7 @@ class SettingsController extends Controller
             'children.*.name'               => 'required|string|max:255',
             'children.*.cost'               => 'required|numeric|min:0',
             'children.*.periodicity'        => 'nullable|string|max:100',
-        ], self::SCHEDULE_MESSAGES);
+        ] + $this->scheduleRules($request), self::SCHEDULE_MESSAGES);
 
         // Биллинг и количество живут только на основном БП: у подпункта они наследуются от родителя.
         $parent    = $service->parent_id ? $service->parent : null;
@@ -494,11 +527,7 @@ class SettingsController extends Controller
             'cost'               => $request->cost,
             'rate_id'            => $rateId,
             'pricing_rules'      => $request->input('pricing_rules') ?: null,
-            'periodicity'        => $request->periodicity,
-            'due_day'            => $request->input('due_day') ?: null,
-            'start_month'        => $request->input('start_month') ?: null,
-            'start_day'          => $request->input('start_day') ?: null,
-            'deadline_days'      => $request->input('deadline_days') ?: null,
+            ...$this->scheduleAttributes($request),
             'execution_minutes'  => $request->input('execution_minutes') ?: null,
             'closing_rule'       => $request->closing_rule ?: null,
             'requires_document'  => $request->boolean('requires_document', false),

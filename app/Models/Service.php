@@ -297,6 +297,13 @@ class Service extends Model
     // СРОК ВЫПОЛНЕНИЯ (расчёт дат из правила периодичности)
     // =============================================
 
+    /**
+     * Периодичность без дат: месяц и день не выбираются, задачи не планируются.
+     * Такой БП добавляют руками из каталога в БухЗадачнике, а срок считается
+     * от дня добавления плюс deadline_days (календарных).
+     */
+    public const KIND_ON_REQUEST = 'on_request';
+
     /** Кэш name => kind, чтобы не дёргать справочник на каждый БП. */
     protected static array $periodicityKindCache = [];
 
@@ -304,6 +311,18 @@ class Service extends Model
     public function periodicityKind(): ?string
     {
         return static::kindForPeriodicity($this->periodicity);
+    }
+
+    /** Периодичность этого БП — «По запросу» (без дат срока). */
+    public function isOnRequest(): bool
+    {
+        return static::isOnRequestKind($this->periodicityKind());
+    }
+
+    /** Тот же вопрос, но по уже известному kind (в т.ч. из расписания клиента). */
+    public static function isOnRequestKind(?string $kind): bool
+    {
+        return $kind === self::KIND_ON_REQUEST;
     }
 
     /** Kind по имени периодичности из справочника (с кэшем). Null, если имя пустое/не найдено. */
@@ -374,6 +393,12 @@ class Service extends Model
         $from = CarbonImmutable::parse($from)->startOfDay();
         $to   = CarbonImmutable::parse($to)->startOfDay();
         if ($kind === null || $from->gt($to)) {
+            return [];
+        }
+
+        // «По запросу» дат не имеет вовсе: такой БП не планируется, задачу по нему
+        // заводят руками из каталога в БухЗадачнике.
+        if (static::isOnRequestKind($kind)) {
             return [];
         }
 
@@ -522,6 +547,7 @@ class Service extends Model
             static::kindForPeriodicity($r['periodicity']),
             $r['months'],
             $r['days'],
+            $this->deadline_days,
         );
     }
 
@@ -535,7 +561,8 @@ class Service extends Model
      * Подписи срока выполнения для отображения в списке (компактно, по типу периодичности):
      *  - quarterly/yearly → конкретные даты текущего года ['20.03','20.07', …];
      *  - monthly          → ['15 числа'];
-     *  - weekly           → ['Вт','Пт'].
+     *  - weekly           → ['Вт','Пт'];
+     *  - on_request       → ['по запросу, 3 дн.'] (дат нет, срок считается от дня добавления).
      *
      * @return string[]
      */
@@ -545,13 +572,22 @@ class Service extends Model
             $this->periodicityKind(),
             is_array($this->start_month) ? $this->start_month : [],
             is_array($this->start_day) ? $this->start_day : [],
+            $this->deadline_days,
         );
     }
 
-    /** Та же генерация подписей, но из явных (kind, месяцы, дни) — для override клиента. */
-    public static function deadlineLabelsFor(?string $kind, array $months, array $days): array
+    /**
+     * Та же генерация подписей, но из явных (kind, месяцы, дни) — для override клиента.
+     * $deadlineDays нужен только «по запросу»: там вместо дат показываем срок в днях,
+     * и он всегда каталожный (в индивидуальном расписании клиента его не задают).
+     */
+    public static function deadlineLabelsFor(?string $kind, array $months, array $days, ?int $deadlineDays = null): array
     {
         switch ($kind) {
+            case self::KIND_ON_REQUEST:
+                // Дат нет: показываем, через сколько дней от добавления наступит срок.
+                return [$deadlineDays ? 'по запросу, ' . $deadlineDays . ' дн.' : 'по запросу'];
+
             case 'weekly':
                 $names = [1 => 'Пн', 2 => 'Вт', 3 => 'Ср', 4 => 'Чт', 5 => 'Пт', 6 => 'Сб', 7 => 'Вс'];
                 return array_values(array_map(fn ($d) => $names[(int) $d] ?? (string) $d, $days));

@@ -19,12 +19,20 @@ class ClientServiceScheduleController extends Controller
     {
         $this->authorizeClient($client);
 
+        // «По запросу» дат не имеет: день срока там не спрашиваем и не требуем.
+        // Срок в днях живёт в каталоге, индивидуально по клиенту он не задаётся.
+        $onRequest = Service::isOnRequestKind(
+            Service::kindForPeriodicity($request->input('periodicity'))
+        );
+
         $data = $request->validate([
             'periodicity'   => ['nullable', 'string', 'max:100', Rule::exists('periodicities', 'name')],
             'start_month'   => ['nullable', 'array'],
             'start_month.*' => ['integer', 'min:1', 'max:12'],
             // Периодичность без дня срока = БП молча не порождает задач (см. Service::computeDueDates)
-            'start_day'     => ['nullable', 'array', 'required_with:periodicity'],
+            'start_day'     => $onRequest
+                ? ['nullable', 'array']
+                : ['nullable', 'array', 'required_with:periodicity'],
             'start_day.*'   => ['integer', 'min:1', 'max:31'],
         ], [
             'start_day.required_with' => 'Выбрана периодичность — укажите день срока, иначе задачи по этому БП создаваться не будут.',
@@ -34,8 +42,8 @@ class ClientServiceScheduleController extends Controller
             ['client_id' => $client->id, 'service_id' => $service->id],
             [
                 'periodicity' => $data['periodicity'] ?? null,
-                'start_month' => $data['start_month'] ?? null,
-                'start_day'   => $data['start_day'] ?? null,
+                'start_month' => $onRequest ? null : ($data['start_month'] ?? null),
+                'start_day'   => $onRequest ? null : ($data['start_day'] ?? null),
             ],
         );
 

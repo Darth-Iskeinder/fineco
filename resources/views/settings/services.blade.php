@@ -471,8 +471,28 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                     </select>
                                 </div>
 
+                                {{-- «По запросу»: дат срока нет, месяц и день не показываем вовсе.
+                                     Вместо них срок в днях — от него считается дата задачи. --}}
+                                <template x-if="isOnRequest">
+                                    <div class="col-span-2 space-y-2">
+                                        <div class="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-700">
+                                            <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+                                            <span>Плановые задачи по этому БП не создаются. Его добавляют вручную из каталога в БухЗадачнике.</span>
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-slate-700 mb-1">
+                                                Срок выполнения, дней <span class="text-red-500">*</span>
+                                            </label>
+                                            <input type="number" min="1" x-model.number="serviceForm.deadline_days"
+                                                   placeholder="Например: 3"
+                                                   class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                            <p class="mt-1 text-xs" :class="serviceForm.deadline_days ? 'text-slate-500' : 'text-amber-600'" x-text="deadlineDaysHint"></p>
+                                        </div>
+                                    </div>
+                                </template>
+
                                 {{-- Месяц: теги месяцев для ежеквартально/ежегодно, иначе недоступно --}}
-                                <div class="col-span-2">
+                                <div class="col-span-2" x-show="!isOnRequest">
                                     <label class="block text-sm font-medium text-slate-700 mb-1">
                                         Месяц
                                         <span x-show="monthFieldEnabled && monthMultiple" class="text-slate-400 font-normal">(можно выбрать несколько)</span>
@@ -495,7 +515,7 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                 </div>
 
                                 {{-- День: дни недели тегами для еженедельно, иначе день месяца --}}
-                                <div class="col-span-2">
+                                <div class="col-span-2" x-show="!isOnRequest">
                                     <label class="block text-sm font-medium text-slate-700 mb-1">
                                         День
                                         <span x-show="dayIsWeekday" class="text-slate-400 font-normal">(дни недели, можно несколько)</span>
@@ -810,6 +830,16 @@ function servicesPage() {
         },
         get monthFieldEnabled() { return ['quarterly','yearly'].includes(this.selectedKind); },
 
+        // «По запросу»: дат нет, вместо месяца и дня — срок в днях от добавления задачи
+        get isOnRequest() { return this.selectedKind === 'on_request'; },
+        get deadlineDaysHint() {
+            const n = parseInt(this.serviceForm.deadline_days);
+            if (!n || n < 1) return 'Без срока в днях сохранить нельзя: от него считается дата задачи.';
+            const d = new Date(); d.setDate(d.getDate() + n);
+            const dd = String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0');
+            return 'Дата задачи = день добавления плюс ' + n + ' календарных дн. Если добавить сегодня, срок встанет на ' + dd + '.';
+        },
+
         // Тарификация: код режима выбранного биллинга определяет, нужна ли ставка
         get selectedBillingCode() {
             const b = this.billings.find(x => x.name === this.serviceForm.billing);
@@ -845,8 +875,13 @@ function servicesPage() {
         },
         get dayOfMonth() { return (this.serviceForm.start_day && this.serviceForm.start_day.length) ? this.serviceForm.start_day[0] : ''; },
         set dayOfMonth(v) { this.serviceForm.start_day = v ? [parseInt(v)] : []; },
-        // При смене периодичности типы месяца/дня меняются — сбрасываем прежний выбор
-        onPeriodicityChange() { this.serviceForm.start_month = []; this.serviceForm.start_day = []; },
+        // При смене периодичности типы месяца/дня меняются — сбрасываем прежний выбор.
+        // Срок в днях живёт только у «по запросу», у остальных его тоже чистим.
+        onPeriodicityChange() {
+            this.serviceForm.start_month = [];
+            this.serviceForm.start_day = [];
+            if (!this.isOnRequest) this.serviceForm.deadline_days = null;
+        },
 
         get untypedCount() {
             return this.services.filter(s => !s.service_type).length;

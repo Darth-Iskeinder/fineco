@@ -58,6 +58,7 @@ class ServiceScheduleValidationTest extends TestCase
         ]);
 
         Periodicity::firstOrCreate(['name' => 'Ежемесячно'], ['kind' => 'monthly']);
+        Periodicity::firstOrCreate(['name' => 'По запросу'], ['kind' => Service::KIND_ON_REQUEST]);
     }
 
     private function payload(array $overrides = []): array
@@ -119,6 +120,87 @@ class ServiceScheduleValidationTest extends TestCase
         $this->actingAs($this->admin, 'employee')
             ->postJson('/settings/services', $this->payload(['periodicity' => '']))
             ->assertSuccessful();
+    }
+
+    // === «По запросу»: дат нет, вместо них обязательный срок в днях ===
+
+    public function test_store_rejects_on_request_without_deadline_days(): void
+    {
+        $this->actingAs($this->admin, 'employee')
+            ->postJson('/settings/services', $this->payload(['periodicity' => 'По запросу']))
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('deadline_days')
+            ->assertJsonPath('message', 'Выбрана периодичность «По запросу» — укажите срок выполнения в днях, от него считается дата задачи.');
+    }
+
+    public function test_store_rejects_on_request_with_zero_days(): void
+    {
+        $this->actingAs($this->admin, 'employee')
+            ->postJson('/settings/services', $this->payload([
+                'periodicity'   => 'По запросу',
+                'deadline_days' => 0,
+            ]))
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('deadline_days');
+    }
+
+    /** День срока у «По запросу» не спрашивается: дат у такой периодичности нет. */
+    public function test_store_allows_on_request_with_days_and_without_start_day(): void
+    {
+        $name = 'БП по запросу ' . uniqid();
+
+        $this->actingAs($this->admin, 'employee')
+            ->postJson('/settings/services', $this->payload([
+                'name'          => $name,
+                'periodicity'   => 'По запросу',
+                'deadline_days' => 3,
+            ]))
+            ->assertSuccessful();
+
+        $service = Service::where('name', $name)->firstOrFail();
+        $this->assertSame(3, $service->deadline_days);
+        $this->assertTrue($service->isOnRequest());
+        $this->assertSame([], $service->dueDatesBetween(now()->startOfYear(), now()->endOfYear()));
+    }
+
+    /** Смена периодичности на датированную гасит срок в днях, и наоборот. */
+    public function test_switching_periodicity_clears_the_other_schedule_fields(): void
+    {
+        $name = 'БП со сменой периодичности ' . uniqid();
+
+        $this->actingAs($this->admin, 'employee')
+            ->postJson('/settings/services', $this->payload([
+                'name'        => $name,
+                'periodicity' => 'Ежемесячно',
+                'start_day'   => [15],
+            ]))
+            ->assertSuccessful();
+
+        $service = Service::where('name', $name)->firstOrFail();
+
+        $this->actingAs($this->admin, 'employee')
+            ->putJson('/settings/services/' . $service->id, $this->payload([
+                'name'          => $name,
+                'periodicity'   => 'По запросу',
+                'deadline_days' => 5,
+            ]))
+            ->assertSuccessful();
+
+        $service->refresh();
+        $this->assertSame(5, $service->deadline_days);
+        $this->assertNull($service->start_day);
+
+        $this->actingAs($this->admin, 'employee')
+            ->putJson('/settings/services/' . $service->id, $this->payload([
+                'name'        => $name,
+                'periodicity' => 'Ежемесячно',
+                'start_day'   => [15],
+            ]))
+            ->assertSuccessful();
+
+        $service->refresh();
+        $this->assertNull($service->deadline_days);
+        $this->assertSame([15], $service->start_day);
     }
 
     // === Редактирование БП ===
@@ -189,6 +271,23 @@ class ServiceScheduleValidationTest extends TestCase
             ->putJson("/clients/{$client->id}/services/{$service->id}/schedule", [
                 'periodicity' => 'Ежемесячно',
                 'start_day'   => [20],
+            ])
+            ->assertSuccessful();
+    }
+
+    /** У «По запросу» дня срока нет, и требовать его в override нельзя. */
+    public function test_client_override_allows_on_request_without_day(): void
+    {
+        $client  = Client::first();
+        $service = Service::first();
+
+        if (!$client || !$service) {
+            $this->markTestSkipped('Нет клиента или БП в базе для проверки override.');
+        }
+
+        $this->actingAs($this->admin, 'employee')
+            ->putJson("/clients/{$client->id}/services/{$service->id}/schedule", [
+                'periodicity' => 'По запросу',
             ])
             ->assertSuccessful();
     }

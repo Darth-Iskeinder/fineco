@@ -292,6 +292,9 @@ class BuhTasksController extends Controller
                 $service  = $item->service_id ? $services->get($item->service_id) : null;
                 $override = $service ? $overrides->get($item->service_id) : null;
                 $resolved = $service ? $service->resolveForClient($override) : null;
+                // «Расписание есть» — значит позиция не попадает в ветку «задача текущего
+                // месяца». У «По запросу» дат при этом ноль, и это ровно то, что нужно:
+                // такая задача заводится руками из каталога, сама не появляется.
                 $hasSchedule = !empty($resolved['periodicity']);
                 $kind = $resolved ? Service::kindForPeriodicity($resolved['periodicity']) : null;
 
@@ -877,14 +880,17 @@ class BuhTasksController extends Controller
 
         // Каталог услуг для создания задачи «из каталога». Кроме названия отдаём описание
         // и подпункты: форма показывает их сразу при выборе, а в задачу они уедут снимком.
+        // Ещё отдаём срок в днях у БП «по запросу» — по нему форма сама подставляет дату.
         $catalog = Service::roots()->active()->ordered()
             ->with('children:id,parent_id,name,sort_order')
-            ->get(['id', 'name', 'description'])
+            ->get(['id', 'name', 'description', 'periodicity', 'deadline_days'])
             ->map(fn ($s) => [
-                'id'          => $s->id,
-                'name'        => $s->name,
-                'description' => $s->description,
-                'items'       => $s->children->sortBy('sort_order')->pluck('name')->values()->all(),
+                'id'            => $s->id,
+                'name'          => $s->name,
+                'description'   => $s->description,
+                'on_request'    => $s->isOnRequest(),
+                'deadline_days' => $s->deadline_days,
+                'items'         => $s->children->sortBy('sort_order')->pluck('name')->values()->all(),
             ])
             ->values()->toArray();
 

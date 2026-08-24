@@ -423,8 +423,17 @@
                     </select>
                 </div>
 
+                <!-- «По запросу»: дат нет, месяц и день не показываем. Срок в днях
+                     задаётся в каталоге и на клиента индивидуально не переносится. -->
+                <template x-if="isOnRequest">
+                    <div class="mb-5 flex items-start gap-2 px-3 py-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-700">
+                        <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+                        <span>Задачи по этому БП не планируются: их добавляют вручную из каталога в БухЗадачнике. Срок в днях задаётся в каталоге.</span>
+                    </div>
+                </template>
+
                 <!-- Месяц: теги месяцев для ежеквартально/ежегодно -->
-                <div class="mb-4">
+                <div class="mb-4" x-show="!isOnRequest">
                     <label class="block text-sm font-medium text-slate-700 mb-1">
                         Месяц
                         <span x-show="monthFieldEnabled && monthMultiple" class="text-slate-400 font-normal">(можно выбрать несколько)</span>
@@ -447,7 +456,7 @@
                 </div>
 
                 <!-- День: дни недели для еженедельно, иначе день месяца -->
-                <div class="mb-5">
+                <div class="mb-5" x-show="!isOnRequest">
                     <label class="block text-sm font-medium text-slate-700 mb-1">
                         День
                         <span x-show="dayIsWeekday" class="text-slate-400 font-normal">(дни недели, можно несколько)</span>
@@ -821,6 +830,8 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
         },
         get monthFieldEnabled() { return ['quarterly','yearly'].includes(this.selectedKind); },
         get monthMultiple() { return this.selectedKind === 'quarterly'; },
+        // «По запросу» дат не имеет: месяц и день в индивидуальном расписании прячем
+        get isOnRequest() { return this.selectedKind === 'on_request'; },
         get dayIsWeekday() { return this.selectedKind === 'weekly'; },
         get monthDisabledHint() {
             if (!this.scheduleForm.periodicity) return 'Сначала выберите периодичность';
