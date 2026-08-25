@@ -6,6 +6,7 @@ use App\Models\Concerns\BelongsToTenant;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
 
 class BuhAdhocTask extends Model
 {
@@ -17,6 +18,7 @@ class BuhAdhocTask extends Model
         'started_at', 'resumed_at', 'paused_seconds', 'completed_at',
         'review_comment', 'rework_count', 'employee_comment', 'review_started_at', 'reviewed_at', 'reviewed_by',
         'assign_seen_at', 'rework_seen_at',
+        'trigger_source_type', 'trigger_source_id', 'trigger_source_name',
         'document_path', 'document_name',
     ];
 
@@ -92,6 +94,26 @@ class BuhAdhocTask extends Model
     {
         return $this->created_by !== null
             && (int) $this->created_by !== (int) $this->employee_id;
+    }
+
+    /**
+     * Задача-родитель, из-за выполнения которой родилась эта («по событию»).
+     * NULL у всех обычных задач.
+     */
+    public function triggerSource(): MorphTo
+    {
+        return $this->morphTo();
+    }
+
+    /**
+     * Задача рождена триггером «по событию».
+     *
+     * Такая задача сама триггер больше не запускает: цепочка идёт ровно
+     * на одну ступень, поэтому кольцо из двух БП безопасно.
+     */
+    public function isTriggered(): bool
+    {
+        return $this->trigger_source_id !== null;
     }
 
     public function documents(): MorphMany

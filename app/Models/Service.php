@@ -129,6 +129,8 @@ class Service extends Model
         'start_month',
         'start_day',
         'deadline_days',
+        'triggers_on_event',
+        'event_child_service_id',
         'execution_minutes',
         'closing_rule',
         'requires_document',
@@ -212,12 +214,19 @@ class Service extends Model
         'start_month' => 'array',
         'start_day' => 'array',
         'deadline_days' => 'integer',
+        'triggers_on_event' => 'boolean',
         'execution_minutes' => 'integer',
     ];
 
     public function parent(): BelongsTo
     {
         return $this->belongsTo(Service::class, 'parent_id');
+    }
+
+    /** Дочерний БП «по событию»: задача по нему рождается, когда выполнена задача по этому БП. */
+    public function eventChild(): BelongsTo
+    {
+        return $this->belongsTo(Service::class, 'event_child_service_id');
     }
 
     /** Ставка из справочника (источник цены для платных режимов биллинга). */
@@ -335,6 +344,50 @@ class Service extends Model
             static::$periodicityKindCache[$name] = Periodicity::query()->where('name', $name)->value('kind');
         }
         return static::$periodicityKindCache[$name];
+    }
+
+    // =============================================
+    // «ПО СОБЫТИЮ» (выполнение задачи по этому БП рождает задачу по дочернему)
+    // =============================================
+
+    /**
+     * Тумблер включён И дочерний БП выбран. Проверяем оба поля: тумблер сам по
+     * себе рождать нечего, а ссылка могла погаснуть после удаления дочернего.
+     */
+    public function firesOnEvent(): bool
+    {
+        return (bool) $this->triggers_on_event && $this->event_child_service_id !== null;
+    }
+
+    /**
+     * БП, которые годятся в дочерние «по событию»: основные (не подпункты),
+     * действующие, не в архиве, с периодичностью «По запросу».
+     *
+     * Подпункты не берём намеренно: в плановой задаче подпункт это отдельная
+     * задача со своим статусом, а в разовой всего лишь галочка в чеклисте.
+     * Триггер вёл бы себя по-разному, поэтому работаем только с основными.
+     */
+    public function scopeEventChildCandidates($query)
+    {
+        return $query->roots()
+            ->active()
+            ->whereNull('archived_at')
+            ->whereIn('periodicity', static::onRequestPeriodicityNames());
+    }
+
+    /**
+     * Названия периодичностей с типом «По запросу».
+     *
+     * У БП хранится название периодичности, а не ссылка на справочник, поэтому
+     * ищем по именам. Имён может быть несколько: на бою у одного kind бывают
+     * записи-дубли с разными названиями.
+     */
+    public static function onRequestPeriodicityNames(): array
+    {
+        return Periodicity::query()
+            ->where('kind', self::KIND_ON_REQUEST)
+            ->pluck('name')
+            ->all();
     }
 
     /** Названия месяцев (именительный падеж) для подписи отчётного периода. */

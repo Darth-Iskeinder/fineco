@@ -11,6 +11,7 @@ use App\Models\Estimate;
 use App\Models\EstimateItem;
 use App\Models\Service;
 use App\Models\TaskReminder;
+use App\Services\EventTriggeredTasks;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -488,6 +489,10 @@ class BuhTasksController extends Controller
                 'requires_document' => false, // документ всегда опционален для внеплановых
                 'documents'       => $this->docs($adhoc),
                 'clarification'   => $adhoc->clarification,
+                // Задача родилась сама, после выполнения другой — иначе её появление
+                // выглядит как сбой. Название родителя снято при создании.
+                'from_event'      => $adhoc->isTriggered(),
+                'from_event_name' => $adhoc->trigger_source_name,
                 // Подпункты, снятые с услуги при создании: закрыть задачу можно
                 // только когда все отмечены — то же правило, что и у плановых
                 'children'        => $adhoc->checklistForView(),
@@ -1079,7 +1084,10 @@ class BuhTasksController extends Controller
 
         $log->save();
 
-        return response()->json(['success' => true, 'log' => $this->formatLog($log)]);
+        return response()->json(
+            ['success' => true, 'log' => $this->formatLog($log)]
+            + $this->spawnedPayload($this->fireEventTrigger($log))
+        );
     }
 
     /**
@@ -1121,7 +1129,10 @@ class BuhTasksController extends Controller
 
         $log->save();
 
-        return response()->json(['success' => true, 'log' => $this->formatLog($log)]);
+        return response()->json(
+            ['success' => true, 'log' => $this->formatLog($log)]
+            + $this->spawnedPayload($this->fireEventTrigger($log))
+        );
     }
 
     public function reset(BuhTaskLog $log)
@@ -1326,34 +1337,8 @@ class BuhTasksController extends Controller
             'assigned' => $assignee->id === $author->id
                 ? null
                 : $this->assignedRow($adhoc->load('client:id,name', 'employee:id,full_name'), CarbonImmutable::now()->toDateString()),
-            'task' => [
-                'uid'             => 'adhoc_' . $adhoc->id,
-                'type'            => 'adhoc',
-                'is_custom'       => true,
-                'adhoc_id'        => $adhoc->id,
-                'client_id'       => $adhoc->client_id,
-                'client_name'     => $adhoc->client_id ? Client::find($adhoc->client_id)?->name : null,
-                'year'            => $adhoc->year,
-                'month'           => $adhoc->month,
-                'name'            => $adhoc->name,
-                'description'     => $adhoc->description,
-                'clarification'   => $adhoc->clarification,
-                'children'        => $adhoc->checklistForView(),
-                'requires_review' => $adhoc->requires_review,
-                'requires_document' => false, // документ всегда опционален для внеплановых
-                'documents'       => $this->docs($adhoc->load('documents')),
-                'review_comment'  => null,
-                'employee_comment' => null,
-                'cost'            => 0,
-                'periodicity'     => null,
-                'reporting_period' => null,
-                'due_day'         => $adhoc->due_day,
-                'due_date'        => $due->toDateString(),
-                'status'          => 'pending',
-                'elapsed_seconds' => 0,
-                'loading'         => false,
-                'client_resumed_at' => null,
-            ],
+            // Строка для списка на экране — общая с задачами, рождёнными по событию.
+            'task' => $this->adhocTaskRow($adhoc),
         ]);
     }
 
@@ -1436,7 +1421,10 @@ class BuhTasksController extends Controller
         }
         $task->save();
 
-        return response()->json(['success' => true, 'log' => $this->formatAdhoc($task)]);
+        return response()->json(
+            ['success' => true, 'log' => $this->formatAdhoc($task)]
+            + $this->spawnedPayload($this->fireEventTrigger($task))
+        );
     }
 
     // =============================================
@@ -1521,7 +1509,8 @@ class BuhTasksController extends Controller
             'reviewed_by'  => auth('employee')->id(),
         ]);
 
-        return response()->json(['success' => true]);
+        // Дочернюю по событию получает исполнитель, а не принявший главбух.
+        return response()->json(['success' => true] + $this->spawnedPayload($this->fireEventTrigger($log)));
     }
 
     public function rejectReview(Request $request, BuhTaskLog $log)
@@ -1558,7 +1547,8 @@ class BuhTasksController extends Controller
             'reviewed_by'  => auth('employee')->id(),
         ]);
 
-        return response()->json(['success' => true]);
+        // Дочернюю по событию получает исполнитель, а не принявший главбух.
+        return response()->json(['success' => true] + $this->spawnedPayload($this->fireEventTrigger($task)));
     }
 
     public function rejectReviewAdhoc(Request $request, BuhAdhocTask $task)
@@ -1800,6 +1790,98 @@ class BuhTasksController extends Controller
             ->map(fn ($d) => ['id' => $d->id, 'name' => $d->name, 'url' => $d->url])
             ->values()
             ->all();
+    }
+
+    /**
+     * Запустить триггер «по событию» после закрытия задачи.
+     *
+     * Задача с обязательной проверкой уходит не в completed, а в review — тогда
+     * тут ничего не происходит, и триггер сработает позже, на приёмке главбухом.
+     * Сам EventTriggeredTasks гасит любые свои ошибки: закрытие задачи из-за него
+     * упасть не может.
+     */
+    private function fireEventTrigger(BuhTaskLog|BuhAdhocTask $task): ?BuhAdhocTask
+    {
+        return $task->status === 'completed'
+            ? EventTriggeredTasks::afterCompleted($task)
+            : null;
+    }
+
+    /**
+     * Прибавка к ответу: родившаяся по событию дочерняя задача.
+     *
+     * Готовую строку кладём, только если задача досталась тому, кто сейчас на
+     * экране, — тогда она появляется в списке без перезагрузки. При приёмке
+     * главбухом дочернюю получает исполнитель, поэтому строки нет, остаётся
+     * только название для сообщения.
+     */
+    private function spawnedPayload(?BuhAdhocTask $spawned): array
+    {
+        if (!$spawned) {
+            return [];
+        }
+
+        return [
+            'spawned' => (int) $spawned->employee_id === (int) auth('employee')->id()
+                ? $this->adhocTaskRow($spawned)
+                : null,
+            'spawned_name' => $spawned->name,
+        ];
+    }
+
+    /**
+     * Строка внеплановой задачи для списка в БухЗадачнике — в той же форме, в какой
+     * её отдаёт index(). Одна на всех, кто добавляет задачу на экран без перезагрузки:
+     * только что созданную и родившуюся по событию.
+     */
+    private function adhocTaskRow(BuhAdhocTask $adhoc): array
+    {
+        $adhoc->loadMissing('client:id,name', 'creator:id,full_name', 'documents');
+
+        $due = $adhoc->due_day
+            ? CarbonImmutable::create(
+                $adhoc->year,
+                $adhoc->month,
+                min((int) $adhoc->due_day, CarbonImmutable::create($adhoc->year, $adhoc->month, 1)->daysInMonth)
+            )
+            : null;
+
+        return [
+            'uid'              => 'adhoc_' . $adhoc->id,
+            'type'             => 'adhoc',
+            'is_custom'        => true,
+            'adhoc_id'         => $adhoc->id,
+            'assigned_by_name' => $adhoc->isAssignment() ? $adhoc->creator?->full_name : null,
+            'client_id'        => $adhoc->client_id,
+            'client_name'      => $adhoc->client?->name,
+            'year'             => $adhoc->year,
+            'month'            => $adhoc->month,
+            'name'             => $adhoc->name,
+            'service_group'    => null,
+            'cost'             => (float) $adhoc->cost,
+            'periodicity'      => null,
+            'reporting_period' => null,
+            'due_day'          => $adhoc->due_day,
+            'due_date'         => $due?->toDateString(),
+            'comment'          => null,
+            'description'      => $adhoc->description,
+            'clarification'    => $adhoc->clarification,
+            'requires_review'  => $adhoc->requires_review,
+            'status'           => $adhoc->status,
+            'elapsed_seconds'  => $this->calcElapsed($adhoc),
+            'review_comment'   => $adhoc->review_comment,
+            'employee_comment' => $adhoc->employee_comment,
+            'quantity'         => 1,
+            'allows_quantity'  => false,
+            'actual_quantity'  => null,
+            'requires_document' => false, // документ всегда опционален для внеплановых
+            'documents'        => $this->docs($adhoc),
+            'from_event'       => $adhoc->isTriggered(),
+            'from_event_name'  => $adhoc->trigger_source_name,
+            'children'         => $adhoc->checklistForView(),
+            'loading'          => false,
+            'client_resumed_at' => null,
+        ];
     }
 
     private function formatLog(BuhTaskLog $log): array

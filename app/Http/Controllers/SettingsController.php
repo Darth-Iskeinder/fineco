@@ -125,7 +125,7 @@ class SettingsController extends Controller
     {
         return view('settings.services', [
             'taxSystems' => TaxSystem::ordered()->get(),
-            'services' => Service::with(['taxSystems', 'children.rate', 'rate'])->roots()->ordered()->get(),
+            'services' => Service::with(['taxSystems', 'children.rate', 'rate', 'eventChild:id,name'])->roots()->ordered()->get(),
             'specialFlags' => Service::specialFlagsList(),
             'periodicities' => Periodicity::orderBy('name')->get(['name', 'kind'])->values(),
             'categories' => Category::orderBy('name')->pluck('name')->values(),
@@ -380,6 +380,61 @@ class SettingsController extends Controller
         ];
     }
 
+    private const EVENT_MESSAGES = [
+        'event_child_service_id.required' => 'Включено «По событию» — выберите дочерний БП, задача по которому создастся после выполнения.',
+    ];
+
+    /**
+     * Правила «По событию».
+     *
+     * Тумблер включён, значит дочерний БП обязателен: без него рождать нечего.
+     * Годность дочернего проверяем и здесь, а не только списком в форме, потому
+     * что форму можно отправить в обход неё.
+     */
+    private function eventTriggerRules(Request $request, ?Service $service = null): array
+    {
+        // Тумблер выключен — поле не участвует вовсе: eventTriggerAttributes() всё равно
+        // запишет NULL, что бы ни прислали.
+        if (!$request->boolean('triggers_on_event')) {
+            return [];
+        }
+
+        return [
+            'event_child_service_id' => [
+                'bail',
+                'required',
+                'integer',
+                function ($attribute, $value, $fail) use ($service) {
+                    if ($service && (int) $value === (int) $service->id) {
+                        $fail('Дочерним нельзя выбрать этот же БП.');
+
+                        return;
+                    }
+
+                    if (!Service::eventChildCandidates()->whereKey($value)->exists()) {
+                        $fail('Дочерним может быть только действующий основной БП с периодичностью «По запросу».');
+                    }
+                },
+            ],
+        ];
+    }
+
+    /**
+     * Поля «По событию» к записи. Тумблер выключили — гасим и ссылку, чтобы от
+     * прежней настройки не осталось хвоста, который однажды выстрелит.
+     *
+     * У подпунктов триггера нет вовсе: он живёт только на основном БП.
+     */
+    private function eventTriggerAttributes(Request $request, ?int $parentId): array
+    {
+        $on = $parentId === null && $request->boolean('triggers_on_event');
+
+        return [
+            'triggers_on_event'      => $on,
+            'event_child_service_id' => $on ? (int) $request->input('event_child_service_id') : null,
+        ];
+    }
+
     public function storeService(Request $request)
     {
         $request->validate([
@@ -416,7 +471,9 @@ class SettingsController extends Controller
             'children.*.name'               => 'required|string|max:255',
             'children.*.cost'               => 'required|numeric|min:0',
             'children.*.periodicity'        => 'nullable|string|max:100',
-        ] + $this->scheduleRules($request), self::SCHEDULE_MESSAGES);
+            'triggers_on_event'             => 'boolean',
+        ] + $this->scheduleRules($request) + $this->eventTriggerRules($request),
+            self::SCHEDULE_MESSAGES + self::EVENT_MESSAGES);
 
         // Новый бизнес-процесс ставим в начало списка (сортировка по sort_order ASC)
         $minSortOrder = (int) Service::roots()->min('sort_order');
@@ -433,6 +490,7 @@ class SettingsController extends Controller
             'rate_id'            => $this->resolveRateId($request),
             'pricing_rules'      => $request->input('pricing_rules') ?: null,
             ...$this->scheduleAttributes($request),
+            ...$this->eventTriggerAttributes($request, null),
             'execution_minutes'  => $request->input('execution_minutes') ?: null,
             'closing_rule'       => $request->closing_rule ?: null,
             'requires_document'  => $request->boolean('requires_document', false),
@@ -462,7 +520,7 @@ class SettingsController extends Controller
             ]);
         }
 
-        $service->load(['taxSystems', 'children.rate', 'rate']);
+        $service->load(['taxSystems', 'children.rate', 'rate', 'eventChild:id,name']);
 
         return response()->json([
             'success' => true,
@@ -508,7 +566,9 @@ class SettingsController extends Controller
             'children.*.name'               => 'required|string|max:255',
             'children.*.cost'               => 'required|numeric|min:0',
             'children.*.periodicity'        => 'nullable|string|max:100',
-        ] + $this->scheduleRules($request), self::SCHEDULE_MESSAGES);
+            'triggers_on_event'             => 'boolean',
+        ] + $this->scheduleRules($request) + $this->eventTriggerRules($request, $service),
+            self::SCHEDULE_MESSAGES + self::EVENT_MESSAGES);
 
         // Биллинг и количество живут только на основном БП: у подпункта они наследуются от родителя.
         $parent    = $service->parent_id ? $service->parent : null;
@@ -528,6 +588,7 @@ class SettingsController extends Controller
             'rate_id'            => $rateId,
             'pricing_rules'      => $request->input('pricing_rules') ?: null,
             ...$this->scheduleAttributes($request),
+            ...$this->eventTriggerAttributes($request, $service->parent_id),
             'execution_minutes'  => $request->input('execution_minutes') ?: null,
             'closing_rule'       => $request->closing_rule ?: null,
             'requires_document'  => $request->boolean('requires_document', false),
@@ -573,7 +634,7 @@ class SettingsController extends Controller
             }
         }
 
-        $service->load(['taxSystems', 'children.rate', 'rate']);
+        $service->load(['taxSystems', 'children.rate', 'rate', 'eventChild:id,name']);
 
         return response()->json([
             'success' => true,
@@ -774,6 +835,9 @@ class SettingsController extends Controller
             'start_day'         => $service->start_day,
             'deadline'          => $service->deadlineLabels(),
             'deadline_days'     => $service->deadline_days,
+            'triggers_on_event'      => (bool) $service->triggers_on_event,
+            'event_child_service_id' => $service->event_child_service_id,
+            'event_child_name'       => $service->eventChild?->name,
             'execution_minutes' => $service->execution_minutes,
             'closing_rule'      => $service->closing_rule,
             'requires_document' => $service->requires_document,

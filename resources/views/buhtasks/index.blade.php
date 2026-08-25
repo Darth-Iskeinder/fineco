@@ -414,6 +414,14 @@
                                     </span>
                                     <span x-show="task.status === 'rework'"
                                           class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-rose-100 text-rose-700">на доработку</span>
+                                    {{-- Задача появилась сама, после выполнения другой: без бейджа её
+                                         происхождение выглядит как сбой. Родитель — в подсказке. --}}
+                                    <span x-show="task.from_event"
+                                          class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-violet-100 text-violet-700 whitespace-nowrap"
+                                          :title="task.from_event_name ? ('после выполнения «' + task.from_event_name + '»') : 'создана после выполнения другой задачи'">
+                                        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                                        <span>по событию</span>
+                                    </span>
                                     {{-- Задачу завёл не сам исполнитель, а кто-то другой — видно, с кого спрос --}}
                                     <span x-show="task.assigned_by_name"
                                           class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
@@ -1467,6 +1475,16 @@
                     </button>
                 </div>
                 <p class="text-sm text-slate-500 mt-0.5" x-text="tasks[taskModalIdx].client_name || '—'"></p>
+
+                {{-- Откуда взялась задача, которую никто не заводил руками --}}
+                <div x-show="tasks[taskModalIdx].from_event"
+                     class="mt-3 flex items-start gap-2 px-3 py-2 rounded-lg bg-violet-50 border border-violet-200 text-xs text-violet-700">
+                    <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                    <span>
+                        Создана по событию: после того, как выполнена задача
+                        «<span x-text="tasks[taskModalIdx].from_event_name || '—'"></span>».
+                    </span>
+                </div>
 
                 {{-- Таймер + управление (Старт/Пауза/Стоп) — те же действия, что и в строке таблицы --}}
                 <div class="mt-4 flex items-center justify-between gap-3 bg-slate-50 rounded-xl px-4 py-3">
@@ -3202,6 +3220,20 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             }
         },
 
+        /**
+         * Задача, родившаяся «по событию» после закрытия этой.
+         *
+         * Сервер кладёт готовую строку только когда дочерняя досталась тому, кто
+         * сейчас на экране. При приёмке главбухом её получает исполнитель, и тогда
+         * spawned приходит пустым — добавлять на чужой экран нечего.
+         */
+        addSpawned(data) {
+            if (!data || !data.spawned) return;
+            if (this.tasks.some(t => t.uid === data.spawned.uid)) return; // защита от повтора
+            this.tasks.unshift(data.spawned);
+            this._taskVer++;
+        },
+
         // Добавляет запись во вкладку «Выполненные» (форма как у контроллера при следующем заходе).
         addToCompleted(task, log) {
             const cid = task.type === 'planned' ? 'log_' + log.id : 'adhoc_' + task.adhoc_id;
@@ -3503,6 +3535,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             const data = await this.post(this.actionUrl(this.tasks[idx], 'complete'));
             if (data.success) {
                 this.applyResult(idx, data.log);
+                this.addSpawned(data);
             } else {
                 this.patch(idx, { loading: false });
                 if (data.requires_document) this.docRequiredModal = { show: true, taskIdx: idx };
@@ -3545,6 +3578,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             if (data.success) {
                 this.closeForceClose();
                 this.applyResult(idx, data.log);
+                this.addSpawned(data);
             } else {
                 this.patch(idx, { loading: false });
                 this.forceCloseModal.saving = false;

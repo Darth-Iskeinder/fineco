@@ -94,6 +94,16 @@
             color: #3a3153;
         }
         .doc blockquote p { margin: 0; }
+        /* Скриншоты: во всю ширину колонки, с рамкой, чтобы белый интерфейс
+           не сливался с белой карточкой страницы. */
+        .doc img {
+            display: block;
+            max-width: 100%;
+            height: auto;
+            margin: 18px 0;
+            border: 1px solid var(--rule);
+            border-radius: 12px;
+        }
         .doc table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 15px; }
         .doc th, .doc td { border: 1px solid var(--rule); padding: 8px 12px; text-align: left; vertical-align: top; }
         .doc th { background: #faf8fe; font-weight: 600; }

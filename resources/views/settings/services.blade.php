@@ -25,6 +25,9 @@ $servicesJson = $services->map(fn($s) => array_merge([
     'start_day'         => $s->start_day,
     'deadline'          => $s->deadlineLabels(),
     'deadline_days'     => $s->deadline_days,
+    'triggers_on_event'      => (bool) $s->triggers_on_event,
+    'event_child_service_id' => $s->event_child_service_id,
+    'event_child_name'       => $s->eventChild?->name,
     'execution_minutes' => $s->execution_minutes,
     'closing_rule'      => $s->closing_rule,
     'requires_document' => $s->requires_document,
@@ -204,7 +207,14 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                     <template x-if="!row.svc.tax_systems || row.svc.tax_systems.length === 0"><span class="text-slate-400">—</span></template>
                                 </div>
                             </td>
-                            <td class="px-4 py-3 whitespace-nowrap text-sm text-slate-500" x-text="row.svc.periodicity || '—'"></td>
+                            <td class="px-4 py-3 whitespace-nowrap text-sm text-slate-500">
+                                <span x-text="row.svc.periodicity || '—'"></span>
+                                {{-- Триггер «по событию» виден прямо в списке: иначе о нём знает
+                                     только тот, кто откроет карточку. --}}
+                                <span x-show="row.svc.triggers_on_event"
+                                      class="ml-1 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-violet-100 text-violet-700"
+                                      :title="'По событию → ' + (row.svc.event_child_name || '')">По событию</span>
+                            </td>
                             <td class="px-4 py-3 whitespace-nowrap text-sm">
                                 <div class="flex flex-wrap gap-1">
                                     <template x-for="(d, di) in (row.svc.deadline || [])" :key="di">
@@ -488,6 +498,72 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                                    class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
                                             <p class="mt-1 text-xs" :class="serviceForm.deadline_days ? 'text-slate-500' : 'text-amber-600'" x-text="deadlineDaysHint"></p>
                                         </div>
+                                    </div>
+                                </template>
+
+                                {{-- «По событию»: не периодичность, а надстройка над ней. Расписание у БП
+                                     остаётся своё, тумблер лишь добавляет поведение родителя: выполнили
+                                     задачу по этому БП — родилась задача по дочернему.
+                                     У подпунктов тумблера нет, триггер живёт только на основном БП. --}}
+                                <template x-if="!serviceForm.parent_id">
+                                    <div class="col-span-2 rounded-lg border border-slate-200 px-3 py-2.5 space-y-2">
+                                        <div class="flex items-center gap-2">
+                                            <button type="button" @click="toggleEventTrigger()"
+                                                    :class="serviceForm.triggers_on_event ? 'bg-indigo-600' : 'bg-slate-300'"
+                                                    class="relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500/20">
+                                                <span :class="serviceForm.triggers_on_event ? 'translate-x-6' : 'translate-x-1'" class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform"></span>
+                                            </button>
+                                            <span class="text-sm font-medium text-slate-700">По событию</span>
+                                        </div>
+                                        <p class="text-xs text-slate-400" x-show="!serviceForm.triggers_on_event">
+                                            Включите, чтобы после выполнения задачи по этому БП сама создавалась задача по другому.
+                                        </p>
+                                        <template x-if="serviceForm.triggers_on_event">
+                                            <div>
+                                                <label class="block text-sm font-medium text-slate-700 mb-1">
+                                                    Дочерний БП <span class="text-red-500">*</span>
+                                                </label>
+                                                <select x-model.number="serviceForm.event_child_service_id"
+                                                        class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
+                                                    <option value="">— выберите БП —</option>
+                                                    <template x-for="o in eventChildOptions" :key="o.id">
+                                                        <option :value="o.id" x-text="o.name"></option>
+                                                    </template>
+                                                </select>
+                                                <p class="mt-1 text-xs" :class="serviceForm.event_child_service_id ? 'text-slate-500' : 'text-amber-600'" x-text="eventChildHint"></p>
+                                                <p class="mt-1 text-xs text-slate-400" x-show="eventChildOptions.length === 0">
+                                                    Дочерним может быть только основной БП с периодичностью «По запросу». Сейчас таких нет.
+                                                </p>
+                                                <p class="mt-1 text-xs text-slate-400">
+                                                    Цепочка идёт на одну ступень: задача, рождённая по событию, сама уже ничего не рождает.
+                                                </p>
+
+                                                {{-- Дочерний, у которого самого включён тумблер: цепочка на нём и оборвётся.
+                                                     Без этой подсказки человек ждёт третью задачу, а её не будет. --}}
+                                                <template x-if="chainStopsAtChild">
+                                                    <div class="mt-2 flex items-start gap-2 px-3 py-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-700">
+                                                        <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+                                                        <span>
+                                                            У «<span x-text="chainStopsAtChild.name"></span>» тоже включено «По событию», дочерний там
+                                                            «<span x-text="chainStopsAtChild.event_child_name || '—'"></span>». Цепочка дальше не пойдёт:
+                                                            задача, которая родится здесь, сама уже ничего не создаст.
+                                                        </span>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </template>
+
+                                        {{-- Этот БП сам выбран чьим-то дочерним: тогда его задача сработает
+                                             триггером, только если её завели руками из каталога. --}}
+                                        <template x-if="serviceForm.triggers_on_event && eventParents.length > 0">
+                                            <div class="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-700">
+                                                <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+                                                <span>
+                                                    Этот БП сам выбран дочерним у «<span x-text="eventParents.map(p => p.name).join('», «')"></span>».
+                                                    Задача, которая придёт оттуда, дочернюю уже не создаст. Сработает только та, что заведена руками из каталога.
+                                                </span>
+                                            </div>
+                                        </template>
                                     </div>
                                 </template>
 
@@ -883,6 +959,44 @@ function servicesPage() {
             if (!this.isOnRequest) this.serviceForm.deadline_days = null;
         },
 
+        // ===== «По событию»: этот БП становится родителем и рождает задачу по дочернему =====
+        // Дочерним годится основной действующий БП с периодичностью «По запросу».
+        // Уже выбранный держим в списке всегда, даже если он перестал подходить:
+        // иначе открытие карточки молча стирало бы настройку.
+        get eventChildOptions() {
+            const names = this.periodicities.filter(p => p.kind === 'on_request').map(p => p.name);
+            const chosen = this.serviceForm.event_child_service_id;
+            return this.services
+                .filter(s => s.id !== this.serviceForm.id
+                    && (s.id === chosen || (!s.parent_id && s.is_active && !s.archived_at && names.includes(s.periodicity))))
+                .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
+        },
+        get eventChildHint() {
+            const chosen = this.eventChildOptions.find(o => o.id === this.serviceForm.event_child_service_id);
+            if (!chosen) return 'Без дочернего БП сохранить нельзя: включённое событие ничего не создаст.';
+            const days = chosen.deadline_days;
+            return 'Задачу по «' + chosen.name + '» получит тот, кто выполнил эту, '
+                + (days ? 'со сроком «день выполнения плюс ' + days + ' дн.»' : 'сроком на день выполнения: у дочернего БП не задан срок в днях')
+                + '.';
+        },
+        // Выбранный дочерний, у которого самого включено «По событию»: правило одной
+        // ступени оборвёт цепочку на нём, и об этом надо предупредить сразу в карточке.
+        get chainStopsAtChild() {
+            const chosen = this.eventChildOptions.find(o => o.id === this.serviceForm.event_child_service_id);
+            return chosen && chosen.triggers_on_event ? chosen : null;
+        },
+        // Кто выбрал этот БП своим дочерним. Тогда его собственный триггер сработает
+        // только у задачи, заведённой руками, а не у пришедшей от родителя.
+        get eventParents() {
+            if (!this.serviceForm.id) return [];
+            return this.services.filter(s => s.triggers_on_event && s.event_child_service_id === this.serviceForm.id);
+        },
+        toggleEventTrigger() {
+            this.serviceForm.triggers_on_event = !this.serviceForm.triggers_on_event;
+            // Выключили — гасим и выбор, чтобы от прежней настройки не осталось хвоста.
+            if (!this.serviceForm.triggers_on_event) this.serviceForm.event_child_service_id = null;
+        },
+
         get untypedCount() {
             return this.services.filter(s => !s.service_type).length;
         },
@@ -972,6 +1086,7 @@ function servicesPage() {
             sphere: '', service_group: '', business_process: '', category: '', service_type: '',
             cost: 0, rate_id: null, pricing_rules: [], use_tiered_pricing: false,
             periodicity: '', due_day: null, start_month: [], start_day: [], deadline_days: null, execution_minutes: null,
+            triggers_on_event: false, event_child_service_id: null,
             closing_rule: '', requires_document: false, check_type: '', requires_review: false, billing: '', comment: '',
             allows_quantity: false, splits_by_branch: false, flags: {}, children: [],
         },
@@ -1025,6 +1140,7 @@ function servicesPage() {
                     periodicity: svc.periodicity || '', due_day: svc.due_day || null,
                     start_month: Array.isArray(svc.start_month) ? svc.start_month : [], start_day: Array.isArray(svc.start_day) ? svc.start_day : [],
                     deadline_days: svc.deadline_days || null, execution_minutes: svc.execution_minutes || null,
+                    triggers_on_event: !!svc.triggers_on_event, event_child_service_id: svc.event_child_service_id ?? null,
                     closing_rule: svc.closing_rule || '', requires_document: !!svc.requires_document, check_type: svc.check_type || '', requires_review: !!svc.requires_review,
                     billing: svc.billing || '', comment: svc.comment || '',
                     allows_quantity: svc.allows_quantity || false,
@@ -1038,6 +1154,7 @@ function servicesPage() {
                     sphere: '', service_group: '', business_process: '', category: '', service_type: '',
                     cost: 0, rate_id: null, pricing_rules: [], use_tiered_pricing: false,
                     periodicity: '', due_day: null, start_month: [], start_day: [], deadline_days: null, execution_minutes: null,
+                    triggers_on_event: false, event_child_service_id: null,
                     closing_rule: '', requires_document: false, check_type: '', requires_review: false, billing: '', comment: '',
                     allows_quantity: false, splits_by_branch: false, flags: this.blankFlags(), children: [],
                 };
