@@ -36,6 +36,7 @@ class ClientController extends Controller
 
         return view('clients.index', [
             'clients' => $clients,
+            'clientRows' => $clients->map(fn ($c) => $this->clientRow($c)),
             'search' => $request->search,
             'filters' => $request->only(Client::FILTER_KEYS),
             // Всего клиентов без фильтров — для счётчика «Найдено N из M»
@@ -48,6 +49,30 @@ class ClientController extends Controller
             'canManageClients' => $seesEveryone,
             'canFilterByPerson' => $seesEveryone,
         ]);
+    }
+
+    /**
+     * Строка клиента для списка на экране.
+     *
+     * Одна на всех, кто этот список наполняет: первая отрисовка страницы, поиск
+     * с фильтрами и ответ на правку клиента. Разъедутся форматы — строка после
+     * сохранения станет отличаться от соседних, и заметят это не сразу.
+     */
+    private function clientRow(Client $client): array
+    {
+        return [
+            'id' => $client->id,
+            'name' => $client->name,
+            'inn' => $client->inn,
+            'tax_system_id' => $client->tax_system_id,
+            'tax_system_name' => $client->taxSystem?->name ?? '—',
+            'tariff_id' => $client->tariff_id,
+            'tariff_name' => $client->tariff?->name ?? '—',
+            'is_active' => $client->is_active,
+            'responsible_employee_id' => $client->responsible_employee_id,
+            'responsible_name' => $client->responsibleEmployee?->full_name ?? '—',
+            'estimate_items_count' => $client->estimate_root_items_count,
+        ];
     }
 
     public function search(Request $request)
@@ -63,21 +88,7 @@ class ClientController extends Controller
             ->orderBy('created_at', 'desc')
             ->orderBy('id', 'desc')
             ->get()
-            ->map(function ($client) {
-                return [
-                    'id' => $client->id,
-                    'name' => $client->name,
-                    'inn' => $client->inn,
-                    'tax_system_id' => $client->tax_system_id,
-                    'tax_system_name' => $client->taxSystem?->name ?? '—',
-                    'tariff_id' => $client->tariff_id,
-                    'tariff_name' => $client->tariff?->name ?? '—',
-                    'is_active' => $client->is_active,
-                    'responsible_employee_id' => $client->responsible_employee_id,
-                    'responsible_name' => $client->responsibleEmployee?->full_name ?? '—',
-                    'estimate_items_count' => $client->estimate_root_items_count,
-                ];
-            });
+            ->map(fn ($client) => $this->clientRow($client));
 
         return response()->json($clients);
     }
@@ -175,6 +186,19 @@ class ClientController extends Controller
             'is_active' => $request->boolean('is_active'),
             'notes' => $validated['notes'] ?? null,
         ]);
+
+        // Правка из списка идёт фоновым запросом: страница не перезагружается,
+        // поэтому прокрутка, поиск и фильтры остаются на месте. Со ста клиентами
+        // перезагрузка означала «листай вниз заново».
+        if ($request->expectsJson()) {
+            $client->load(['taxSystem', 'tariff', 'responsibleEmployee'])->loadCount('estimateRootItems');
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Данные клиента обновлены',
+                'client'  => $this->clientRow($client),
+            ]);
+        }
 
         return redirect()
             ->route('clients.index')

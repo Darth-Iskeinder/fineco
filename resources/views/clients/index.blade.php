@@ -15,6 +15,11 @@
     // optional chaining — при null Alpine падал бы с TypeError ещё до открытия. Держим объект
     // с полями под x-model; openEditModal() полностью заменяет его данными клиента.
     editClient: { tax_system_id: '', tariff_id: '', responsible_employee_id: '' },
+    // Ошибки правки и признак отправки: раньше и то и другое приезжало новой
+    // страницей, теперь живёт прямо в окне.
+    editErrors: [],
+    savingClient: false,
+    toast: { show: false, message: '' },
 
     init() {
         @if($errors->updateClient->isNotEmpty())
@@ -38,19 +43,7 @@
 
     // Live search
     searchQuery: '',
-    clients: @js($clients->map(fn($c) => [
-        'id' => $c->id,
-        'name' => $c->name,
-        'inn' => $c->inn,
-        'tax_system_id' => $c->tax_system_id,
-        'tax_system_name' => $c->taxSystem?->name ?? '—',
-        'tariff_id' => $c->tariff_id,
-        'tariff_name' => $c->tariff?->name ?? '—',
-        'is_active' => $c->is_active,
-        'responsible_employee_id' => $c->responsible_employee_id,
-        'responsible_name' => $c->responsibleEmployee?->full_name ?? '—',
-        'estimate_items_count' => $c->estimate_root_items_count,
-    ])),
+    clients: @js($clientRows),
     loading: false,
     searchTimeout: null,
 
@@ -176,7 +169,60 @@
     openEditModal(client) {
         // Нормализуем под select: null → '' (иначе пункт «Не назначено» не выберется)
         this.editClient = { ...client, responsible_employee_id: client.responsible_employee_id ?? '' };
+        this.editErrors = [];
         this.showEditModal = true;
+    },
+
+    /**
+     * Сохранение правки без перезагрузки страницы.
+     *
+     * Раньше форма уходила обычной отправкой, сервер отвечал редиректом, и список
+     * рисовался заново с самого верха. У фирмы со ста клиентами это означало
+     * «листай вниз заново» после каждой правки, а заодно слетали поиск и фильтры.
+     * Теперь строка подменяется на месте, страница не двигается.
+     */
+    async saveClient(event) {
+        if (this.savingClient) return;
+
+        this.savingClient = true;
+        this.editErrors = [];
+
+        const form = event.target;
+
+        try {
+            const response = await fetch(form.action, {
+                method: 'POST', // метод PUT приезжает скрытым полем _method, как и при обычной отправке
+                headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                body: new FormData(form),
+            });
+
+            if (response.status === 422) {
+                const data = await response.json();
+                this.editErrors = Object.values(data.errors ?? {}).flat();
+                return;
+            }
+
+            if (!response.ok) {
+                this.editErrors = ['Не удалось сохранить. Обновите страницу и попробуйте ещё раз.'];
+                return;
+            }
+
+            const data = await response.json();
+            const i = this.clients.findIndex(c => c.id === data.client.id);
+            if (i !== -1) this.clients[i] = data.client;
+
+            this.showEditModal = false;
+            this.showToast(data.message);
+        } catch {
+            this.editErrors = ['Сеть недоступна. Изменения не сохранены.'];
+        } finally {
+            this.savingClient = false;
+        }
+    },
+
+    showToast(message) {
+        this.toast = { show: true, message };
+        setTimeout(() => { this.toast.show = false; }, 3000);
     }
 }">
     <div class="sm:flex sm:items-center sm:justify-between mb-8">
@@ -699,10 +745,21 @@
                     </button>
                 </div>
 
-                <form :action="'/clients/' + editClient?.id" method="POST" class="overflow-y-auto max-h-[calc(90vh-140px)]">
+                <form :action="'/clients/' + editClient?.id" method="POST" @submit.prevent="saveClient($event)" class="overflow-y-auto max-h-[calc(90vh-140px)]">
                     @csrf
                     @method('PUT')
                     <input type="hidden" name="client_id" :value="editClient?.id">
+                    {{-- Ошибки приходят ответом на фоновый запрос. Блок ниже с $errors
+                         оставлен для случая, когда форма ушла обычной отправкой (без JS). --}}
+                    <template x-if="editErrors.length">
+                        <div class="mx-6 mt-4 p-4 bg-red-50 border border-red-200/50 rounded-xl">
+                            <ul class="text-sm text-red-700 space-y-1">
+                                <template x-for="(error, i) in editErrors" :key="i">
+                                    <li x-text="error"></li>
+                                </template>
+                            </ul>
+                        </div>
+                    </template>
                     @if($errors->updateClient->isNotEmpty())
                         <div class="mx-6 mt-4 p-4 bg-red-50 border border-red-200/50 rounded-xl">
                             <ul class="text-sm text-red-700 space-y-1">
@@ -770,11 +827,11 @@
                         <button @click="showEditModal = false" type="button" class="inline-flex items-center px-5 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 bg-white hover:bg-slate-50 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition-all duration-200">
                             Отмена
                         </button>
-                        <button type="submit" class="inline-flex items-center px-5 py-2.5 bg-gradient-to-r from-violet-500 to-indigo-600 text-white text-sm font-medium rounded-xl shadow-lg shadow-indigo-500/25 hover:shadow-xl hover:shadow-indigo-500/30 transition-all duration-200">
+                        <button type="submit" :disabled="savingClient" class="inline-flex items-center px-5 py-2.5 bg-gradient-to-r from-violet-500 to-indigo-600 text-white text-sm font-medium rounded-xl shadow-lg shadow-indigo-500/25 hover:shadow-xl hover:shadow-indigo-500/30 transition-all duration-200" :class="savingClient ? 'opacity-50' : ''">
                             <svg class="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                             </svg>
-                            Сохранить изменения
+                            <span x-text="savingClient ? 'Сохраняем…' : 'Сохранить изменения'"></span>
                         </button>
                     </div>
                 </form>
@@ -837,6 +894,23 @@
                 </div>
             </div>
         </div>
+    </div>
+
+    {{-- Подтверждение сохранения. Раньше его роль играло флеш-сообщение на новой
+         странице, но страница больше не перезагружается. --}}
+    <div x-show="toast.show"
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0 translate-y-2"
+         x-transition:enter-end="opacity-100 translate-y-0"
+         x-transition:leave="transition ease-in duration-150"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         class="fixed bottom-4 right-4 z-50 flex items-center gap-2 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200 shadow-lg"
+         style="display: none;">
+        <svg class="w-5 h-5 text-emerald-600 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+        </svg>
+        <span class="text-sm font-medium text-emerald-800" x-text="toast.message"></span>
     </div>
 </div>
 
