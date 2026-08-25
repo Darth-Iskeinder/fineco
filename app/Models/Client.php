@@ -458,7 +458,7 @@ class Client extends Model
      * Ключи фильтров списка клиентов — общий словарь для страницы, живого поиска
      * и выгрузки CSV. Контроллеры берут из запроса ровно их: $request->only(Client::FILTER_KEYS).
      */
-    public const FILTER_KEYS = ['search', 'responsible', 'tax_system', 'status'];
+    public const FILTER_KEYS = ['search', 'responsible', 'tax_system', 'status', 'organization_form'];
 
     /**
      * Фильтры списка клиентов. Один источник правды для страницы, /clients/search и
@@ -484,6 +484,7 @@ class Client extends Model
 
         $byId('responsible', 'responsible_employee_id');
         $byId('tax_system', 'tax_system_id');
+        $byId('organization_form', 'organization_form_id');
 
         $status = $filters['status'] ?? null;
         if (in_array($status, ['active', 'inactive'], true)) {

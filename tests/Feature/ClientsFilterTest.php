@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Client;
 use App\Models\Employee;
+use App\Models\OrganizationForm;
 use App\Models\Module;
 use App\Models\Role;
 use App\Models\TaxSystem;
@@ -131,6 +132,39 @@ class ClientsFilterTest extends TestCase
         $this->assertSame([$withSystem->name], $this->foundNames(['tax_system' => $taxSystem->id]));
         $this->assertContains($without->name, $this->foundNames(['tax_system' => 'none']));
         $this->assertNotContains($withSystem->name, $this->foundNames(['tax_system' => 'none']));
+    }
+
+    public function test_filters_by_organization_form(): void
+    {
+        $ip   = OrganizationForm::firstOrCreate(['name' => 'ИП Фильтр ' . uniqid()]);
+        $osoo = OrganizationForm::firstOrCreate(['name' => 'ОсОО Фильтр ' . uniqid()]);
+
+        $entrepreneur = $this->client(['organization_form_id' => $ip->id]);
+        $company      = $this->client(['organization_form_id' => $osoo->id]);
+        $unset        = $this->client(['organization_form_id' => null]);
+
+        $names = $this->foundNames(['organization_form' => $ip->id]);
+        $this->assertContains($entrepreneur->name, $names);
+        $this->assertNotContains($company->name, $names);
+
+        // «Не указана» — тот же приём, что у ответственного и режима налогообложения
+        $none = $this->foundNames(['organization_form' => 'none']);
+        $this->assertContains($unset->name, $none);
+        $this->assertNotContains($entrepreneur->name, $none);
+    }
+
+    /** Название формы едет вместе со строкой: под названием клиента его видно в списке. */
+    public function test_row_carries_organization_form_name(): void
+    {
+        $form   = OrganizationForm::firstOrCreate(['name' => 'Форма ' . uniqid()]);
+        $client = $this->client(['organization_form_id' => $form->id]);
+
+        $rows = $this->actingAs($this->viewer, 'employee')
+            ->getJson('/clients/search?' . http_build_query(['organization_form' => $form->id]))
+            ->assertOk()
+            ->json();
+
+        $this->assertSame($form->name, collect($rows)->firstWhere('id', $client->id)['organization_form_name']);
     }
 
     /** Фильтры складываются друг с другом и с текстовым поиском. */

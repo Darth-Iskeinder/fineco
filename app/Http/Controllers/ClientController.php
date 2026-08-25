@@ -6,6 +6,7 @@ use App\Models\Client;
 use App\Models\ClientDocument;
 use App\Models\ClientStatus;
 use App\Models\Employee;
+use App\Models\OrganizationForm;
 use App\Models\Tariff;
 use App\Models\TaxSystem;
 use App\Services\ClientTaskHistory;
@@ -23,7 +24,7 @@ class ClientController extends Controller
         // Вторичная сортировка по id: у импортированных клиентов created_at совпадает
         // с точностью до секунды, и без неё порядок «последний созданный сверху» плавает.
         $clients = Client::visibleTo($me)
-            ->with(['taxSystem', 'tariff', 'responsibleEmployee'])
+            ->with(['taxSystem', 'tariff', 'responsibleEmployee', 'organizationForm'])
             ->withCount('estimateRootItems')
             ->filter($request->only(Client::FILTER_KEYS))
             ->orderBy('created_at', 'desc')
@@ -46,6 +47,7 @@ class ClientController extends Controller
             // в модалке правки клиента. Скрыт от них только фильтр по ответственному.
             'employees' => Employee::active()->orderBy('full_name')->get(),
             'tariffs' => Tariff::active()->ordered()->get(),
+            'organizationForms' => OrganizationForm::orderBy('name')->get(['id', 'name']),
             'canManageClients' => $seesEveryone,
             'canFilterByPerson' => $seesEveryone,
         ]);
@@ -66,6 +68,10 @@ class ClientController extends Controller
             'inn' => $client->inn,
             'tax_system_id' => $client->tax_system_id,
             'tax_system_name' => $client->taxSystem?->name ?? '—',
+            'organization_form_id' => $client->organization_form_id,
+            // Пусто оставляем пустым, а не прочерком: форма показывается мелкой
+            // строкой под названием, и прочерк там был бы шумом.
+            'organization_form_name' => $client->organizationForm?->name,
             'tariff_id' => $client->tariff_id,
             'tariff_name' => $client->tariff?->name ?? '—',
             'is_active' => $client->is_active,
@@ -82,7 +88,7 @@ class ClientController extends Controller
         $filters['search'] = $filters['search'] ?? $request->get('q', '');
 
         $clients = Client::visibleTo(auth('employee')->user())
-            ->with(['taxSystem', 'tariff', 'responsibleEmployee'])
+            ->with(['taxSystem', 'tariff', 'responsibleEmployee', 'organizationForm'])
             ->withCount('estimateRootItems')
             ->filter($filters)
             ->orderBy('created_at', 'desc')
@@ -191,7 +197,7 @@ class ClientController extends Controller
         // поэтому прокрутка, поиск и фильтры остаются на месте. Со ста клиентами
         // перезагрузка означала «листай вниз заново».
         if ($request->expectsJson()) {
-            $client->load(['taxSystem', 'tariff', 'responsibleEmployee'])->loadCount('estimateRootItems');
+            $client->load(['taxSystem', 'tariff', 'responsibleEmployee', 'organizationForm'])->loadCount('estimateRootItems');
 
             return response()->json([
                 'success' => true,

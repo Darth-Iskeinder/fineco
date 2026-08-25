@@ -40,6 +40,7 @@
     allEmployees: @js($employees->map(fn($e) => ['id' => $e->id, 'name' => $e->full_name])),
     taxSystems: @js($taxSystems->map(fn($t) => ['id' => $t->id, 'name' => $t->name])),
     tariffs: @js($tariffs->map(fn($t) => ['id' => $t->id, 'name' => $t->name])),
+    organizationForms: @js($organizationForms),
 
     // Live search
     searchQuery: '',
@@ -53,6 +54,7 @@
         responsible: @js((string) ($filters['responsible'] ?? '')),
         status:      @js((string) ($filters['status'] ?? '')),
         tax_system:  @js((string) ($filters['tax_system'] ?? '')),
+        organization_form: @js((string) ($filters['organization_form'] ?? '')),
     },
 
     get isFiltered() {
@@ -72,6 +74,9 @@
 
         if (this.filters.tax_system === 'none') chips.push({ key: 'tax_system', label: 'Без СНО' });
         else if (this.filters.tax_system) chips.push({ key: 'tax_system', label: named(this.taxSystems, this.filters.tax_system) });
+
+        if (this.filters.organization_form === 'none') chips.push({ key: 'organization_form', label: 'Без формы' });
+        else if (this.filters.organization_form) chips.push({ key: 'organization_form', label: named(this.organizationForms, this.filters.organization_form) });
 
         if (this.searchQuery) chips.push({ key: 'search', label: '«' + this.searchQuery + '»' });
 
@@ -405,6 +410,16 @@
                     </template>
                 </select>
 
+                <select x-model="filters.organization_form" @change="applyFilters()"
+                        :class="filters.organization_form ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-slate-50/50 text-slate-600'"
+                        class="px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 transition-colors">
+                    <option value="">Форма: все</option>
+                    <option value="none">— не указана —</option>
+                    <template x-for="f in organizationForms" :key="f.id">
+                        <option :value="f.id" x-text="f.name"></option>
+                    </template>
+                </select>
+
             </div>
 
             {{-- Чипы применённых фильтров: видно, почему список короткий, и снимается в один клик --}}
@@ -496,7 +511,14 @@
                                         <div class="w-9 h-9 bg-gradient-to-br from-emerald-100 to-teal-100 rounded-xl flex items-center justify-center mr-3">
                                             <span class="text-sm font-semibold text-teal-600" x-text="client.name.charAt(0)"></span>
                                         </div>
-                                        <div class="text-sm font-medium text-slate-800 group-hover:text-indigo-600 transition-colors" x-text="client.name"></div>
+                                        <div>
+                                            <div class="text-sm font-medium text-slate-800 group-hover:text-indigo-600 transition-colors" x-text="client.name"></div>
+                                            {{-- Форма собственности мелкой строкой: по ней есть фильтр,
+                                                 и фильтровать по невидимому полю неудобно. Отдельную
+                                                 колонку не заводим, их в таблице и так много. --}}
+                                            <div x-show="client.organization_form_name"
+                                                 class="text-xs text-slate-400" x-text="client.organization_form_name"></div>
+                                        </div>
                                     </a>
                                     <!-- Смета собрана — ведёт сразу в смету. Нет позиций → бейджа нет вовсе. -->
                                     <a x-show="client.estimate_items_count > 0"
