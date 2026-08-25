@@ -5,6 +5,23 @@
 @source '../**/*.blade.php';
 @source '../**/*.js';
 
+/*
+ * Цвета характеристик бизнеса в карточке клиента.
+ *
+ * Классы там собираются из кусков: 'bg-' + opt.color + '-500'. Сканер Tailwind
+ * читает исходники текстом и такую склейку не видит, поэтому правило просто не
+ * попадает в сборку. В разметке класс стоит, а цвета нет: тумблер «Учёт ГСМ»
+ * оставался белым, и понять, включён он или нет, было нельзя.
+ *
+ * Синему повезло: его оттенки набрались из других мест. Жёлтому и зелёному нет.
+ *
+ * Добавляете новую характеристику с цветом — допишите цвет сюда, иначе она
+ * молча останется бесцветной.
+ */
+@source inline("{bg,text,border}-{blue,yellow,green}-{50,100,200,400,500,600,700}");
+@source inline("focus:border-{blue,yellow,green}-400");
+@source inline("focus:ring-{blue,yellow,green}-500/20");
+
 @theme {
     --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
         'Segoe UI Symbol', 'Noto Color Emoji';
