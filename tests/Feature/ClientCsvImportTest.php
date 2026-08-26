@@ -11,6 +11,7 @@ use App\Models\Employee;
 use App\Models\Module;
 use App\Models\Role;
 use App\Models\Tariff;
+use App\Models\TaxSystem;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Http\UploadedFile;
 use Tests\TestCase;
@@ -176,21 +177,75 @@ class ClientCsvImportTest extends TestCase
         $this->assertSame($newName, $client->refresh()->name);
     }
 
+    /**
+     * Строгие справочники: незнакомое значение отбивает строку и само в
+     * справочник не заводится. Здесь это режим налогообложения — от него зависит,
+     * какие БП подтянутся клиенту в смету.
+     */
     public function test_unknown_reference_book_value_is_an_error_not_a_new_entry(): void
     {
         $who    = $this->importer();
-        $before = ActivityType::count();
+        $before = TaxSystem::count();
 
         [$response] = $this->preview($who, $this->csv(
-            [";Клиент {$this->inn()};{$this->inn()};Вида-которого-нет;;да;;"],
-            'id;Название;ИНН;Вид деятельности;Ответственный;Активен;Телефон;Заметка',
+            [";Клиент {$this->inn()};{$this->inn()};Режима-которого-нет;;да;;"],
+            'id;Название;ИНН;Режим налогообложения;Ответственный;Активен;Телефон;Заметка',
         ));
 
         $plan = $response->viewData('plan');
 
         $this->assertSame('error', $plan[0]['verdict']);
-        $this->assertStringContainsString('Вид деятельности', $plan[0]['reason']);
+        $this->assertStringContainsString('Режим налогообложения', $plan[0]['reason']);
+        $this->assertSame($before, TaxSystem::count(), 'Справочник пополнился сам собой');
+    }
+
+    /**
+     * Вид деятельности ни на что в системе не влияет, поэтому чужое название не
+     * повод терять клиента: строка грузится, поле остаётся пустым, справочник
+     * сам собой не пополняется.
+     */
+    public function test_unknown_activity_type_is_skipped_instead_of_rejecting_the_row(): void
+    {
+        $who    = $this->importer();
+        $before = ActivityType::count();
+        $inn    = $this->inn();
+
+        [$response, $token] = $this->preview($who, $this->csv(
+            [";Клиент {$inn};{$inn};Вида-которого-нет;;да;;"],
+            'id;Название;ИНН;Вид деятельности;Ответственный;Активен;Телефон;Заметка',
+        ));
+
+        $plan = $response->viewData('plan');
+
+        $this->assertSame('create', $plan[0]['verdict'], 'Строка отбита из-за вида деятельности: ' . $plan[0]['reason']);
+        $this->assertArrayNotHasKey('activity_type_id', $plan[0]['attributes']);
         $this->assertSame($before, ActivityType::count(), 'Справочник пополнился сам собой');
+
+        $this->actingAs($who, 'employee')
+            ->post("/clients/import/{$token}/apply", ['update_existing' => 0])
+            ->assertRedirect(route('clients.index'));
+
+        $this->assertNull(Client::where('inn', $inn)->value('activity_type_id'));
+    }
+
+    /**
+     * Известный вид деятельности по-прежнему подставляется: мягкость касается
+     * только незнакомых значений.
+     */
+    public function test_known_activity_type_is_still_filled(): void
+    {
+        $who      = $this->importer();
+        $inn      = $this->inn();
+        $activity = ActivityType::create(['name' => 'Торговля ' . uniqid(), 'code' => uniqid('act_'), 'is_active' => true]);
+
+        [$response] = $this->preview($who, $this->csv(
+            [";Клиент {$inn};{$inn};{$activity->name};;да;;"],
+            'id;Название;ИНН;Вид деятельности;Ответственный;Активен;Телефон;Заметка',
+        ));
+
+        $plan = $response->viewData('plan');
+
+        $this->assertSame($activity->id, $plan[0]['attributes']['activity_type_id']);
     }
 
     /**
