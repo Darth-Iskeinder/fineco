@@ -307,7 +307,11 @@
              уезжает вся вёрстка вместе с меню. С ним прокручивается только сам широкий блок. --}}
         <div class="flex-1 min-w-0 ml-72 flex flex-col">
             <!-- Header -->
-            <header class="h-16 bg-white/80 backdrop-blur-xl border-b border-slate-200/50 flex items-center justify-between px-6 sticky top-0 z-10">
+            {{-- z-40, а не z-10: шапка со своим z-index создаёт слой, и всё внутри неё,
+                 включая меню профиля, живёт внутри этого слоя. С z-10 закреплённая
+                 строка заголовков широких таблиц (у неё z-20, у угловой ячейки z-30)
+                 перекрывала раскрытое меню. Выше только модалки, они на z-50. --}}
+            <header class="h-16 bg-white/80 backdrop-blur-xl border-b border-slate-200/50 flex items-center justify-between px-6 sticky top-0 z-40">
                 <div>
                     <h1 class="text-lg font-semibold text-slate-800">@yield('page-title', 'Kubik')</h1>
                 </div>

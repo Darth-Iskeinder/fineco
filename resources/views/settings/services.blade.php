@@ -155,42 +155,49 @@ $servicesJson = $services->map(fn($s) => array_merge([
                             {{-- Закреплённая колонка: фон обязателен и должен быть непрозрачным,
                                  иначе под неё будут просвечивать уезжающие ячейки. --}}
                             {{-- Ширина фиксирована: колонка закреплена и не должна съедать экран.
-                                 Длинное название обрезается (полное — в подсказке), метки условий
-                                 переносятся на следующую строку. --}}
+                                 Название занимает верхнюю строку целиком и переносится на вторую,
+                                 метки условий уходят под него. --}}
                             <td class="px-4 py-3 text-sm font-semibold text-slate-900 sticky left-0 z-10 border-r border-slate-200"
                                 :class="selectedRowId === 's' + row.svc.id ? 'bg-indigo-50' : 'bg-white group-hover:bg-slate-50'">
-                                <div class="flex flex-wrap items-center gap-1 w-64">
-                                    {{-- Подпункты свёрнуты: у БП их бывает по пять штук, и раскрытыми
-                                         они раздували список так, что сами БП терялись. Цифра у стрелки
-                                         показывает, сколько внутри, чтобы не раскрывать ради проверки. --}}
-                                    <button type="button" x-show="(row.svc.children || []).length > 0"
-                                            @click.stop="toggleChildren(row.svc.id)"
-                                            :title="childrenVisible(row.svc) ? 'Свернуть подпункты' : 'Показать подпункты'"
-                                            class="flex items-center gap-0.5 -ml-1 px-1 py-0.5 rounded text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors flex-shrink-0">
-                                        <svg class="w-3.5 h-3.5 transition-transform" :class="childrenVisible(row.svc) ? 'rotate-90' : ''"
-                                             fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                                        <span class="text-xs font-medium" x-text="(row.svc.children || []).length"></span>
-                                    </button>
-                                    {{-- У БП без подпунктов место под стрелку остаётся: иначе названия
-                                         в колонке скакали бы влево-вправо от строки к строке. --}}
-                                    <span x-show="(row.svc.children || []).length === 0" class="w-3.5 flex-shrink-0"></span>
-                                    <span class="truncate max-w-full" :class="row.svc.archived_at ? 'text-slate-400' : ''" :title="row.svc.name" x-text="row.svc.name"></span>
-                                    {{-- Архивный БП остаётся в списке: он часть истории, по нему
-                                         доделывают незакрытое. Отличаем пометкой, а не пряча. --}}
-                                    <span x-show="row.svc.archived_at" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-slate-200 text-slate-600">архивный</span>
-                                    <span x-show="row.svc.active_from" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700"
-                                          :title="'Задачи по нему пойдут с ' + formatDate(row.svc.active_from)"
-                                          x-text="'с ' + formatDate(row.svc.active_from)"></span>
-                                    <span x-show="row.svc.service_type" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700"
-                                          title="Тип обслуживания" x-text="serviceTypeOptions[row.svc.service_type] || row.svc.service_type"></span>
-                                    <span x-show="row.svc.allows_quantity" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">кол-во</span>
-                                    <span x-show="row.svc.splits_by_branch" class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
-                                        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 6h4"/></svg>
-                                        по филиалам
-                                    </span>
-                                    <template x-for="f in specialFlags" :key="f.key">
-                                        <span x-show="row.svc[f.key]" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium" :class="'bg-' + f.color + '-100 text-' + f.color + '-700'" x-text="f.label"></span>
-                                    </template>
+                                <div class="w-80">
+                                    <div class="flex items-start gap-1">
+                                        {{-- Подпункты свёрнуты: у БП их бывает по пять штук, и раскрытыми
+                                             они раздували список так, что сами БП терялись. Цифра у стрелки
+                                             показывает, сколько внутри, чтобы не раскрывать ради проверки. --}}
+                                        <button type="button" x-show="(row.svc.children || []).length > 0"
+                                                @click.stop="toggleChildren(row.svc.id)"
+                                                :title="childrenVisible(row.svc) ? 'Свернуть подпункты' : 'Показать подпункты'"
+                                                class="flex items-center gap-0.5 -ml-1 px-1 rounded text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors flex-shrink-0">
+                                            <svg class="w-3.5 h-3.5 transition-transform" :class="childrenVisible(row.svc) ? 'rotate-90' : ''"
+                                                 fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                                            <span class="text-xs font-medium" x-text="(row.svc.children || []).length"></span>
+                                        </button>
+                                        {{-- У БП без подпунктов место под стрелку остаётся: иначе названия
+                                             в колонке скакали бы влево-вправо от строки к строке. --}}
+                                        <span x-show="(row.svc.children || []).length === 0" class="w-3.5 flex-shrink-0"></span>
+                                        <span class="line-clamp-2 break-words" :class="row.svc.archived_at ? 'text-slate-400' : ''" :title="row.svc.name" x-text="row.svc.name"></span>
+                                    </div>
+
+                                    {{-- Метки строкой ниже и только если они есть: пустая строка добавляла
+                                         бы каждой записи лишнюю высоту. --}}
+                                    <div class="flex flex-wrap items-center gap-1 mt-1 pl-4 font-normal" x-show="hasBadges(row.svc)">
+                                        {{-- Архивный БП остаётся в списке: он часть истории, по нему
+                                             доделывают незакрытое. Отличаем пометкой, а не пряча. --}}
+                                        <span x-show="row.svc.archived_at" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-slate-200 text-slate-600">архивный</span>
+                                        <span x-show="row.svc.active_from" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700"
+                                              :title="'Задачи по нему пойдут с ' + formatDate(row.svc.active_from)"
+                                              x-text="'с ' + formatDate(row.svc.active_from)"></span>
+                                        <span x-show="row.svc.service_type" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-700"
+                                              title="Тип обслуживания" x-text="serviceTypeOptions[row.svc.service_type] || row.svc.service_type"></span>
+                                        <span x-show="row.svc.allows_quantity" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">кол-во</span>
+                                        <span x-show="row.svc.splits_by_branch" class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
+                                            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 6h4"/></svg>
+                                            по филиалам
+                                        </span>
+                                        <template x-for="f in specialFlags" :key="f.key">
+                                            <span x-show="row.svc[f.key]" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium" :class="'bg-' + f.color + '-100 text-' + f.color + '-700'" x-text="f.label"></span>
+                                        </template>
+                                    </div>
                                 </div>
                             </td>
                             <td class="px-4 py-3 text-sm text-slate-500 whitespace-nowrap" x-text="row.svc.sphere || '—'"></td>
@@ -264,7 +271,7 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                 class="group cursor-pointer select-none">
                                 <td class="pl-10 pr-4 py-2.5 text-sm text-slate-600 sticky left-0 z-10 border-r border-slate-200"
                                     :class="selectedRowId === 'c' + child.id ? 'bg-indigo-100' : 'bg-slate-50'">
-                                    <div class="flex items-center gap-1.5 w-56">
+                                    <div class="flex items-center gap-1.5 w-[18.5rem]">
                                         <svg class="w-3 h-3 text-slate-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
                                         <span class="truncate" :title="child.name" x-text="child.name"></span>
                                         <span x-show="child.allows_quantity" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 flex-shrink-0">кол-во</span>
@@ -1031,6 +1038,18 @@ function servicesPage() {
          * Во время поиска БП находится и по названию подпункта — такой раскрываем
          * сами, иначе непонятно, почему строка вообще нашлась.
          */
+        /**
+         * Есть ли у БП метки. Нужно, чтобы не рисовать под названием пустую
+         * строку: она добавляла бы высоту каждой записи без единой метки.
+         */
+        hasBadges(svc) {
+            return Boolean(
+                svc.archived_at || svc.active_from || svc.service_type
+                || svc.allows_quantity || svc.splits_by_branch
+                || this.specialFlags.some(f => svc[f.key])
+            );
+        },
+
         childrenVisible(svc) {
             const q = this.searchQuery.trim().toLowerCase();
 
