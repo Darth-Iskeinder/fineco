@@ -13,6 +13,7 @@
     {{ $client->id }},
     {{ json_encode($tariffBPs) }},
     {{ json_encode($extras) }},
+    {{ json_encode($closed) }},
     {{ json_encode($estimate->notes ?? '') }},
     {{ json_encode($estimate->updated_at?->format('d.m.Y H:i')) }},
     {{ json_encode($allServices) }},
@@ -73,6 +74,27 @@
     </div>
     @endif
 
+    {{-- Смена режима налогообложения.
+         Плашка сообщает факт, а не судит о составе сметы: процесс, оставленный
+         намеренно, её не поднимает. Живёт не меньше двух недель и не пропадает
+         раньше начала следующего месяца, дату исчезновения называет сама. --}}
+    @if($taxSystemChange)
+    <div class="mb-6 flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3">
+        <svg class="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+        <div class="text-sm text-amber-800 space-y-1">
+            <p>
+                <span class="font-semibold">Режим налогообложения сменён: {{ $taxSystemChange['from'] }} → {{ $taxSystemChange['to'] }}, {{ $taxSystemChange['changed_at'] }}.</span>
+            </p>
+            <p>
+                Задачи идут по тому, что включено в смете, само ничего не переключилось.
+                Включите процессы нового режима и выключите те, что больше не ведёте:
+                история по ним сохранится.
+            </p>
+            <p class="text-amber-700">Напоминание пропадёт {{ $taxSystemChange['until'] }}.</p>
+        </div>
+    </div>
+    @endif
+
     {{-- ШАГ 1. Каркас: две колонки ~70% / 30%. Правая — sticky. --}}
     <div class="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-6 items-start">
 
@@ -104,9 +126,17 @@
                 </template>
             </template>
 
+            {{-- Пустой блок. Про тариф тут говорить нельзя: на подбор БП он не влияет
+                 совсем, только на цену. Список собирает ClientServiceCatalog по режиму
+                 налогообложения, категории и признакам бизнеса, про них и пишем.
+                 Иначе человек идёт заводить тариф и ничего этим не добивается. --}}
             <template x-if="tariffBPs.length === 0">
                 <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 px-6 py-8 text-center text-slate-400 text-sm">
-                    У клиента не выбран тариф или в тарифе нет бизнес-процессов.
+                    Клиенту не подтянулось ни одного бизнес-процесса.
+                    <div class="mt-2 text-slate-500">
+                        Проверьте режим налогообложения у клиента и разметку каталога:
+                        БП подтягиваются по режиму, по категории «Обязательная» и по признакам бизнеса.
+                    </div>
                     @if (!empty($serviceScopeLabels))
                         {{-- Пустой список у клиента с урезанным обслуживанием почти всегда
                              означает не поломку, а неразмеченный каталог. --}}
@@ -219,6 +249,39 @@
                     </template>
                 </div>
             </div>
+
+            <!-- Завершённые БП: в работе их нет, история по ним осталась -->
+            <template x-if="closed.length > 0">
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
+                    <div class="px-6 py-4 border-b border-slate-100">
+                        <h2 class="text-base font-semibold text-slate-800">Завершённые</h2>
+                        <p class="text-sm text-slate-500 mt-0.5">
+                            Новых задач по ним нет. Незакрытые задачи прошлых месяцев и вся история остаются на месте.
+                        </p>
+                    </div>
+                    <div class="divide-y divide-slate-100">
+                        <template x-for="(row, cIdx) in closed" :key="row.id">
+                            <div class="flex flex-wrap items-center gap-3 px-6 py-4">
+                                <div class="min-w-0 flex-1">
+                                    <div class="text-sm text-slate-500">
+                                        <span x-text="row.name"></span>
+                                        <span x-show="row.branch_label" class="text-slate-400" x-text="' — ' + row.branch_label"></span>
+                                    </div>
+                                    <div class="text-xs text-slate-400 mt-0.5" x-text="row.periodicity"></div>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <label class="text-xs text-slate-500" :for="'closed_' + row.id">Задачи по</label>
+                                    {{-- Дата правится руками: у квартальных и годовых БП последняя
+                                         декларация за отработанный период сдаётся уже после закрытия. --}}
+                                    <input type="date" :id="'closed_' + row.id" x-model="row.tasks_end_at"
+                                           class="px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
+
 
             <!-- Примечания -->
             <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 p-6">
@@ -575,11 +638,13 @@
 </div>
 
 <script>
-function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedAt, allServices, specialFlags, periodicities, canAssign, assigneeOptions) {
+function estimatePage(clientId, tariffBPs, extras, closed, initialNotes, initialUpdatedAt, allServices, specialFlags, periodicities, canAssign, assigneeOptions) {
     return {
         clientId,
         tariffBPs,
         extras,
+        // Завершённые БП: в работе их уже нет, но история по ним осталась.
+        closed,
         notes: initialNotes,
         updatedAt: initialUpdatedAt,
         allServices,
@@ -957,6 +1022,7 @@ function estimatePage(clientId, tariffBPs, extras, initialNotes, initialUpdatedA
                         notes:      this.notes,
                         tariff_bps: this.tariffBPs,
                         extras:     this.extras,
+                        closed:     this.closed.map(c => ({ id: c.id, tasks_end_at: c.tasks_end_at })),
                     }),
                 });
                 const data = await res.json();

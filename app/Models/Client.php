@@ -134,6 +134,33 @@ class Client extends Model
         'serves_payroll' => true,
     ];
 
+    /**
+     * Смену режима налогообложения запоминаем сами: по ней смета показывает
+     * напоминание пройтись по составу БП, потому что само ничего не переключается.
+     *
+     * Пишем в модели, а не в контроллерах: смену делают из карточки, из попапа на
+     * списке клиентов и из импорта, и забыть одно из мест слишком легко.
+     */
+    protected static function booted(): void
+    {
+        static::updating(function (Client $client) {
+            if (!$client->isDirty('tax_system_id')) {
+                return;
+            }
+
+            $previous = $client->getOriginal('tax_system_id');
+
+            // Первое заполнение режима сменой не считаем: «нет → ОСНО» никого
+            // ни о чём не предупреждает, у такого клиента и сметы обычно ещё нет.
+            if (!$previous) {
+                return;
+            }
+
+            $client->previous_tax_system_id = $previous;
+            $client->tax_system_changed_at  = CarbonImmutable::now()->startOfDay();
+        });
+    }
+
     protected $casts = [
         'is_active' => 'boolean',
         'its_enabled' => 'boolean',
@@ -184,6 +211,7 @@ class Client extends Model
         'service_end_date' => 'date',
         'power_of_attorney_expires' => 'date',
         'eds_expires' => 'date',
+        'tax_system_changed_at' => 'date',
         // JSON поля
         'power_of_attorney_name' => 'array',
         'founding_docs_urls' => 'array',
@@ -286,6 +314,12 @@ class Client extends Model
     public function taxSystem(): BelongsTo
     {
         return $this->belongsTo(TaxSystem::class);
+    }
+
+    /** Режим, который был у клиента до последней смены. */
+    public function previousTaxSystem(): BelongsTo
+    {
+        return $this->belongsTo(TaxSystem::class, 'previous_tax_system_id');
     }
 
     public function activityType(): BelongsTo
@@ -571,6 +605,34 @@ class Client extends Model
     // =============================================
     // МЕТОДЫ
     // =============================================
+
+    /**
+     * До какого дня в смете висит напоминание о смене режима налогообложения.
+     *
+     * Не меньше двух недель и не раньше начала следующего месяца: задачи по
+     * обновлённой смете пойдут с 1 числа, и до этого дня напоминание нужно.
+     * Смена 3 августа держит его до 1 сентября, смена 30 августа до 13 сентября.
+     */
+    public function taxSystemNoticeUntil(): ?CarbonImmutable
+    {
+        if (!$this->tax_system_changed_at) {
+            return null;
+        }
+
+        $changed   = CarbonImmutable::parse($this->tax_system_changed_at)->startOfDay();
+        $twoWeeks  = $changed->addDays(14);
+        $nextMonth = $changed->addMonth()->startOfMonth();
+
+        return $twoWeeks->gt($nextMonth) ? $twoWeeks : $nextMonth;
+    }
+
+    /** Показывать ли в смете напоминание о смене режима. */
+    public function showsTaxSystemNotice(): bool
+    {
+        $until = $this->taxSystemNoticeUntil();
+
+        return $until !== null && CarbonImmutable::now()->startOfDay()->lt($until);
+    }
 
     /**
      * Проверка истекает ли ЭЦП в ближайшие N дней

@@ -309,6 +309,14 @@ class BuhTasksController extends Controller
                     $itemFloor = $addedFrom->gt($itemFloor) ? $addedFrom : $itemFloor;
                 }
 
+                // Верхняя граница позиции: БП у клиента закончился (сменился режим
+                // налогообложения, отказались от услуги). Новых задач после неё нет,
+                // а всё, что было до, остаётся на месте — и выполненное, и просроченное.
+                $itemCeiling = $clientHorizon;
+                if ($closedAt = $item->tasksEndAt()) {
+                    $itemCeiling = $closedAt->lt($itemCeiling) ? $closedAt : $itemCeiling;
+                }
+
                 $occurrences = [];
                 if ($hasSchedule) {
                     // Окно клиента пересекаем с рабочим периодом самого БП: у архивного
@@ -316,12 +324,12 @@ class BuhTasksController extends Controller
                     // месяца после возврата. У действующих БП обе границы пусты.
                     [$bpFrom, $bpTo] = $service->workPeriod();
                     $itemStart = $bpFrom && $bpFrom->gt($itemFloor) ? $bpFrom : $itemFloor;
-                    $itemEnd   = $bpTo && $bpTo->lt($clientHorizon) ? $bpTo : $clientHorizon;
+                    $itemEnd   = $bpTo && $bpTo->lt($itemCeiling) ? $bpTo : $itemCeiling;
 
                     foreach ($itemEnd->lt($itemStart) ? [] : $service->dueDatesForClient($override, $itemStart, $itemEnd) as $due) {
                         $occurrences[] = [$due->year, $due->month, $due->toDateString(), (int) $due->day, $due];
                     }
-                } elseif ($curStart->gte($itemFloor) && $curStart->lte($clientHorizon)) {
+                } elseif ($curStart->gte($itemFloor) && $curStart->lte($itemCeiling)) {
                     // Позиции без расписания — задача текущего месяца. В холостой месяц
                     // (смета только что заведена) их тоже не показываем.
                     $dueDay = $item->due_day ? min((int) $item->due_day, $curStart->daysInMonth) : null;

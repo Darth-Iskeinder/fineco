@@ -28,6 +28,7 @@ class EstimateItem extends Model
         'total',
         'sort_order',
         'tasks_start_from',
+        'tasks_end_at',
     ];
 
     protected $casts = [
@@ -35,6 +36,7 @@ class EstimateItem extends Model
         'total'            => 'decimal:2',
         'due_day'          => 'integer',
         'tasks_start_from' => 'date',
+        'tasks_end_at'     => 'date',
     ];
 
     /**
@@ -60,6 +62,37 @@ class EstimateItem extends Model
         return $this->tasks_start_from
             ? CarbonImmutable::parse($this->tasks_start_from)->startOfDay()
             : null;
+    }
+
+    /**
+     * Каким числом закрывается позиция, которую выключают прямо сейчас.
+     *
+     * Конец текущего месяца: месяц уже отработан по-старому, его задачи и сроки
+     * должны остаться. Для квартальных и годовых БП дату потом правят руками —
+     * последняя декларация за отработанный период сдаётся уже после закрытия.
+     */
+    public static function tasksEndForClosing(): CarbonImmutable
+    {
+        return CarbonImmutable::now()->endOfMonth()->startOfDay();
+    }
+
+    /**
+     * Верхняя граница задач этой позиции, если она задана.
+     *
+     * Пусто у всего действующего. Заполнена у позиций, которые выключили в смете,
+     * но не удалили: по ним есть история выполнения, и она должна пережить выключение.
+     */
+    public function tasksEndAt(): ?CarbonImmutable
+    {
+        return $this->tasks_end_at
+            ? CarbonImmutable::parse($this->tasks_end_at)->endOfDay()
+            : null;
+    }
+
+    /** Позиция закрыта: новые задачи по ней не появляются, старые остаются. */
+    public function isClosed(): bool
+    {
+        return $this->tasks_end_at !== null;
     }
 
     public function estimate(): BelongsTo

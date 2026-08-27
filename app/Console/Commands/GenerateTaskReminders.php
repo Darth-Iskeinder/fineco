@@ -171,6 +171,11 @@ class GenerateTaskReminders extends Command
                     $itemFrom = $addedFrom->gt($itemFrom) ? $addedFrom : $itemFrom;
                 }
 
+                // Закрытая позиция (БП у клиента закончился) новых напоминаний не даёт.
+                if ($closedAt = $item->tasksEndAt()) {
+                    $itemTo = $closedAt->lt($itemTo) ? $closedAt : $itemTo;
+                }
+
                 if ($itemTo->lt($itemFrom)) {
                     continue; // БП вне работы в этом окне — заводить нечего
                 }

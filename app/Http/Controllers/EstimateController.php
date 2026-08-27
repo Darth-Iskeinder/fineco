@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\BuhTaskLog;
 use App\Models\Client;
 use App\Models\Employee;
 use App\Models\Estimate;
@@ -11,6 +12,7 @@ use App\Models\Service;
 use App\Services\ClientServiceCatalog;
 use App\Services\PricingCalculator;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
@@ -193,7 +195,12 @@ class EstimateController extends Controller
         // добавленная вручную: показываем её в блоке доп. услуг, а не теряем.
         $savedByKey  = collect();
         $extraItems  = collect();
-        foreach ($estimate->rootItems as $item) {
+        // Закрытые позиции (БП у клиента закончился) в разборе не участвуют: они не
+        // тарифные и не доп. услуги, а отдельный блок «Завершённые». Если их не
+        // отделить, тумблер такого БП оказался бы включён, а сохранение сняло бы
+        // дату закрытия и БП молча вернулся бы в работу.
+        $closedItems = $estimate->rootItems->filter(fn ($i) => $i->isClosed())->values();
+        foreach ($estimate->rootItems->reject(fn ($i) => $i->isClosed()) as $item) {
             $key = $item->service_id . ':' . ($item->tax_office_code ?? '');
             $isTariffRow = $item->type === 'recurring'
                 && $item->service_id !== null
@@ -255,6 +262,39 @@ class EstimateController extends Controller
                     ])->values()->toArray(),
                 ];
             })->values()->toArray();
+
+        // Напоминание о смене режима налогообложения.
+        //
+        // Сообщаем факт, а не строим догадки по составу сметы: догадка ругалась и на
+        // процессы, которые оставили намеренно, а отличить их в данных нельзя.
+        // Само ничего не переключается, поэтому смету должен пройти человек.
+        $months = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+                   'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+        $dayLabel = fn ($date) => $date->day . ' ' . $months[$date->month - 1];
+
+        $taxSystemChange = null;
+        if ($client->showsTaxSystemNotice()) {
+            $changedAt = CarbonImmutable::parse($client->tax_system_changed_at);
+            $until     = $client->taxSystemNoticeUntil();
+
+            $taxSystemChange = [
+                'from'       => $client->previousTaxSystem?->name ?? 'не указан',
+                'to'         => $client->taxSystem?->name ?? 'не указан',
+                'changed_at' => $dayLabel($changedAt),
+                'until'      => $dayLabel($until),
+            ];
+        }
+
+        // Завершённые позиции: показываем отдельным блоком, чтобы было видно, что БП
+        // не пропал, а закончился, и чтобы дату можно было поправить (у квартальных
+        // и годовых последняя декларация сдаётся уже после закрытия).
+        $closed = $closedItems->map(fn ($item) => [
+            'id'           => $item->id,
+            'name'         => $item->name,
+            'branch_label' => $item->branch_label,
+            'periodicity'  => $item->periodicity ?? '',
+            'tasks_end_at' => $item->tasks_end_at?->toDateString(),
+        ])->values()->toArray();
 
         // All catalog BPs for "add extra" modal (root only, with children)
         $allServices = Service::with(['children.rate', 'rate'])
@@ -323,18 +363,16 @@ class EstimateController extends Controller
             ->values()->toArray();
 
         // Подпись для предупреждения перед сохранением: с какого дня пойдут задачи
-        // по тому, что добавят сейчас. Локаль приложения — en, месяц склоняем сами.
+        // по тому, что добавят сейчас. Месяц склоняем сами ($months выше): локаль en.
         $tasksStart = EstimateItem::tasksStartForNew();
-        $months     = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
-                       'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
-        $tasksStartLabel = $tasksStart->day . ' ' . $months[$tasksStart->month - 1] . ' ' . $tasksStart->year;
+        $tasksStartLabel = $dayLabel($tasksStart) . ' ' . $tasksStart->year;
 
         // Урезанный тип обслуживания объясняет, почему БП меньше, чем ожидали.
         // У клиента на полном обслуживании список пуст, и подсказка не показывается.
         $serviceScopeLabels = $client->servesEverything() ? [] : $client->serviceTypeLabels();
 
         return view('clients.estimate', compact(
-            'client', 'estimate', 'tariffBPs', 'extras', 'allServices', 'specialFlags',
+            'client', 'estimate', 'tariffBPs', 'extras', 'closed', 'taxSystemChange', 'allServices', 'specialFlags',
             'estimateHasItems', 'periodicities', 'canAssign', 'assigneeOptions', 'tasksStartLabel',
             'serviceScopeLabels'
         ));
@@ -380,6 +418,10 @@ class EstimateController extends Controller
             'extras.*.cost'                        => 'nullable|numeric|min:0',
             'extras.*.quantity'                    => 'nullable|integer|min:1',
             'extras.*.assignee_id'                 => 'nullable|integer|exists:employees,id',
+            // Завершённые позиции присылаются отдельно: у них правится только дата.
+            'closed'                               => 'nullable|array',
+            'closed.*.id'                          => 'required|integer',
+            'closed.*.tasks_end_at'                => 'required|date',
         ]);
 
         return DB::transaction(function () use ($request, $client) {
@@ -460,6 +502,13 @@ class EstimateController extends Controller
 
                 if ($existing) {
                     // Обновление на месте: границу задач не трогаем — БП уже ведут.
+                    // Кроме одного случая: включили завершённый БП, то есть вернули
+                    // его в работу. Тогда дату закрытия снимаем, а задачи, как и у
+                    // новой позиции, идут со следующего месяца, а не задним числом.
+                    if ($existing->isClosed()) {
+                        $attrs['tasks_end_at']     = null;
+                        $attrs['tasks_start_from'] = EstimateItem::tasksStartForNew()->toDateString();
+                    }
                     $existing->update($attrs);
                     $parent = $existing;
                 } else {
@@ -625,12 +674,60 @@ class EstimateController extends Controller
                 $keptRootIds[] = $parent->id;
             }
 
-            // Удаляем корневые позиции, которых больше нет в присланных, и их подпункты
-            // (buh_task_logs этих позиций уходят каскадом — БП/подпункт убрали из сметы).
+            // Позиции, которых больше нет в присланных: часть закрываем датой, часть удаляем.
+            //
+            // Закрываем те, по которым есть хоть одна отметка о выполнении: у логов
+            // внешний ключ на позицию с каскадным удалением, и удаление стёрло бы всю
+            // историю за прошлые месяцы. Такое бывает при каждой смене режима
+            // налогообложения, а история нужна.
+            //
+            // Удаляем те, где истории нет: БП добавили в смету и передумали, терять нечего.
             $removedRootIds = $existingRoots->pluck('id')->diff($keptRootIds)->values();
             if ($removedRootIds->isNotEmpty()) {
-                $estimate->items()->whereIn('parent_id', $removedRootIds)->delete();
-                $estimate->items()->whereIn('id', $removedRootIds)->delete();
+                // Уже закрытые пропускаем: дата у них стоит, второй раз закрывать нечего.
+                $removed = $existingRoots->whereIn('id', $removedRootIds)
+                    ->reject(fn ($r) => $r->isClosed());
+
+                $itemIds = $removed->pluck('id')
+                    ->merge($removed->flatMap(fn ($r) => $r->children->pluck('id')))
+                    ->all();
+
+                $withHistory = $itemIds
+                    ? BuhTaskLog::whereIn('estimate_item_id', $itemIds)->distinct()->pluck('estimate_item_id')->flip()
+                    : collect();
+
+                $closingIds = [];
+                $deletingIds = [];
+                foreach ($removed as $item) {
+                    $hasHistory = $withHistory->has($item->id)
+                        || $item->children->contains(fn ($c) => $withHistory->has($c->id));
+                    if ($hasHistory) {
+                        $closingIds[] = $item->id;
+                    } else {
+                        $deletingIds[] = $item->id;
+                    }
+                }
+
+                if ($closingIds) {
+                    $estimate->items()->whereIn('id', $closingIds)->update([
+                        'tasks_end_at' => EstimateItem::tasksEndForClosing()->toDateString(),
+                    ]);
+                }
+
+                if ($deletingIds) {
+                    $estimate->items()->whereIn('parent_id', $deletingIds)->delete();
+                    $estimate->items()->whereIn('id', $deletingIds)->delete();
+                }
+            }
+
+            // Правка даты у завершённых позиций: у квартальных и годовых БП последняя
+            // декларация за отработанный период сдаётся уже после конца месяца.
+            foreach ($request->input('closed', []) as $closedRow) {
+                $estimate->items()
+                    ->whereNull('parent_id')
+                    ->whereNotNull('tasks_end_at')
+                    ->where('id', (int) $closedRow['id'])
+                    ->update(['tasks_end_at' => $closedRow['tasks_end_at']]);
             }
 
             $estimate->notes = $request->notes;

@@ -154,6 +154,12 @@ class DashboardController extends Controller
                     $itemFrom = $itemStart->gt($itemFrom) ? $itemStart : $itemFrom;
                 }
 
+                // Верхняя граница позиции: закрытый БП после своей даты задач не даёт.
+                $itemTo = $scanTo;
+                if ($closedAt = $item->tasksEndAt()) {
+                    $itemTo = $closedAt->lt($itemTo) ? $closedAt : $itemTo;
+                }
+
                 $service     = $item->service_id ? $services->get($item->service_id) : null;
                 $override    = $service ? $overrides->get($item->service_id) : null;
                 $resolved    = $service ? $service->resolveForClient($override) : null;
@@ -163,10 +169,10 @@ class DashboardController extends Controller
                 // Экземпляры задачи: [год, месяц, срок|null]
                 $occurrences = [];
                 if ($hasSchedule) {
-                    foreach ($service->dueDatesForClient($override, $itemFrom, $scanTo) as $due) {
+                    foreach ($service->dueDatesForClient($override, $itemFrom, $itemTo) as $due) {
                         $occurrences[] = [$due->year, $due->month, $due];
                     }
-                } elseif ($today->startOfMonth()->gte($itemFrom)) {
+                } elseif ($today->startOfMonth()->gte($itemFrom) && $today->startOfMonth()->lte($itemTo)) {
                     // Позиции без расписания — задача текущего месяца (как в задачнике),
                     // но не в холостой месяц только что заведённой сметы
                     $dueDay = $item->due_day ? min((int) $item->due_day, $today->daysInMonth) : null;
