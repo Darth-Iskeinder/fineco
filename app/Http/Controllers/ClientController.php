@@ -132,6 +132,10 @@ class ClientController extends Controller
 
         $validated = $request->validateWithBag('createClient', [
             'name' => ['required', 'string', 'max:255'],
+            // Форма собственности хранится отдельно от названия: в названии остаётся
+            // «Ромашка», а «ОсОО» приходит сюда. Необязательна — клиента часто заводят
+            // на бегу, зная только название и ИНН.
+            'organization_form_id' => ['nullable', 'exists:organization_forms,id'],
             // Уникальность ИНН — в пределах своей фирмы. Правило проверки ходит
             // мимо фильтра по фирме (оно смотрит таблицу напрямую), поэтому
             // ограничиваем вручную. Иначе фирма получала бы «ИНН занят» из-за
@@ -149,6 +153,7 @@ class ClientController extends Controller
 
         $client = Client::create([
             'name' => $validated['name'],
+            'organization_form_id' => $validated['organization_form_id'] ?? null,
             'inn' => $validated['inn'],
             'tax_system_id' => $validated['tax_system_id'] ?? null,
             'tariff_id' => $validated['tariff_id'] ?? null,
@@ -172,6 +177,7 @@ class ClientController extends Controller
 
         $validated = $request->validateWithBag('updateClient', [
             'name' => ['required', 'string', 'max:255'],
+            'organization_form_id' => ['nullable', 'exists:organization_forms,id'],
             'inn' => ['required', 'string', 'max:14', $this->innIsFreeInTenant($client->id)],
             'tax_system_id' => ['nullable', 'exists:tax_systems,id'],
             'tariff_id' => ['nullable', 'exists:tariffs,id'],
@@ -185,6 +191,7 @@ class ClientController extends Controller
 
         $client->update([
             'name' => $validated['name'],
+            'organization_form_id' => $validated['organization_form_id'] ?? null,
             'inn' => $validated['inn'],
             'tax_system_id' => $validated['tax_system_id'] ?? null,
             'tariff_id' => $validated['tariff_id'] ?? null,

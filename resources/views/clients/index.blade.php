@@ -173,7 +173,11 @@
 
     openEditModal(client) {
         // Нормализуем под select: null → '' (иначе пункт «Не назначено» не выберется)
-        this.editClient = { ...client, responsible_employee_id: client.responsible_employee_id ?? '' };
+        this.editClient = {
+            ...client,
+            responsible_employee_id: client.responsible_employee_id ?? '',
+            organization_form_id: client.organization_form_id ?? '',
+        };
         this.editErrors = [];
         this.showEditModal = true;
     },
@@ -661,9 +665,20 @@
                     @endif
                     <div class="px-6 py-6">
                         <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                            <div class="sm:col-span-2">
+                            <div>
+                                <label for="create_organization_form_id" class="block text-sm font-medium text-slate-700 mb-2">Форма собственности</label>
+                                <select name="organization_form_id" id="create_organization_form_id" class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
+                                    <option value="">Не указана</option>
+                                    <template x-for="f in organizationForms" :key="f.id">
+                                        <option :value="f.id" :selected="'{{ old('organization_form_id') }}' == f.id" x-text="f.name"></option>
+                                    </template>
+                                </select>
+                            </div>
+
+                            <div>
                                 <label for="create_name" class="block text-sm font-medium text-slate-700 mb-2">Название компании <span class="text-red-500">*</span></label>
-                                <input type="text" name="name" id="create_name" required value="{{ old('name') }}" class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200" placeholder="ООО «Компания»">
+                                <input type="text" name="name" id="create_name" required value="{{ old('name') }}" class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200" placeholder="Ромашка">
+                                <p class="mt-1 text-xs text-slate-500">Только название, форма выбирается слева</p>
                             </div>
 
                             <div>
@@ -793,9 +808,20 @@
                     @endif
                     <div class="px-6 py-6">
                         <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                            <div class="sm:col-span-2">
+                            <div>
+                                <label for="edit_organization_form_id" class="block text-sm font-medium text-slate-700 mb-2">Форма собственности</label>
+                                <select name="organization_form_id" id="edit_organization_form_id" x-model="editClient.organization_form_id" class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
+                                    <option value="">Не указана</option>
+                                    <template x-for="f in organizationForms" :key="f.id">
+                                        <option :value="f.id" x-text="f.name"></option>
+                                    </template>
+                                </select>
+                            </div>
+
+                            <div>
                                 <label for="edit_name" class="block text-sm font-medium text-slate-700 mb-2">Название компании <span class="text-red-500">*</span></label>
                                 <input type="text" name="name" id="edit_name" :value="editClient?.name" required class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
+                                <p class="mt-1 text-xs text-slate-500">Только название, форма выбирается слева</p>
                             </div>
 
                             <div>
