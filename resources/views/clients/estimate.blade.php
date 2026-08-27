@@ -764,9 +764,43 @@ function estimatePage(clientId, tariffBPs, extras, closed, initialNotes, initial
         get regularBPs() { return this.tariffBPs.filter(bp => !this.primaryFlag(bp)); },
         flagBPs(key) { return this.tariffBPs.filter(bp => this.primaryFlag(bp) === key); },
 
+        // Тип периодичности БП по её названию: 'monthly' | 'quarterly' | ... | null.
+        kindOf(periodicityName) {
+            const p = this.periodicities.find(x => x.name === periodicityName);
+            return p ? p.kind : null;
+        },
+
+        /**
+         * Ключ сортировки строки внутри сферы: [группа, день].
+         *
+         * Внутри сферы читают по ходу месяца, поэтому основной ключ это число месяца
+         * из расписания (у квартальных и годовых берём то же число, оно у них общее).
+         * Недельные идут первыми: у них в расписании не числа месяца, а дни недели
+         * (1 = Пн), и в общем ряду «Пн» встал бы первым числом. Строки без дат
+         * («срок не задан», «по запросу») уходят в конец.
+         *
+         * Считаем по расписанию с учётом индивидуального: в строке показано оно же.
+         */
+        scheduleSortKey(bp) {
+            const schedule = bp.schedule || {};
+            const kind = this.kindOf(schedule.periodicity || bp.periodicity);
+            const days = (schedule.start_day || [])
+                .map(Number)
+                .filter(n => Number.isFinite(n));
+
+            if (kind === 'weekly') return [0, days.length ? Math.min(...days) : 99];
+            if (days.length) return [1, Math.min(...days)];
+
+            return [2, 99];
+        },
+
         // Группировка БП по сфере. Срок выполнения показывается в самой строке БП,
         // поэтому отдельной подгруппы по датам нет (иначе дата дублируется).
         // Возвращает [{ sphere, bps: [...] }]. Порядок сфер — по первому появлению.
+        //
+        // Внутри сферы строки идут по срокам: так сфера читается по ходу месяца.
+        // Это только показ, порядок в базе (sort_order) не меняется, поэтому на цену,
+        // задачи и PDF сортировка не влияет.
         groupBySphere(list) {
             const sphereMap = {};
             const spheres = [];
@@ -778,6 +812,17 @@ function estimatePage(clientId, tariffBPs, extras, closed, initialNotes, initial
                 }
                 sphereMap[sphere].bps.push(bp);
             });
+
+            // Сортировка устойчивая: строки с одинаковым сроком остаются в порядке каталога.
+            spheres.forEach(group => {
+                group.bps.sort((a, b) => {
+                    const ka = this.scheduleSortKey(a);
+                    const kb = this.scheduleSortKey(b);
+
+                    return ka[0] - kb[0] || ka[1] - kb[1];
+                });
+            });
+
             return spheres;
         },
         get regularBPsGrouped() { return this.groupBySphere(this.regularBPs); },
