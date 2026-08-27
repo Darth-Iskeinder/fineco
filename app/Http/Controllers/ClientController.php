@@ -258,6 +258,7 @@ class ClientController extends Controller
             'eds' => [
                 'eds_password' => ['nullable', 'string'],
                 'eds_expires' => ['nullable', 'date'],
+                'tunduk_password' => ['nullable', 'string'],
                 'cabinet_credentials' => ['nullable', 'array'],
                 'esf_user_credentials' => ['nullable', 'array'],
                 'ettn_user_credentials' => ['nullable', 'array'],

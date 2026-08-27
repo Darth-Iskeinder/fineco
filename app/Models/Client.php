@@ -97,6 +97,7 @@ class Client extends Model
         // ЭЦП и доступы
         'eds_password',
         'eds_expires',
+        'tunduk_password',
         'cabinet_credentials',
         'esf_user_credentials',
         'ettn_user_credentials',
@@ -192,6 +193,7 @@ class Client extends Model
         'extra_fields' => 'array',
         // Зашифрованные поля (пароли и учётные данные)
         'eds_password' => 'encrypted',
+        'tunduk_password' => 'encrypted',
         'cabinet_credentials' => 'encrypted:array',
         'esf_user_credentials' => 'encrypted:array',
         'ettn_user_credentials' => 'encrypted:array',

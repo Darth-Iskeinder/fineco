@@ -1078,7 +1078,9 @@
                             <span class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-emerald-100 text-emerald-700">Подключено</span>
                         </template>
                     </div>
-                    <template x-if="!editing.its">
+                    <div class="flex items-center gap-2">
+                        <x-passwords-eye />
+                        <template x-if="!editing.its">
                         <button @click="startEdit('its')" class="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" title="Редактировать">
                             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -1096,6 +1098,7 @@
                             </button>
                         </div>
                     </template>
+                    </div>
                 </div>
                 <div class="px-6 py-5">
                     <template x-if="!editing.its">
@@ -1113,14 +1116,8 @@
                                     <dt class="text-sm font-medium text-slate-500">Путь к базе</dt>
                                     <dd class="mt-1 text-sm text-slate-900 break-all" x-text="client.database_path || '—'"></dd>
                                 </div>
-                                <div>
-                                    <dt class="text-sm font-medium text-slate-500">Логин ИТС</dt>
-                                    <dd class="mt-1 text-sm font-mono" :class="showPasswords ? 'text-slate-900' : 'text-slate-400'" x-text="showPasswords ? (client.its_credentials?.login || '—') : '••••••••'"></dd>
-                                </div>
-                                <div>
-                                    <dt class="text-sm font-medium text-slate-500">Пароль ИТС</dt>
-                                    <dd class="mt-1 text-sm font-mono" :class="showPasswords ? 'text-slate-900' : 'text-slate-400'" x-text="showPasswords ? (client.its_credentials?.password || '—') : '••••••••'"></dd>
-                                </div>
+                                <x-secret-field label="Логин ИТС" value="client.its_credentials?.login" field="'its_login'" :secret="false" label-class="text-sm font-medium text-slate-500" />
+                                <x-secret-field label="Пароль ИТС" value="client.its_credentials?.password" field="'its_password'" label-class="text-sm font-medium text-slate-500" />
                             </dl>
                         </template>
                         <template x-if="!client.its_enabled">
@@ -1167,7 +1164,7 @@
                 </div>
             </div>
 
-            <!-- ЭЦП и доступы -->
+            <!-- ЭЦП и Тундук ЕСИ -->
             <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
                 <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
                     <div class="flex items-center gap-3">
@@ -1176,18 +1173,10 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
                             </svg>
                         </div>
-                        <h2 class="text-lg font-semibold text-slate-800">ЭЦП и доступы</h2>
+                        <h2 class="text-lg font-semibold text-slate-800">ЭЦП и Тундук ЕСИ</h2>
                     </div>
                     <div class="flex items-center gap-2">
-                        <button @click="showPasswords = !showPasswords" type="button" class="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all" title="Показать/скрыть пароли">
-                            <svg x-show="!showPasswords" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                            </svg>
-                            <svg x-show="showPasswords" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                            </svg>
-                        </button>
+                        <x-passwords-eye />
                         <template x-if="!editing.eds">
                             <button @click="startEdit('eds')" class="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" title="Редактировать">
                                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -1210,14 +1199,11 @@
                 </div>
                 <div class="px-6 py-5 space-y-5">
                     <template x-if="!editing.eds">
-                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-x-10 gap-y-6">
                             <div>
-                                <h4 class="text-sm font-medium text-slate-700 mb-3">ЭЦП / Тундук ЭСИ</h4>
-                                <dl class="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <dt class="text-xs font-medium text-slate-500">Пароль ЭЦП</dt>
-                                        <dd class="mt-1 text-sm font-mono" :class="showPasswords ? 'text-slate-900' : 'text-slate-400'" x-text="showPasswords ? (client.eds_password || '—') : '••••••••'"></dd>
-                                    </div>
+                                <h4 class="text-sm font-medium text-slate-700 mb-3">ЭЦП</h4>
+                                <dl class="grid grid-cols-2 gap-4 max-w-md">
+                                    <x-secret-field label="Пароль ЭЦП" value="client.eds_password" field="'eds_password'" />
                                     <div>
                                         <dt class="text-xs font-medium text-slate-500">Срок действия</dt>
                                         <dd class="mt-1 text-sm" :class="{'text-red-600': isEdsExpired(), 'text-amber-600': isEdsExpiringSoon(), 'text-slate-900': !isEdsExpired() && !isEdsExpiringSoon()}" x-text="formatDate(client.eds_expires) || '—'"></dd>
@@ -1225,42 +1211,38 @@
                                 </dl>
                             </div>
                             <template x-if="client.cabinet_credentials?.login">
-                                <div class="sm:border-l sm:border-slate-100 sm:pl-6">
+                                <div>
                                     <h4 class="text-sm font-medium text-slate-700 mb-3">Кабинет (без ЭЦП)</h4>
-                                    <dl class="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <dt class="text-xs font-medium text-slate-500">Логин</dt>
-                                            <dd class="mt-1 text-sm font-mono" :class="showPasswords ? 'text-slate-900' : 'text-slate-400'" x-text="showPasswords ? client.cabinet_credentials?.login : '••••••••'"></dd>
-                                        </div>
-                                        <div>
-                                            <dt class="text-xs font-medium text-slate-500">Пароль</dt>
-                                            <dd class="mt-1 text-sm font-mono" :class="showPasswords ? 'text-slate-900' : 'text-slate-400'" x-text="showPasswords ? client.cabinet_credentials?.password : '••••••••'"></dd>
-                                        </div>
+                                    <dl class="grid grid-cols-2 gap-4 max-w-md">
+                                        <x-secret-field label="Логин" value="client.cabinet_credentials?.login" field="'cabinet_login'" :secret="false" />
+                                        <x-secret-field label="Пароль" value="client.cabinet_credentials?.password" field="'cabinet_password'" />
                                     </dl>
                                 </div>
                             </template>
                             <template x-if="client.esf_user_credentials?.login">
-                                <div class="sm:border-l sm:border-slate-100 sm:pl-6">
+                                <div>
                                     <h4 class="text-sm font-medium text-slate-700 mb-3">Доп. пользователь ЭСФ</h4>
-                                    <dl class="grid grid-cols-2 gap-4">
-                                        <div>
-                                            <dt class="text-xs font-medium text-slate-500">Логин</dt>
-                                            <dd class="mt-1 text-sm font-mono" :class="showPasswords ? 'text-slate-900' : 'text-slate-400'" x-text="showPasswords ? client.esf_user_credentials?.login : '••••••••'"></dd>
-                                        </div>
-                                        <div>
-                                            <dt class="text-xs font-medium text-slate-500">Пароль</dt>
-                                            <dd class="mt-1 text-sm font-mono" :class="showPasswords ? 'text-slate-900' : 'text-slate-400'" x-text="showPasswords ? client.esf_user_credentials?.password : '••••••••'"></dd>
-                                        </div>
+                                    <dl class="grid grid-cols-2 gap-4 max-w-md">
+                                        <x-secret-field label="Логин" value="client.esf_user_credentials?.login" field="'esf_login'" :secret="false" />
+                                        <x-secret-field label="Пароль" value="client.esf_user_credentials?.password" field="'esf_password'" />
+                                    </dl>
+                                </div>
+                            </template>
+                            <template x-if="client.tunduk_password">
+                                <div>
+                                    <h4 class="text-sm font-medium text-slate-700 mb-3">Тундук ЕСИ</h4>
+                                    <dl class="grid grid-cols-2 gap-4 max-w-md">
+                                        <x-secret-field label="Пароль" value="client.tunduk_password" field="'tunduk_password'" />
                                     </dl>
                                 </div>
                             </template>
                         </div>
                     </template>
                     <template x-if="editing.eds">
-                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-x-10 gap-y-6">
                             <div>
-                                <h4 class="text-sm font-medium text-slate-700 mb-3">ЭЦП / Тундук ЭСИ</h4>
-                                <div class="grid grid-cols-2 gap-4">
+                                <h4 class="text-sm font-medium text-slate-700 mb-3">ЭЦП</h4>
+                                <div class="grid grid-cols-2 gap-4 max-w-md">
                                     <div>
                                         <label class="block text-xs font-medium text-slate-500 mb-1">Пароль ЭЦП</label>
                                         <input type="text" x-model="form.eds.eds_password" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
@@ -1271,9 +1253,9 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="sm:border-l sm:border-slate-100 sm:pl-6">
+                            <div>
                                 <h4 class="text-sm font-medium text-slate-700 mb-3">Кабинет (без ЭЦП)</h4>
-                                <div class="grid grid-cols-2 gap-4">
+                                <div class="grid grid-cols-2 gap-4 max-w-md">
                                     <div>
                                         <label class="block text-xs font-medium text-slate-500 mb-1">Логин</label>
                                         <input type="text" x-model="form.eds.cabinet_credentials.login" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
@@ -1284,9 +1266,9 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="sm:border-l sm:border-slate-100 sm:pl-6">
+                            <div>
                                 <h4 class="text-sm font-medium text-slate-700 mb-3">Доп. пользователь ЭСФ</h4>
-                                <div class="grid grid-cols-2 gap-4">
+                                <div class="grid grid-cols-2 gap-4 max-w-md">
                                     <div>
                                         <label class="block text-xs font-medium text-slate-500 mb-1">Логин</label>
                                         <input type="text" x-model="form.eds.esf_user_credentials.login" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
@@ -1294,6 +1276,15 @@
                                     <div>
                                         <label class="block text-xs font-medium text-slate-500 mb-1">Пароль</label>
                                         <input type="text" x-model="form.eds.esf_user_credentials.password" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                    </div>
+                                </div>
+                            </div>
+                            <div>
+                                <h4 class="text-sm font-medium text-slate-700 mb-3">Тундук ЕСИ</h4>
+                                <div class="grid grid-cols-2 gap-4 max-w-md">
+                                    <div>
+                                        <label class="block text-xs font-medium text-slate-500 mb-1">Пароль</label>
+                                        <input type="text" x-model="form.eds.tunduk_password" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
                                     </div>
                                 </div>
                             </div>
@@ -1313,7 +1304,9 @@
                         </div>
                         <h2 class="text-lg font-semibold text-slate-800">Интернет-банкинг</h2>
                     </div>
-                    <template x-if="!editing.banks">
+                    <div class="flex items-center gap-2">
+                        <x-passwords-eye />
+                        <template x-if="!editing.banks">
                         <button @click="startEdit('banks')" class="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all" title="Редактировать">
                             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -1331,6 +1324,7 @@
                             </button>
                         </div>
                     </template>
+                    </div>
                 </div>
                 <div class="px-6 py-5">
                     <template x-if="!editing.banks">
@@ -1340,14 +1334,8 @@
                                     <div :class="{'sm:border-l sm:border-slate-100 sm:pl-6': index > 0}">
                                         <h4 class="text-sm font-medium text-slate-700 mb-3" x-text="bank.bank || 'Банк ' + (index + 1)"></h4>
                                         <dl class="grid grid-cols-2 gap-4">
-                                            <div>
-                                                <dt class="text-xs font-medium text-slate-500">Логин</dt>
-                                                <dd class="mt-1 text-sm font-mono" :class="showPasswords ? 'text-slate-900' : 'text-slate-400'" x-text="showPasswords ? (bank.login || '—') : '••••••••'"></dd>
-                                            </div>
-                                            <div>
-                                                <dt class="text-xs font-medium text-slate-500">Пароль</dt>
-                                                <dd class="mt-1 text-sm font-mono" :class="showPasswords ? 'text-slate-900' : 'text-slate-400'" x-text="showPasswords ? (bank.password || '—') : '••••••••'"></dd>
-                                            </div>
+                                            <x-secret-field label="Логин" value="bank.login" field="'bank_login_' + index" :secret="false" />
+                                            <x-secret-field label="Пароль" value="bank.password" field="'bank_password_' + index" />
                                         </dl>
                                     </div>
                                 </template>
@@ -2541,6 +2529,11 @@ function clientShow() {
         ],
 
         showPasswords: false,
+        // Раскрытие само схлопывается обратно, см. revealPasswords().
+        passwordsTimer: null,
+        passwordsWatchReady: false,
+        // Поле, у которого только что нажали «скопировать» — на нём галочка.
+        copiedField: null,
         uploadDragging: false,
         uploadingDocs: false,
         showPreview: false,
@@ -2562,7 +2555,7 @@ function clientShow() {
             flags: 'Характеристики бизнеса',
             contract: 'Договор и обслуживание',
             attorney: 'Доверенность',
-            eds: 'ЭЦП и доступы',
+            eds: 'ЭЦП и Тундук ЕСИ',
             its: 'ИТС (1С)',
             banks: 'Интернет-банкинг',
             contacts_info: 'Контакты и связанные лица',
@@ -2622,6 +2615,7 @@ function clientShow() {
         init() {
             this.resetForms();
             this.guardNavigation();
+            this.watchPasswords();
         },
 
         /** Правки в секции есть и они отличаются от сохранённого. */
@@ -2808,6 +2802,7 @@ function clientShow() {
                 eds: {
                     eds_password: this.client.eds_password,
                     eds_expires: this.client.eds_expires?.split('T')[0],
+                    tunduk_password: this.client.tunduk_password,
                     cabinet_credentials: this.client.cabinet_credentials || { login: '', password: '' },
                     esf_user_credentials: this.client.esf_user_credentials || { login: '', password: '' },
                     ettn_user_credentials: this.client.ettn_user_credentials || { login: '', password: '' },
@@ -3014,6 +3009,102 @@ function clientShow() {
             const now = new Date();
             const daysUntil = (expires - now) / (1000 * 60 * 60 * 24);
             return daysUntil > 0 && daysUntil <= 30;
+        },
+
+        /**
+         * Точки над паролями спасают только от взгляда через плечо: нажать глазик
+         * может любой, кто открыл карточку. Отсюда два следствия — раскрытие живёт
+         * недолго, а копировать можно и не раскрывая (copyValue).
+         */
+        togglePasswords() {
+            this.showPasswords ? this.hidePasswords() : this.revealPasswords();
+        },
+
+        revealPasswords() {
+            this.showPasswords = true;
+            clearTimeout(this.passwordsTimer);
+            // Пять минут: столько живёт раскрытие, про которое забыли.
+            this.passwordsTimer = setTimeout(() => this.hidePasswords(), 5 * 60 * 1000);
+        },
+
+        hidePasswords() {
+            this.showPasswords = false;
+            clearTimeout(this.passwordsTimer);
+            this.passwordsTimer = null;
+        },
+
+        /** Ушли со вкладки — прячем: экран мог остаться на виду или в записи созвона. */
+        watchPasswords() {
+            // init() срабатывает дважды (Alpine + x-init), слушатель вешаем один раз.
+            if (this.passwordsWatchReady) return;
+            this.passwordsWatchReady = true;
+
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) this.hidePasswords();
+            });
+        },
+
+        /** Заполнено ли поле: пустое показываем прочерком, а не точками. */
+        hasValue(value) {
+            return value !== null && value !== undefined && String(value).trim() !== '';
+        },
+
+        /** Пароль: прочерк если пусто, точки пока скрыто, значение когда раскрыто. */
+        secretText(value) {
+            if (!this.hasValue(value)) return '—';
+
+            return this.showPasswords ? value : '••••••••';
+        },
+
+        /**
+         * Копирование не требует раскрытия — в этом и смысл кнопки.
+         *
+         * navigator.clipboard живёт только на https и localhost, но отказать может и
+         * там (нет разрешения, вкладка не в фокусе), поэтому на любой отказ уходим на
+         * старый способ через скрытое поле. Галочку показываем, только если получилось:
+         * кнопка, которая молча ничего не делает, хуже отсутствующей.
+         */
+        async copyValue(value, field) {
+            if (!this.hasValue(value)) return;
+
+            const text = String(value);
+            let copied = false;
+
+            if (navigator.clipboard && window.isSecureContext) {
+                try {
+                    await navigator.clipboard.writeText(text);
+                    copied = true;
+                } catch (e) {
+                    copied = false;
+                }
+            }
+
+            if (!copied) copied = this.copyThroughField(text);
+            if (!copied) return;
+
+            this.copiedField = field;
+            setTimeout(() => {
+                if (this.copiedField === field) this.copiedField = null;
+            }, 1500);
+        },
+
+        /** Запасной путь копирования: скрытое поле и execCommand. */
+        copyThroughField(text) {
+            try {
+                const holder = document.createElement('textarea');
+                holder.value = text;
+                holder.setAttribute('readonly', '');
+                holder.style.position = 'fixed';
+                holder.style.opacity = '0';
+                document.body.appendChild(holder);
+                holder.select();
+                const done = document.execCommand('copy');
+                holder.remove();
+
+                return done;
+            } catch (e) {
+                return false;
+            }
         },
 
         /**
