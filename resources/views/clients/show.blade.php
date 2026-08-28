@@ -2254,6 +2254,8 @@
             </div>
         </div>
     </div>
+
+    @include('clients.partials.responsible-transfer-modal')
 </div>
 
 <script>
@@ -2484,6 +2486,7 @@ function taskHistory(clientId) {
 }
 function clientShow() {
     return {
+        ...responsibleTransferMixin(),
         client: @json($client),
         taxSystems: @json(\App\Models\TaxSystem::active()->ordered()->get()),
         activityTypes: @json(\App\Models\ActivityType::active()->ordered()->get()),
@@ -2907,10 +2910,29 @@ function clientShow() {
             return closing && !this.client.service_end_date;
         },
 
+        /** Ответственного в секции «Договор» поменяли на другого (или сняли). */
+        responsibleChanged() {
+            return String(this.form.contract.responsible_employee_id ?? '')
+                !== String(this.client.responsible_employee_id ?? '');
+        },
+
         async saveSection(section, confirmed = false) {
             if (section === 'status' && !confirmed && this.serviceWillEnd()) {
                 this.showEndServiceWarning = true;
                 return;
+            }
+
+            // Смена ответственного забирает с собой незакрытую работу по клиенту:
+            // показываем, что именно переедет, и сохраняем только после согласия.
+            if (section === 'contract' && !confirmed && this.responsibleChanged()) {
+                await this.askResponsibleTransfer(
+                    this.client.id,
+                    this.form.contract.responsible_employee_id,
+                    this.client.name,
+                    () => this.saveSection('contract', true),
+                );
+
+                return false;
             }
 
             this.saving[section] = true;

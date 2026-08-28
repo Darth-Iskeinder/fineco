@@ -165,6 +165,9 @@ Route::middleware('auth:employee')->group(function () {
 
         Route::post('/', [ClientController::class, 'store'])->name('store');
         Route::get('/{client}', [ClientController::class, 'show'])->name('show');
+        // Что переедет на нового ответственного — считаем до сохранения, для окна подтверждения.
+        Route::get('/{client}/responsible-preview', [ClientController::class, 'responsiblePreview'])
+            ->name('responsible-preview');
         Route::put('/{client}', [ClientController::class, 'update'])->name('update');
         Route::patch('/{client}', [ClientController::class, 'updateSection'])->name('update-section');
         Route::delete('/{client}', [ClientController::class, 'destroy'])->name('destroy');

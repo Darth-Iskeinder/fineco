@@ -267,6 +267,88 @@ class ClientResponsibleTransferTest extends TestCase
         $this->assertSame($this->newHead->id, $item->fresh()->assignee_id);
     }
 
+    /** Окно подтверждения считает те же цифры, что потом переедут. */
+    public function test_preview_counts_what_will_move(): void
+    {
+        $this->item($this->oldHead->id);
+        $this->item(null);
+        $this->item($this->accountant->id);
+        $this->reminder($this->oldHead->id, TaskReminder::STATUS_PENDING, '2026-09-20');
+        $this->reminder($this->oldHead->id, TaskReminder::STATUS_DONE, '2026-08-20');
+        $this->adhoc($this->oldHead->id, 'running');
+
+        $data = $this->actingAs($this->admin, 'employee')
+            ->getJson('/clients/' . $this->client->id . '/responsible-preview?employee_id=' . $this->newHead->id)
+            ->assertOk()
+            ->json();
+
+        $this->assertTrue($data['changed']);
+        $this->assertSame($this->oldHead->full_name, $data['from']['name']);
+        $this->assertSame($this->newHead->full_name, $data['to']['name']);
+        $this->assertSame(2, $data['items'], 'Позиция прежнего и позиция без исполнителя');
+        $this->assertSame(1, $data['reminders'], 'Только незакрытое');
+        $this->assertSame(1, $data['adhoc']);
+        $this->assertSame([['name' => $this->accountant->full_name, 'count' => 1]], $data['stays']);
+        $this->assertTrue($data['to_can_assign'], 'Главбух сможет назначать исполнителей');
+    }
+
+    /** Цифры предпросмотра сходятся с тем, что делает сам перенос. */
+    public function test_preview_matches_the_transfer(): void
+    {
+        $this->item($this->oldHead->id);
+        $this->item(null);
+        $this->reminder($this->oldHead->id, TaskReminder::STATUS_PENDING, '2026-09-20');
+
+        $preview = $this->actingAs($this->admin, 'employee')
+            ->getJson('/clients/' . $this->client->id . '/responsible-preview?employee_id=' . $this->newHead->id)
+            ->assertOk()
+            ->json();
+
+        $this->changeResponsible($this->newHead->id);
+
+        $moved = EstimateItem::whereIn('estimate_id', [$this->estimate->id])
+            ->whereNull('parent_id')
+            ->where('assignee_id', $this->newHead->id)
+            ->count();
+
+        $this->assertSame($preview['items'], $moved);
+        $this->assertSame(
+            $preview['reminders'],
+            TaskReminder::where('client_id', $this->client->id)->where('employee_id', $this->newHead->id)->count(),
+        );
+    }
+
+    /** Новый ответственный не главбух — раздавать БП в смете он не сможет, окно предупредит. */
+    public function test_preview_warns_when_the_new_one_cannot_assign(): void
+    {
+        $data = $this->actingAs($this->admin, 'employee')
+            ->getJson('/clients/' . $this->client->id . '/responsible-preview?employee_id=' . $this->accountant->id)
+            ->assertOk()
+            ->json();
+
+        $this->assertFalse($data['to_can_assign']);
+    }
+
+    /** Тот же сотрудник — окну нечего показывать. */
+    public function test_preview_reports_no_change(): void
+    {
+        $data = $this->actingAs($this->admin, 'employee')
+            ->getJson('/clients/' . $this->client->id . '/responsible-preview?employee_id=' . $this->oldHead->id)
+            ->assertOk()
+            ->json();
+
+        $this->assertFalse($data['changed']);
+        $this->assertSame(0, $data['items']);
+    }
+
+    /** Предпросмотр чужого клиента недоступен, как и сама карточка. */
+    public function test_preview_is_closed_for_a_foreign_client(): void
+    {
+        $this->actingAs($this->accountant, 'employee')
+            ->getJson('/clients/' . $this->client->id . '/responsible-preview?employee_id=' . $this->newHead->id)
+            ->assertForbidden();
+    }
+
     private function changeResponsible(?int $employeeId): void
     {
         $this->actingAs($this->admin, 'employee')

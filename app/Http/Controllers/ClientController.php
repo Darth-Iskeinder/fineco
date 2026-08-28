@@ -174,6 +174,26 @@ class ClientController extends Controller
     }
 
     /**
+     * Предпросмотр смены ответственного: что переедет на нового сотрудника.
+     *
+     * Отдельным запросом, а не вместе с сохранением: окно подтверждения показывается
+     * ДО того, как поле изменилось, и человек должен видеть цифры заранее, а не узнавать
+     * о переезде задач постфактум.
+     */
+    public function responsiblePreview(Request $request, Client $client)
+    {
+        $this->authorizeClient($client);
+
+        $validated = $request->validate([
+            'employee_id' => ['nullable', 'exists:employees,id'],
+        ]);
+
+        return response()->json(
+            (new ClientResponsibleTransfer())->preview($client, $validated['employee_id'] ?? null)
+        );
+    }
+
+    /**
      * Сохранение карточки клиента. Если сменился ответственный, вместе с ним на нового
      * переезжает вся незакрытая работа по клиенту (см. ClientResponsibleTransfer).
      *

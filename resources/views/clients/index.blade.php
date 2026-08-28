@@ -5,6 +5,7 @@
 
 @section('content')
 <div x-data="{
+    ...responsibleTransferMixin(),
     showCreateModal: {{ $errors->createClient->isNotEmpty() ? 'true' : 'false' }},
     // Файл не прошёл проверку — открываем окно импорта заново, а не прячем ошибку.
     showImportModal: {{ $errors->has('file') ? 'true' : 'false' }},
@@ -15,6 +16,8 @@
     // optional chaining — при null Alpine падал бы с TypeError ещё до открытия. Держим объект
     // с полями под x-model; openEditModal() полностью заменяет его данными клиента.
     editClient: { tax_system_id: '', tariff_id: '', responsible_employee_id: '' },
+    // Кто был ответственным на момент открытия окна правки — см. openEditModal().
+    editResponsibleWas: '',
     // Ошибки правки и признак отправки: раньше и то и другое приезжало новой
     // страницей, теперь живёт прямо в окне.
     editErrors: [],
@@ -34,6 +37,7 @@
                 tariff_id: @json(old('tariff_id')),
                 responsible_employee_id: @json(old('responsible_employee_id')) ?? '',
             };
+            this.editResponsibleWas = String(base.responsible_employee_id ?? '');
             this.showEditModal = true;
         @endif
     },
@@ -178,6 +182,9 @@
             responsible_employee_id: client.responsible_employee_id ?? '',
             organization_form_id: client.organization_form_id ?? '',
         };
+        // Прежний ответственный: x-model перетирает поле в editClient, а сравнивать
+        // «сменился или нет» надо с тем, что было до открытия окна.
+        this.editResponsibleWas = String(client.responsible_employee_id ?? '');
         this.editErrors = [];
         this.showEditModal = true;
     },
@@ -193,10 +200,29 @@
     async saveClient(event) {
         if (this.savingClient) return;
 
+        const form = event.target;
+
+        // Смена ответственного забирает с собой незакрытую работу по клиенту, поэтому
+        // сначала показываем, что именно переедет, и только потом сохраняем.
+        if (String(this.editClient.responsible_employee_id ?? '') !== this.editResponsibleWas) {
+            await this.askResponsibleTransfer(
+                this.editClient.id,
+                this.editClient.responsible_employee_id,
+                this.editClient.name,
+                () => this.submitEditForm(form),
+            );
+
+            return;
+        }
+
+        await this.submitEditForm(form);
+    },
+
+    async submitEditForm(form) {
+        if (this.savingClient) return;
+
         this.savingClient = true;
         this.editErrors = [];
-
-        const form = event.target;
 
         try {
             const response = await fetch(form.action, {
@@ -943,6 +969,8 @@
             </div>
         </div>
     </div>
+
+    @include('clients.partials.responsible-transfer-modal')
 
     {{-- Подтверждение сохранения. Раньше его роль играло флеш-сообщение на новой
          странице, но страница больше не перезагружается. --}}
