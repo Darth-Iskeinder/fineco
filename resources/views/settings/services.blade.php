@@ -86,15 +86,6 @@ $servicesJson = $services->map(fn($s) => array_merge([
                 </button>
             </div>
             <div class="flex items-center gap-2">
-                <label class="text-sm text-slate-600">Сфера:</label>
-                <select x-model="sphereFilter" class="px-3 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                    <option value="">Все сферы</option>
-                    <template x-for="sph in sphereOptions" :key="sph">
-                        <option :value="sph" x-text="sph"></option>
-                    </template>
-                </select>
-            </div>
-            <div class="flex items-center gap-2">
                 <label class="text-sm text-slate-600">Тип обслуживания:</label>
                 {{-- «Без типа» вынесен в фильтр не для красоты: пока у БП типа нет, он
                      подтягивается всем подряд, и разметка каталога идёт именно по этому списку. --}}
@@ -110,25 +101,43 @@ $servicesJson = $services->map(fn($s) => array_merge([
                 <input type="checkbox" x-model="groupBySphere" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/20">
                 Группировать по сферам
             </label>
-            <span class="text-xs text-slate-400" x-show="sphereFilter || serviceTypeFilter || searchQuery.trim()" x-text="visibleServices.length + ' из ' + services.length"></span>
+            <span class="text-xs text-slate-400" x-show="activeFilterCount || serviceTypeFilter || searchQuery.trim()" x-text="visibleServices.length + ' из ' + services.length"></span>
+            <button type="button" x-show="activeFilterCount || serviceTypeFilter || searchQuery.trim()"
+                    @click="resetFilters()"
+                    class="text-xs text-slate-500 hover:text-indigo-600 underline decoration-dotted underline-offset-2">
+                Сбросить всё
+            </button>
         </div>
-        <div class="flex-1 min-h-0 overflow-auto">
+
+        {{-- Чипы отобранного: по колонкам видно только значок воронки, а тут одной строкой
+             видно всё, что сейчас включено, и каждое снимается на месте. --}}
+        <div x-show="filterChips.length" class="px-6 py-2 border-b border-slate-100 flex flex-wrap items-center gap-1.5 bg-white flex-shrink-0">
+            <template x-for="chip in filterChips" :key="chip.key + ':' + chip.value">
+                <button type="button" @click="toggleFacetValue(chip.key, chip.value)"
+                        class="inline-flex items-center gap-1 pl-2 pr-1.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-100 hover:bg-indigo-100 transition-colors">
+                    <span class="text-indigo-400" x-text="chip.title + ':'"></span>
+                    <span x-text="chip.label"></span>
+                    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </template>
+        </div>
+        <div class="flex-1 min-h-0 overflow-auto" @scroll="onScrollWhileFiltering()">
             <table class="min-w-full divide-y divide-slate-200">
                 <thead class="bg-slate-50 sticky top-0 z-20 [&_th]:bg-slate-50">
                     <tr>
                         {{-- Название закреплено слева: при прокрутке вправо видно, о каком БП строка --}}
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap sticky left-0 z-30 border-r border-slate-200">Бизнес процесс</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Сфера</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Группа</th>
+                        @include('settings.partials.column-filter', ['key' => 'sphere', 'title' => 'Сфера'])
+                        @include('settings.partials.column-filter', ['key' => 'service_group', 'title' => 'Группа'])
                         {{-- TODO: колонка "Бизнес процесс" (поле business_process) удалена — дублировала "Название", рассмотреть удаление поля из таблицы --}}
-                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Категория</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Режим НО</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Периодичность</th>
+                        @include('settings.partials.column-filter', ['key' => 'category', 'title' => 'Категория'])
+                        @include('settings.partials.column-filter', ['key' => 'tax_system', 'title' => 'Режим НО'])
+                        @include('settings.partials.column-filter', ['key' => 'periodicity', 'title' => 'Периодичность'])
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Дедлайн</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">План (мин.)</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Правило закрытия</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Проверка</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Биллинг</th>
+                        @include('settings.partials.column-filter', ['key' => 'requires_document', 'title' => 'Правило закрытия'])
+                        @include('settings.partials.column-filter', ['key' => 'requires_review', 'title' => 'Проверка'])
+                        @include('settings.partials.column-filter', ['key' => 'billing', 'title' => 'Биллинг'])
                         {{-- TODO: колонка "Стоимость" скрыта — возможно не нужна в таблице БП, рассмотреть удаление поля cost из services --}}
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Комментарий</th>
                         <th class="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap">Действия</th>
@@ -310,6 +319,75 @@ $servicesJson = $services->map(fn($s) => array_merge([
             </table>
         </div>
     </div>
+
+    {{-- Меню воронки: одно на страницу, позиционируется по нажатой кнопке.
+         Через teleport в body, иначе его обрезал бы прокручиваемый блок таблицы. --}}
+    <template x-teleport="body">
+        {{-- style="display:none" (а не x-cloak): правила [x-cloak] в этом макете нет,
+             и подложка на весь экран висела бы поверх страницы до старта Alpine. --}}
+        <div x-show="openFilter" style="display: none;" class="fixed inset-0 z-40"
+             @keydown.escape.window="closeFilterMenu()"
+             @resize.window="positionFilterMenu()"
+             @scroll.window="onScrollWhileFiltering()">
+            {{-- Прозрачная подложка: клик мимо меню закрывает его, как в любой таблице. --}}
+            <div class="absolute inset-0" @click="closeFilterMenu()"></div>
+
+            <div class="absolute w-[260px] bg-white rounded-xl shadow-xl border border-slate-200 overflow-hidden"
+                 :style="'top:' + filterMenu.top + 'px; left:' + filterMenu.left + 'px'"
+                 @click.stop>
+                <div class="px-3 pt-3 pb-2 flex items-center justify-between gap-2">
+                    <span class="text-xs font-semibold text-slate-700 uppercase tracking-wider"
+                          x-text="openFilter ? facetByKey(openFilter).title : ''"></span>
+                    <button type="button" x-show="openFilter && filters[openFilter].length"
+                            @click="clearFacet(openFilter)"
+                            class="text-xs text-slate-400 hover:text-indigo-600">Сбросить</button>
+                </div>
+
+                {{-- Строка поиска нужна там, где значений много (группы, режимы НО).
+                     Показываем по ПОЛНОМУ числу значений: если считать по найденным,
+                     поле пропадало бы от первой же введённой буквы. --}}
+                <div class="px-3 pb-2" x-show="menuTotal > 7">
+                    <input type="text" x-model="filterSearch" x-ref="filterSearchInput"
+                           placeholder="Найти значение…" @keydown.enter.prevent="closeFilterMenu()"
+                           class="w-full px-2 py-1 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                </div>
+
+                {{-- «Выбрать все» работает по тому, что сейчас в списке: отобрал поиском
+                     нужное — отметил одним нажатием, как в фильтре таблицы Excel. --}}
+                <label x-show="menuOptions.length > 1"
+                       class="flex items-center gap-2 px-3 py-1.5 text-sm text-slate-600 cursor-pointer hover:bg-slate-50 border-t border-slate-100">
+                    <input type="checkbox" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/20"
+                           :checked="menuAllChecked" @change="toggleMenuAll()">
+                    <span x-text="menuAllChecked ? 'Снять все' : 'Выбрать все'"></span>
+                    <span class="ml-auto text-xs text-slate-400" x-text="menuOptions.length"></span>
+                </label>
+
+                <div class="max-h-72 overflow-y-auto border-t border-slate-100">
+                    <template x-for="opt in menuOptions" :key="opt.value">
+                        {{-- Значение с нулём оставляем видимым, но приглушаем: под текущим
+                             отбором оно ничего не добавит, и это видно до нажатия. --}}
+                        <label class="flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-slate-50"
+                               :class="opt.count === 0 ? 'text-slate-400' : 'text-slate-700'">
+                            <input type="checkbox" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/20"
+                                   :checked="isFacetChecked(openFilter, opt.value)"
+                                   @change="toggleFacetValue(openFilter, opt.value)">
+                            <span class="flex-1 truncate" :title="opt.label" x-text="opt.label"></span>
+                            <span class="text-xs text-slate-400" x-text="opt.count"></span>
+                        </label>
+                    </template>
+                    <div x-show="menuOptions.length === 0"
+                         class="px-3 py-4 text-sm text-slate-400 text-center">Ничего не нашлось</div>
+                </div>
+
+                <div class="px-3 py-2 border-t border-slate-100 bg-slate-50/60 flex justify-end">
+                    <button type="button" @click="closeFilterMenu()"
+                            class="px-3 py-1 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50">
+                        Готово
+                    </button>
+                </div>
+            </div>
+        </div>
+    </template>
 
     {{-- Service modal --}}
     <template x-teleport="body">
@@ -886,6 +964,22 @@ $servicesJson = $services->map(fn($s) => array_merge([
 <script>
 function servicesPage() {
     return {
+        init() {
+            this.readFiltersFromUrl();
+
+            // Поиск, тип и группировка правятся напрямую через x-model, поэтому в адрес
+            // их переносим наблюдателями, а не из каждого обработчика.
+            ['searchQuery', 'serviceTypeFilter', 'groupBySphere'].forEach(prop => {
+                this.$watch(prop, () => {
+                    this.refreshMenuOptions();
+                    this.syncFiltersToUrl();
+                });
+            });
+
+            // Строка внутри меню только отбирает уже посчитанные значения, в адрес не идёт.
+            this.$watch('filterSearch', () => this.refreshMenuOptions());
+        },
+
         services: @json($servicesJson),
         taxSystems: @json($taxSystems),
         specialFlags: @json($specialFlags),
@@ -898,10 +992,52 @@ function servicesPage() {
         rates: @json($rates),
         selectedRowId: null,
 
-        sphereFilter: '',
         serviceTypeFilter: '',
         searchQuery: '',
         groupBySphere: false,
+
+        // --- Фильтры по колонкам ---
+        // Воронка в шапке колонки, как в таблицах, к которым бухгалтер привык. Внутри
+        // мультивыбор: «покажи налоги и НДС сразу» — обычный запрос, одним значением он
+        // не решается. Счётчик у каждого значения считается с учётом ОСТАЛЬНЫХ фильтров,
+        // поэтому сразу видно, что выбирать бессмысленно.
+        //
+        // Колонки «Дедлайн» и «План (мин.)» не фильтруются: там у каждой строки своё
+        // значение, список из девяноста вариантов фильтром не был бы.
+        facets: [
+            { key: 'sphere',            title: 'Сфера',           type: 'text' },
+            { key: 'service_group',     title: 'Группа',          type: 'text' },
+            { key: 'category',          title: 'Категория',       type: 'text' },
+            { key: 'tax_system',        title: 'Режим НО',        type: 'tax'  },
+            { key: 'periodicity',       title: 'Периодичность',   type: 'text' },
+            { key: 'requires_document', title: 'Правило закрытия', type: 'bool', yes: 'С документом', no: 'Без документа' },
+            { key: 'requires_review',   title: 'Проверка',        type: 'bool', yes: 'Проверка',      no: 'Самоконтроль' },
+            { key: 'billing',           title: 'Биллинг',         type: 'text' },
+        ],
+
+        // Выбранные значения по каждому фасету (нормализованные ключи).
+        filters: {
+            sphere: [], service_group: [], category: [], tax_system: [],
+            periodicity: [], requires_document: [], requires_review: [], billing: [],
+        },
+
+        // Открытая воронка и её положение. Меню рисуется через teleport в body:
+        // таблица прокручивается внутри своего блока и обрезала бы выпадающий список.
+        openFilter: null,
+        filterMenu: { top: 0, left: 0 },
+        filterSearch: '',
+        // Кнопка, из которой меню открыли: по ней оно и держится при прокрутке таблицы.
+        filterAnchor: null,
+        filterFrame: null,
+
+        // Готовый список значений открытого меню. Считается один раз на открытие и на
+        // каждое изменение отбора, а не на каждую перерисовку: иначе Alpine пересчитывал
+        // бы его при любом чихе, а это проход по всему справочнику на каждое значение.
+        menuOptions: [],
+        // Сколько значений у фасета всего, до строки поиска. Именно по этому числу
+        // решаем, показывать ли поиск: иначе поле исчезало бы от первой же буквы,
+        // как только найденных становится меньше порога.
+        menuTotal: 0,
 
         months: ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'],
         weekdays: [{n:1,label:'Пн'},{n:2,label:'Вт'},{n:3,label:'Ср'},{n:4,label:'Чт'},{n:5,label:'Пт'},{n:6,label:'Сб'},{n:7,label:'Вс'}],
@@ -1007,9 +1143,283 @@ function servicesPage() {
         get untypedCount() {
             return this.services.filter(s => !s.service_type).length;
         },
-        get sphereOptions() {
-            return [...new Set(this.services.map(s => s.sphere).filter(Boolean))]
-                .sort((a, b) => a.localeCompare(b, 'ru'));
+
+        // --- Фильтры по колонкам: значения, счётчики, выбор ---
+
+        facetByKey(key) {
+            return this.facets.find(f => f.key === key);
+        },
+
+        /**
+         * Значения одного БП по фасету, уже нормализованные для сравнения.
+         *
+         * Регистр не различаем: в справочнике живут и «Ежемесячно», и «ежемесячно»,
+         * и человек, выбравший одно, ждёт увидеть оба. Пустое значение — тоже значение
+         * («не задано»), по нему как раз и ищут незаполненные карточки.
+         */
+        facetValues(svc, key) {
+            const facet = this.facetByKey(key);
+
+            if (facet.type === 'tax') {
+                return (svc.tax_systems || []).map(ts => String(ts.id));
+            }
+
+            if (facet.type === 'bool') {
+                return [svc[key] ? 'yes' : 'no'];
+            }
+
+            return [(svc[key] || '').trim().toLowerCase()];
+        },
+
+        /**
+         * Подпись значения для меню и чипов.
+         *
+         * У текстовых фасетов ключ нормализован (нижний регистр), поэтому подпись берём
+         * из самих данных: иначе в чипе оказалось бы «налоги и отчетность» вместо того,
+         * как поле написано в справочнике.
+         */
+        facetLabel(key, value) {
+            const facet = this.facetByKey(key);
+
+            if (facet.type === 'bool') return value === 'yes' ? facet.yes : facet.no;
+            if (facet.type === 'tax') {
+                const ts = this.taxSystems.find(t => String(t.id) === value);
+                return ts ? ts.name : value;
+            }
+            if (value === '') return 'Не задано';
+
+            const svc = this.services.find(s => (s[key] || '').trim().toLowerCase() === value);
+
+            return svc ? (svc[key] || '').trim() : value;
+        },
+
+        /** Проходит ли БП через выбранные значения фасета (внутри фасета — «любое из»). */
+        matchesFacet(svc, key) {
+            const chosen = this.filters[key];
+            if (!chosen.length) return true;
+
+            return this.facetValues(svc, key).some(v => chosen.includes(v));
+        },
+
+        /** Поиск и тип обслуживания — общая часть отбора, отдельная от фасетов. */
+        matchesBase(svc) {
+            if (this.serviceTypeFilter) {
+                const ok = this.serviceTypeFilter === 'none'
+                    ? !svc.service_type
+                    : svc.service_type === this.serviceTypeFilter;
+                if (!ok) return false;
+            }
+
+            const q = this.searchQuery.trim().toLowerCase();
+
+            return !q || this.serviceMatchesSearch(svc, q);
+        },
+
+        /**
+         * Значения для меню одной воронки со счётчиками.
+         *
+         * Счётчик считается по списку, отобранному ВСЕМИ фильтрами, кроме этого же:
+         * так число показывает, сколько строк добавится при выборе, а не сколько их
+         * осталось после уже сделанного выбора.
+         *
+         * Зовётся только из refreshMenuOptions(), то есть на открытие меню и на смену
+         * отбора. В разметке используется уже готовый menuOptions.
+         */
+        facetOptions(key) {
+            const facet = this.facetByKey(key);
+            const base = this.services.filter(s =>
+                this.matchesBase(s) && this.facets.every(f => f.key === key || this.matchesFacet(s, f.key))
+            );
+
+            const counts = new Map();  // нормализованное значение → { label, count }
+            const bump = (value, label) => {
+                const row = counts.get(value) || { label, count: 0 };
+                row.count++;
+                counts.set(value, row);
+            };
+
+            base.forEach(svc => {
+                if (facet.type === 'tax') {
+                    const list = (svc.tax_systems || []);
+                    if (!list.length) return bump('', 'Не задано');
+                    list.forEach(ts => bump(String(ts.id), ts.name));
+                    return;
+                }
+                if (facet.type === 'bool') {
+                    return bump(svc[key] ? 'yes' : 'no', svc[key] ? facet.yes : facet.no);
+                }
+                const raw = (svc[key] || '').trim();
+                bump(raw.toLowerCase(), raw === '' ? 'Не задано' : raw);
+            });
+
+            // Выбранное показываем всегда, даже если под остальными фильтрами его уже нет:
+            // иначе снять свой же фильтр было бы нечем.
+            this.filters[key].forEach(v => {
+                if (!counts.has(v)) counts.set(v, { label: this.facetLabel(key, v), count: 0 });
+            });
+
+            return [...counts.entries()]
+                .map(([value, row]) => ({ value, label: row.label, count: row.count }))
+                // «Не задано» всегда внизу, остальное по алфавиту.
+                .sort((a, b) => (a.value === '' ? 1 : b.value === '' ? -1 : a.label.localeCompare(b.label, 'ru')));
+        },
+
+        /** Пересобрать список открытого меню: значения, счётчики и отбор по строке поиска. */
+        refreshMenuOptions() {
+            if (!this.openFilter) {
+                this.menuOptions = [];
+                this.menuTotal = 0;
+
+                return;
+            }
+
+            const all = this.facetOptions(this.openFilter);
+            const q = this.filterSearch.trim().toLowerCase();
+
+            this.menuTotal = all.length;
+            this.menuOptions = q ? all.filter(o => o.label.toLowerCase().includes(q)) : all;
+        },
+
+        /** Отметить или снять всё, что сейчас в списке. С поиском отмечает найденное. */
+        get menuAllChecked() {
+            return this.menuOptions.length > 0
+                && this.menuOptions.every(o => this.isFacetChecked(this.openFilter, o.value));
+        },
+
+        toggleMenuAll() {
+            const key = this.openFilter;
+            const values = this.menuOptions.map(o => o.value);
+
+            this.filters[key] = this.menuAllChecked
+                ? this.filters[key].filter(v => !values.includes(v))
+                : [...new Set([...this.filters[key], ...values])];
+
+            this.afterFilterChange();
+        },
+
+        /** Общий хвост любого изменения отбора. */
+        afterFilterChange() {
+            this.refreshMenuOptions();
+            this.syncFiltersToUrl();
+        },
+
+        isFacetChecked(key, value) {
+            return this.filters[key].includes(value);
+        },
+
+        toggleFacetValue(key, value) {
+            this.filters[key] = this.isFacetChecked(key, value)
+                ? this.filters[key].filter(v => v !== value)
+                : [...this.filters[key], value];
+            this.afterFilterChange();
+        },
+
+        clearFacet(key) {
+            this.filters[key] = [];
+            this.afterFilterChange();
+        },
+
+        /** Открыть меню воронки под её кнопкой. */
+        toggleFilterMenu(key, event) {
+            if (this.openFilter === key) return this.closeFilterMenu();
+
+            this.filterAnchor = event.currentTarget;
+            this.filterSearch = '';
+            this.openFilter = key;
+            this.refreshMenuOptions();
+            this.positionFilterMenu();
+
+            // Курсор сразу в поиске, если он есть: набирать можно, не целясь мышью.
+            this.$nextTick(() => this.$refs.filterSearchInput?.focus());
+        },
+
+        /**
+         * Держать меню у своей колонки.
+         *
+         * Раньше на прокрутку таблицы меню просто закрывалось, и это выглядело как
+         * «выбрал значение — меню исчезло»: список становился короче, браузер сам
+         * поправлял прокрутку, и событие закрывало открытое меню. Теперь двигаем его
+         * следом, а закрываем, только когда сама колонка ушла с экрана.
+         */
+        positionFilterMenu() {
+            if (!this.openFilter || !this.filterAnchor) return;
+
+            const rect = this.filterAnchor.getBoundingClientRect();
+            const width = 260;
+
+            if (rect.bottom < 0 || rect.top > window.innerHeight || rect.right < 0 || rect.left > window.innerWidth) {
+                return this.closeFilterMenu();
+            }
+
+            this.filterMenu = {
+                top: rect.bottom + 4,
+                left: Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)),
+            };
+        },
+
+        /** Прокрутка идёт пачками событий, поэтому пересчёт кадром, а не на каждое. */
+        onScrollWhileFiltering() {
+            if (!this.openFilter || this.filterFrame) return;
+
+            this.filterFrame = requestAnimationFrame(() => {
+                this.filterFrame = null;
+                this.positionFilterMenu();
+            });
+        },
+
+        closeFilterMenu() {
+            this.openFilter = null;
+            this.filterAnchor = null;
+            this.filterSearch = '';
+            this.menuOptions = [];
+            this.menuTotal = 0;
+        },
+
+        get activeFilterCount() {
+            return this.facets.reduce((n, f) => n + this.filters[f.key].length, 0);
+        },
+
+        /** Чипы под панелью: что именно сейчас отобрано, с крестиком у каждого значения. */
+        get filterChips() {
+            const chips = [];
+            this.facets.forEach(f => {
+                this.filters[f.key].forEach(value => {
+                    chips.push({ key: f.key, value, title: f.title, label: this.facetLabel(f.key, value) });
+                });
+            });
+            return chips;
+        },
+
+        resetFilters() {
+            this.facets.forEach(f => { this.filters[f.key] = []; });
+            this.searchQuery = '';
+            this.serviceTypeFilter = '';
+            this.afterFilterChange();
+        },
+
+        // --- Фильтры в адресе страницы ---
+        // Ссылкой с отбором можно поделиться или сохранить в закладки, а возврат на
+        // страницу (в том числе кнопкой «назад») не теряет то, что человек уже выбрал.
+
+        syncFiltersToUrl() {
+            const params = new URLSearchParams();
+            // Значения кладём отдельными параметрами, а не через запятую: в названиях
+            // сфер и групп запятые встречаются («ЗП, кадры и соцфонд»).
+            this.facets.forEach(f => this.filters[f.key].forEach(v => params.append(f.key, v)));
+            if (this.searchQuery.trim()) params.set('q', this.searchQuery.trim());
+            if (this.serviceTypeFilter) params.set('type', this.serviceTypeFilter);
+            if (this.groupBySphere) params.set('group', '1');
+
+            const qs = params.toString();
+            window.history.replaceState(null, '', qs ? location.pathname + '?' + qs : location.pathname);
+        },
+
+        readFiltersFromUrl() {
+            const params = new URLSearchParams(location.search);
+            this.facets.forEach(f => { this.filters[f.key] = params.getAll(f.key); });
+            this.searchQuery = params.get('q') || '';
+            this.serviceTypeFilter = params.get('type') || '';
+            this.groupBySphere = params.get('group') === '1';
         },
         childMatchesSearch(s, q) {
             return (s.children || []).some(c => (c.name || '').toLowerCase().includes(q));
@@ -1059,22 +1469,13 @@ function servicesPage() {
 
             return !!this.expandedServices[svc.id];
         },
+        // Поиск и тип обслуживания ('none' — БП без типа, их размечают в первую очередь)
+        // плюс фильтры колонок. Между разными фасетами условия складываются: выбрали
+        // сферу и периодичность — покажем то, что подходит и туда, и туда.
         get visibleServices() {
-            let list = this.services;
-            if (this.sphereFilter) {
-                list = list.filter(s => (s.sphere || '') === this.sphereFilter);
-            }
-            // 'none' — БП без типа: их и надо разметить в первую очередь.
-            if (this.serviceTypeFilter) {
-                list = this.serviceTypeFilter === 'none'
-                    ? list.filter(s => !s.service_type)
-                    : list.filter(s => s.service_type === this.serviceTypeFilter);
-            }
-            const q = this.searchQuery.trim().toLowerCase();
-            if (q) {
-                list = list.filter(s => this.serviceMatchesSearch(s, q));
-            }
-            return list;
+            return this.services.filter(s =>
+                this.matchesBase(s) && this.facets.every(f => this.matchesFacet(s, f.key))
+            );
         },
         get displayRows() {
             const list = this.visibleServices;
