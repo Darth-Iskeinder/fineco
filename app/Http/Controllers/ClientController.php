@@ -9,9 +9,11 @@ use App\Models\Employee;
 use App\Models\OrganizationForm;
 use App\Models\Tariff;
 use App\Models\TaxSystem;
+use App\Services\ClientResponsibleTransfer;
 use App\Services\ClientTaskHistory;
 use App\Support\TenantContext;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
@@ -171,6 +173,26 @@ class ClientController extends Controller
             ->with('success', 'Клиент ' . $client->name . ' успешно создан');
     }
 
+    /**
+     * Сохранение карточки клиента. Если сменился ответственный, вместе с ним на нового
+     * переезжает вся незакрытая работа по клиенту (см. ClientResponsibleTransfer).
+     *
+     * Одной транзакцией: состояние «у клиента новый ответственный, а смета и задачи
+     * остались на прежнем» — ровно то, из-за чего задачи продолжали идти уволенному.
+     *
+     * @return array{items:int, reminders:int, adhoc:int}
+     */
+    private function saveClient(Client $client, array $attrs): array
+    {
+        $previousResponsibleId = $client->responsible_employee_id;
+
+        return DB::transaction(function () use ($client, $attrs, $previousResponsibleId) {
+            $client->update($attrs);
+
+            return (new ClientResponsibleTransfer())->apply($client, $previousResponsibleId);
+        });
+    }
+
     public function update(Request $request, Client $client)
     {
         $this->authorizeClient($client);
@@ -189,7 +211,7 @@ class ClientController extends Controller
             'inn.unique' => 'Клиент с таким ИНН уже существует',
         ]);
 
-        $client->update([
+        $this->saveClient($client, [
             'name' => $validated['name'],
             'organization_form_id' => $validated['organization_form_id'] ?? null,
             'inn' => $validated['inn'],
@@ -397,7 +419,7 @@ class ClientController extends Controller
             }
         }
 
-        $client->update($validated);
+        $this->saveClient($client, $validated);
         $client->load([
             'organizationForm',
             'taxSystem',

@@ -10,6 +10,7 @@ use App\Services\ClientCsvSchema;
 use App\Services\ClientCsvTemplate;
 use App\Services\ClientCsvWriter;
 use App\Services\ClientImportPlanner;
+use App\Services\ClientResponsibleTransfer;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -156,7 +157,13 @@ class ClientImportController extends Controller
                     ->mapWithKeys(fn (string $field) => [$field => $client->getAttribute($field)])
                     ->all();
 
+                $previousResponsibleId = $client->responsible_employee_id;
+
                 $client->update($row['attributes']);
+
+                // Импорт меняет ответственного так же, как карточка, значит и работа по
+                // клиенту должна переехать так же — иначе задачи остались бы на прежнем.
+                (new ClientResponsibleTransfer())->apply($client, $previousResponsibleId);
 
                 $import->rows()->create([
                     'client_id' => $client->id,
