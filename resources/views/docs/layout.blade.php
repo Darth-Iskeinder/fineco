@@ -130,14 +130,33 @@
         .item b { display: block; font-size: 16px; margin-bottom: 3px; }
         .item span { font-size: 14px; color: var(--muted); }
         .item.off span { color: #b5b0c4; }
+        .nav .group, .cards .group {
+            margin: 16px 0 6px;
+            padding: 0 10px;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: .04em;
+            text-transform: uppercase;
+            color: #a8a2bb;
+        }
+        .cards .group { padding: 0; margin: 20px 0 0; }
+        .note { color: var(--muted); font-size: 14px; margin: 26px 0 0; }
     </style>
 </head>
 <body>
     <div class="wrap">
         <div class="side">
-            <a class="brand" href="{{ route('docs.index') }}">Kubik<span>·</span>док</a>
+            <a class="brand" href="{{ route('docs.index') }}">Kubik<span>·</span>справка</a>
+            @php($navGroup = null)
             <ul class="nav">
                 @foreach($sections as $slug => $s)
+                    @if(($s['group'] ?? null) !== $navGroup)
+                        @php($navGroup = $s['group'] ?? null)
+                        @if($navGroup)
+                            <li class="group">{{ $navGroup }}</li>
+                        @endif
+                    @endif
+
                     @if($s['ready'])
                         <li>
                             <a href="{{ route('docs.section', $slug) }}"

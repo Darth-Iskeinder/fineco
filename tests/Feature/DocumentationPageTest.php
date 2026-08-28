@@ -38,7 +38,7 @@ class DocumentationPageTest extends TestCase
     {
         $page = $this->get('/documentation/kubik')->assertOk();
 
-        $page->assertSee('Как работает Kubik', false);
+        $page->assertSee('Справка по Kubik', false);
         $page->assertSee('БухСмета', false);
         $page->assertSee('noindex', false);
     }
