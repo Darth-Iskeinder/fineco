@@ -415,7 +415,18 @@ $servicesJson = $services->map(fn($s) => array_merge([
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-1">Описание</label>
-                                <textarea x-model="serviceForm.description" rows="2" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-none"></textarea>
+                                {{-- Поле растёт под текст: пустое в две строки, дальше до max-h-60
+                                     (около десяти строк), после чего прокрутка внутри поля. Короткое
+                                     описание не раздувает форму, длинное видно целиком. --}}
+                                <textarea x-model="serviceForm.description" x-ref="descBox" @input="autoGrowDesc()"
+                                          rows="2" maxlength="1000"
+                                          class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-none overflow-y-auto max-h-60"></textarea>
+                                {{-- Остаток показываем только у предела: при обычном описании
+                                     цифра под полем ни о чём и только отвлекает. --}}
+                                <p x-show="descriptionLeft < 100" x-cloak class="mt-1 text-xs text-right"
+                                   :class="descriptionLeft < 20 ? 'text-amber-600' : 'text-slate-400'">
+                                    осталось <span x-text="descriptionLeft"></span>
+                                </p>
                             </div>
 
                             {{-- Дополнительные классификационные поля --}}
@@ -1602,6 +1613,30 @@ function servicesPage() {
                 };
             }
             this.showServiceModal = true;
+            // Высоту считаем после показа: у скрытого поля scrollHeight равен нулю.
+            this.$nextTick(() => this.autoGrowDesc());
+        },
+
+        /** Предел описания тот же, что в проверке на сервере (SettingsController). */
+        descriptionLimit: 1000,
+
+        get descriptionLeft() {
+            return this.descriptionLimit - (this.serviceForm.description || '').length;
+        },
+
+        /**
+         * Подгоняет высоту описания под текст.
+         *
+         * Сначала сбрасываем в auto, иначе поле умеет только расти: уже занятая
+         * высота осталась бы после удаления строк. К scrollHeight добавляем рамки
+         * (у поля box-sizing: border-box), иначе на них вылезает лишняя прокрутка.
+         */
+        autoGrowDesc() {
+            const el = this.$refs.descBox;
+            if (!el || el.offsetParent === null) return;
+
+            el.style.height = 'auto';
+            el.style.height = (el.scrollHeight + el.offsetHeight - el.clientHeight) + 'px';
         },
 
         /**
