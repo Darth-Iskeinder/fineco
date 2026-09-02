@@ -115,11 +115,14 @@ class TaskClientSelectorTest extends TestCase
     }
 
     /**
-     * Поиск в модалке и фильтр компаний над таблицей — разные списки с разной формой.
+     * Поиск компаний в модалке и отбор по компании в таблице — разные списки.
      *
      * Одноимённый геттер уже ломал страницу: дубликат ключа в объекте компонента
-     * молча перетирает первый, и фильтр начинал перебирать {rows, total}, показывая
+     * молча перетирает первый, и список начинал перебирать {rows, total}, показывая
      * «undefined undefined». Имена должны оставаться разными.
+     *
+     * Отбор по компании теперь живёт в воронке колонки (facetSource + filters.client),
+     * а не в селекте над таблицей, поэтому сторожим уже эту пару имён.
      */
     public function test_picker_and_filter_lists_do_not_clash(): void
     {
@@ -128,9 +131,9 @@ class TaskClientSelectorTest extends TestCase
             ->assertOk()
             ->getContent();
 
-        $this->assertSame(1, substr_count($html, 'get clientOptions()'), 'Геттер списка компаний объявлен не один раз');
         $this->assertSame(1, substr_count($html, 'get clientPickerOptions()'), 'Геттер поиска компаний объявлен не один раз');
-        $this->assertStringContainsString('x-for="c in clientOptions"', $html, 'Фильтр перестал брать свой список');
+        $this->assertSame(1, substr_count($html, 'get facetSource()'), 'Источник значений воронок объявлен не один раз');
+        $this->assertStringContainsString("filters['client']", $html, 'Колонка «Компания» потеряла воронку');
     }
 
     public function test_admin_and_manager_see_all_active_clients(): void

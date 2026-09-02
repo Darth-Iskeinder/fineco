@@ -144,20 +144,11 @@
         {{-- Поиск: быстрее двух селектов, когда знаешь, что ищешь. Клавиша «/» ставит сюда курсор. --}}
         <div class="relative flex-1 min-w-[16rem] max-w-sm">
             <svg class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"/></svg>
-            <input type="search" x-model="listSearch" x-ref="listSearch"
-                   @keydown.escape="listSearch = ''; $event.target.blur()"
+            <input type="search" x-model="listSearchInput" x-ref="listSearch"
+                   @keydown.escape="listSearchInput = ''; listSearch = ''; $event.target.blur()"
                    placeholder="Поиск по задаче, компании…   /"
                    class="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
         </div>
-
-        {{-- Компания (показываем всегда, чтобы выбранная компания оставалась видна в фильтре) --}}
-        <select x-model="clientFilter"
-                class="px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-            <option value="all" x-text="'Все компании (' + activeCount + ')'"></option>
-            <template x-for="c in clientOptions" :key="c.id">
-                <option :value="String(c.id)" x-text="c.name + ' (' + c.count + ')'"></option>
-            </template>
-        </select>
 
         {{-- Срок: два переключателя «что горит». Повторное нажатие снимает фильтр, поэтому
              отдельная кнопка «Все» не нужна. Видны всегда, даже с нулём: «Сегодня 0» — это
@@ -192,17 +183,6 @@
             </button>
         </div>
 
-        {{-- Действие: фильтр по состоянию из колонки «Действия» (не начаты / на паузе и т.д.). --}}
-        <select x-model="statusFilter"
-                class="px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-            <option value="all">Все действия</option>
-            <option value="pending" x-text="'Не начаты (' + statusCounts.pending + ')'"></option>
-            <option value="paused" x-text="'На паузе (' + statusCounts.paused + ')'"></option>
-            <option value="running" x-text="'В работе (' + statusCounts.running + ')'"></option>
-            <option value="review" x-text="'На проверке (' + statusCounts.review + ')'"></option>
-            <option value="rework" x-text="'На доработку (' + statusCounts.rework + ')'"></option>
-        </select>
-
         <button x-show="listFiltersActive" @click="resetListFilters()"
                 class="text-xs text-slate-400 hover:text-slate-600 underline">Сбросить</button>
 
@@ -211,6 +191,12 @@
             <span x-text="visibleCount + ' задач'"></span>
             <span x-show="dueCounts.overdue > 0" class="text-red-600" x-text="' · ' + dueCounts.overdue + ' просрочено'"></span>
         </span>
+    </div>
+
+    {{-- Что сейчас отобрано воронками: в колонках виден только значок, а тут вся
+         картина одной строкой, и каждое значение снимается на месте. --}}
+    <div x-show="viewMode === 'list'">
+        @include('partials.column-filter-chips', ['class' => 'flex flex-wrap items-center gap-1.5 mb-4'])
     </div>
 
     {{-- Подсказка про горизонт показа — только там, где виден активный набор задач.
@@ -319,32 +305,12 @@
                 <thead class="bg-slate-50">
                     <tr>
                         <th class="w-6 px-4 py-3"></th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Задача</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Компания</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                            <button type="button" @click="toggleSort('due')"
-                                    class="group inline-flex items-center gap-1 uppercase tracking-wider hover:text-slate-700 transition-colors"
-                                    title="Сортировать по сроку">
-                                Периодичность
-                                <span class="inline-flex flex-col leading-[0]">
-                                    <svg class="w-2 h-2" :class="sortBy === 'due' && sortDir === 'asc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" viewBox="0 0 8 8" fill="currentColor"><path d="M4 0l4 5H0z"/></svg>
-                                    <svg class="w-2 h-2 mt-0.5" :class="sortBy === 'due' && sortDir === 'desc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" viewBox="0 0 8 8" fill="currentColor"><path d="M4 8L0 3h8z"/></svg>
-                                </span>
-                            </button>
-                        </th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">
-                            <button type="button" @click="toggleSort('period')"
-                                    class="group inline-flex items-center gap-1 uppercase tracking-wider hover:text-slate-700 transition-colors"
-                                    title="Сортировать по отчётному периоду">
-                                Отчётный период
-                                <span class="inline-flex flex-col leading-[0]">
-                                    <svg class="w-2 h-2" :class="sortBy === 'period' && sortDir === 'asc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" viewBox="0 0 8 8" fill="currentColor"><path d="M4 0l4 5H0z"/></svg>
-                                    <svg class="w-2 h-2 mt-0.5" :class="sortBy === 'period' && sortDir === 'desc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" viewBox="0 0 8 8" fill="currentColor"><path d="M4 8L0 3h8z"/></svg>
-                                </span>
-                            </button>
-                        </th>
+                        @include('partials.column-filter', ['key' => 'name', 'title' => 'Задача'])
+                        @include('partials.column-filter', ['key' => 'client', 'title' => 'Компания'])
+                        @include('partials.column-filter', ['key' => 'periodicity', 'title' => 'Периодичность', 'sort' => 'due'])
+                        @include('partials.column-filter', ['key' => 'reporting_period', 'title' => 'Отчётный период', 'sort' => 'period'])
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider w-24">Время</th>
-                        <th class="px-4 py-3 text-right text-xs font-medium text-slate-500 uppercase tracking-wider">Действия</th>
+                        @include('partials.column-filter', ['key' => 'status', 'title' => 'Действия', 'align' => 'right'])
                     </tr>
                 </thead>
                     {{-- Группы: сверху то, что горит. Заголовки появляются, только когда есть
@@ -2100,9 +2066,36 @@
         </div>
     </div>
 
+    @include('partials.column-filter-menu')
+
 </div>
 
+@include('partials.column-filter-engine')
+
 <script>
+// Колонки вкладки «Список», у которых есть воронка. «Время» не фильтруется: там
+// секундомер, у каждой строки своё значение. Срок («Просрочено», «Сегодня») остаётся
+// кнопками над таблицей: это не значение колонки, а состояние на сегодня.
+const TASK_FACETS = [
+    { key: 'name',             title: 'Задача',          type: 'text' },
+    { key: 'client',           title: 'Компания',        type: 'client' },
+    { key: 'periodicity',      title: 'Периодичность',   type: 'text' },
+    { key: 'reporting_period', title: 'Отчётный период', type: 'text' },
+    // Стадии перечисляем в рабочем порядке, а не по алфавиту: список читается
+    // как путь задачи от «не начата» до «на проверке».
+    { key: 'status',           title: 'Действия',        type: 'status',
+      order: ['pending', 'running', 'paused', 'rework', 'review'] },
+];
+
+/** Подписи стадий работы для воронки «Действия». */
+const TASK_STATUS_LABELS = {
+    pending: 'Не начата',
+    running: 'В работе',
+    paused:  'На паузе',
+    rework:  'На доработку',
+    review:  'На проверке',
+};
+
 function buhTasks(initialTasks, year, month, allClients, completed, employees, currentEmployeeId, catalog, teamTasks, teamMembers, assignedTasks, assignedAlertCount, assignedDoneDays) {
     // File-объекты держим вне реактивного state — Alpine оборачивает объекты в Proxy,
     // что ломает внутренние методы File/Blob при передаче в FormData
@@ -2118,7 +2111,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
     // свойство прямо из геттера гоняла бы Alpine по кругу.
     let completedCache = { key: null, list: [] };
 
-    return {
+    return withColumnFilters(TASK_FACETS, {
         tasks: initialTasks.map((t, i) => ({
             ...t,
             loading: false,
@@ -2151,7 +2144,6 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         checklistFilter: { group: '', period: '' }, // совместный фильтр столбцов чеклиста (группа + период)
         ticker: null,
         now: Math.floor(Date.now() / 1000),
-        clientFilter: 'all',
         // Вкладка «Задачи бухгалтеров» (только главбух): текущие задачи его бухгалтеров
         teamTasks: teamTasks || [],
         teamMembers: teamMembers || [],
@@ -2164,9 +2156,15 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         assignedDoneDays: assignedDoneDays || 30,
         assignedReject: { show: false, task: null, comment: '' },
         todayStr: new Date().toLocaleDateString('en-CA'), // YYYY-MM-DD в локальной зоне (подсветка просрочки)
-        listSearch: '', // поиск по активному списку: название, компания, филиал, отчётный период
+        // Поиск по активному списку: название, компания, филиал, отчётный период.
+        // Две переменные, а не одна: в listSearchInput печатают, по listSearch отбирают.
+        // На большом списке (пара тысяч задач) полный пересчёт стоит около четверти
+        // секунды, и на каждой букве экран заметно замирал. Теперь пересчёт один — после
+        // того, как человек допечатал.
+        listSearchInput: '',
+        listSearch: '',
+        _searchTimer: null,
         dueFilter: 'all', // срок: 'all' | 'overdue' | 'today' (только вкладка «Список»)
-        statusFilter: 'all', // фильтр колонки «Действия»: 'all' | 'pending' | 'paused' | 'running' | 'rework'
         assignedOnly: false, // «Поручено мне»: только задачи, заведённые другим сотрудником
         sortBy: null, // null | 'due' (срок/периодичность) | 'period' (отчётный период)
         sortDir: null, // null = исходный порядок | 'asc' | 'desc'
@@ -2202,28 +2200,80 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         creating: false,
         createError: '',
 
-        // Фильтр по компаниям: только компании, по которым в списке реально есть задачи.
-        // allClients содержит и компании с ПУСТОЙ сметой (сотрудник — ответственный, но
-        // корневых позиций/БП нет), они дают 0 задач — в фильтре им не место, иначе выбор
-        // такой компании показывает пустой список. Счётчик — активные (невыполненные) задачи.
-        get clientOptions() {
-            const counts = {};
-            this.tasks.forEach(t => {
-                if (t.status === 'completed' || t.client_id == null) return;
-                counts[t.client_id] = (counts[t.client_id] || 0) + 1;
-            });
-            return (this.allClients || [])
-                .map(c => ({ id: c.id, name: c.name, count: counts[c.id] || 0 }))
-                .filter(c => c.count > 0)
-                .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
+        // --- Воронки в колонках ---
+        // Общая механика (меню, счётчики, чипы, адрес страницы) живёт в движке
+        // partials/column-filter-engine, общем с каталогом БП. Здесь — только свои
+        // виды колонок и то, что считается отбором ДО них.
+
+        /**
+         * По чему движок считает значения и счётчики воронок.
+         *
+         * Выполненные исключаем: в активном списке их нет, и в счётчике они обещали бы
+         * строки, которых на экране не появится.
+         */
+        get facetSource() {
+            return this.tasks.filter(t => t.status !== 'completed');
         },
-        // Активные (невыполненные) задачи всех компаний — для «Все компании (N)»,
-        // чтобы «Все» = сумме счётчиков по компаниям (в списке completed скрыты).
-        get activeCount() {
-            return this.tasks.filter(t => t.status !== 'completed').length;
+
+        /** Значения задачи по колонке: ключ для сравнения плюс подпись для человека. */
+        facetEntries(task, key) {
+            if (key === 'client') {
+                return [{
+                    value: task.client_id == null ? '' : String(task.client_id),
+                    label: task.client_name || 'Без компании',
+                }];
+            }
+
+            if (key === 'status') {
+                const status = task.status || 'pending';
+
+                return [{ value: status, label: TASK_STATUS_LABELS[status] || status }];
+            }
+
+            const raw = (task[key] ?? '').toString().trim();
+
+            return [{ value: raw.toLowerCase(), label: raw === '' ? 'Не задано' : raw }];
         },
-        matchesFilter(task) {
-            return this.clientFilter === 'all' || String(task.client_id) === String(this.clientFilter);
+
+        /**
+         * Подпись значения для меню и чипов.
+         *
+         * Компанию и стадию берём из справочников, а не из задач: значение могло
+         * приехать ссылкой, когда таких задач у сотрудника уже нет, и в чипе оказался
+         * бы номер компании вместо названия.
+         */
+        facetLabel(key, value) {
+            if (key === 'client') {
+                if (value === '') return 'Без компании';
+                const client = (this.allClients || []).find(c => String(c.id) === value);
+
+                return client ? client.name : value;
+            }
+
+            if (key === 'status') return TASK_STATUS_LABELS[value] || value;
+            if (value === '') return 'Не задано';
+
+            const task = this.tasks.find(t => (t[key] ?? '').toString().trim().toLowerCase() === value);
+
+            return task ? (task[key] ?? '').toString().trim() : value;
+        },
+
+        /**
+         * Отбор ДО воронок: поиск, срочность и «поручено мне».
+         *
+         * По нему движок считает счётчики значений, поэтому цифры в меню согласованы
+         * с тем, что человек уже отобрал кнопками над таблицей.
+         */
+        matchesBase(task) {
+            return this.matchesDue(task) && this.matchesSearch(task) && this.matchesAssigned(task);
+        },
+
+        /** Хвост любого изменения отбора: меню, показ с начала, память и адрес страницы. */
+        afterFilterChange() {
+            this.refreshMenuOptions();
+            this.visibleLimit = 20;
+            this._saveListFilters();
+            this._syncListFiltersToUrl();
         },
 
         // Фильтр по сроку (только «Список»): 'all' | 'overdue' | 'today'.
@@ -2261,16 +2311,17 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         },
 
         get listFiltersActive() {
-            return this.clientFilter !== 'all' || this.dueFilter !== 'all'
-                || this.statusFilter !== 'all' || this.listSearch !== '' || this.assignedOnly;
+            return this.activeFilterCount > 0 || this.dueFilter !== 'all'
+                || this.listSearchInput !== '' || this.assignedOnly;
         },
 
         resetListFilters() {
-            this.clientFilter = 'all';
+            this.clearAllFacets();
             this.dueFilter = 'all';
-            this.statusFilter = 'all';
+            this.listSearchInput = '';
             this.listSearch = '';
             this.assignedOnly = false;
+            this.afterFilterChange();
         },
 
         /** Сколько активных задач мне поручили — цифра на кнопке фильтра. */
@@ -2285,7 +2336,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             const c = { all: 0, overdue: 0, today: 0, rest: 0 };
             for (const t of this.tasks) {
                 if (t.status === 'completed') continue;
-                if (!this.matchesFilter(t) || !this.matchesStatus(t) || !this.matchesSearch(t) || !this.matchesAssigned(t)) continue;
+                if (!this.matchesFacets(t) || !this.matchesSearch(t) || !this.matchesAssigned(t)) continue;
                 c.all++;
                 const u = this.urgency(t);
                 if (u === 'overdue') c.overdue++;
@@ -2338,23 +2389,6 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 groups.push({ key: 'rest', label: hot ? 'Остальные' : null, total: counts.rest, headClass: 'bg-slate-50 text-slate-500', items: rest });
             }
             return groups;
-        },
-
-        // Фильтр по состоянию из колонки «Действия»: не начаты, на паузе, в работе, на доработку.
-        matchesStatus(task) {
-            return this.statusFilter === 'all' || task.status === this.statusFilter;
-        },
-
-        // Счётчики по состоянию (для подписей в выпадающем списке фильтра). Считаем по активным
-        // строкам с учётом остальных фильтров (компания/срок) — как их рисует список.
-        get statusCounts() {
-            const c = { pending: 0, paused: 0, running: 0, review: 0, rework: 0 };
-            for (const t of this.tasks) {
-                if (t.status === 'completed') continue;
-                if (!this.matchesFilter(t) || !this.matchesDue(t) || !this.matchesSearch(t) || !this.matchesAssigned(t)) continue;
-                if (c[t.status] !== undefined) c[t.status]++;
-            }
-            return c;
         },
 
         // Матрица вкладки «Чеклист»: строки — компании, столбцы — задачи, ячейка — статус (только чтение).
@@ -2652,8 +2686,8 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         get visibleCount() {
             // Считаем только активные строки (без выполненных) — как их и рисует visibleTasks,
             // иначе сентинел бесконечной прокрутки не «догрузит» до реального конца списка.
-            return this.tasks.filter(t => t.status !== 'completed' && this.matchesFilter(t)
-                && this.matchesDue(t) && this.matchesStatus(t) && this.matchesSearch(t) && this.matchesAssigned(t)).length;
+            return this.tasks.filter(t => t.status !== 'completed' && this.matchesFacets(t)
+                && this.matchesDue(t) && this.matchesSearch(t) && this.matchesAssigned(t)).length;
         },
 
         // Окно бесконечной прокрутки: первые visibleLimit задач, прошедших фильтр,
@@ -2664,13 +2698,13 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         get visibleTasks() {
             // _taskVer в ключе: при закрытии задачи (status → completed) она сразу пропадает
             // из активного списка и уходит во вкладку «Выполненные» — кэш пересобирается.
-            const key = this.clientFilter + '|' + this.dueFilter + '|' + this.statusFilter + '|' + this.listSearch + '|' + this.assignedOnly + '|' + this.visibleLimit + '|' + this.sortBy + '|' + this.sortDir + '|' + this.tasks.length + '|' + this._taskVer;
+            const key = JSON.stringify(this.filters) + '|' + this.dueFilter + '|' + this.listSearch + '|' + this.assignedOnly + '|' + this.visibleLimit + '|' + this.sortBy + '|' + this.sortDir + '|' + this.tasks.length + '|' + this._taskVer;
             if (visibleCache.key !== key) {
                 const idxs = [];
                 for (let i = 0; i < this.tasks.length; i++) {
                     const task = this.tasks[i];
                     if (task.status === 'completed') continue; // выполненные — только во вкладке «Выполненные»
-                    if (!this.matchesFilter(task) || !this.matchesDue(task) || !this.matchesStatus(task) || !this.matchesSearch(task) || !this.matchesAssigned(task)) continue;
+                    if (!this.matchesFacets(task) || !this.matchesDue(task) || !this.matchesSearch(task) || !this.matchesAssigned(task)) continue;
                     idxs.push(i);
                 }
 
@@ -2988,17 +3022,36 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             );
             this.ticker = setInterval(() => { this.now = Math.floor(Date.now() / 1000); }, 1000);
 
-            // Бесконечная прокрутка: при смене фильтра/сортировки начинаем показ заново с 20.
-            this.$watch('clientFilter', () => { this.visibleLimit = 20; });
-            this.$watch('dueFilter', () => { this.visibleLimit = 20; });
-            this.$watch('statusFilter', () => { this.visibleLimit = 20; });
-            this.$watch('listSearch', () => { this.visibleLimit = 20; });
-            this.$watch('sortDir', () => { this.visibleLimit = 20; });
-            this.$watch('sortBy', () => { this.visibleLimit = 20; });
+            // Печать не должна ждать пересчёта: отбор запускаем, когда человек
+            // остановился. Задержка маленькая, на глаз она читается как «мгновенно».
+            this.$watch('listSearchInput', (value) => {
+                clearTimeout(this._searchTimer);
+                this._searchTimer = setTimeout(() => { this.listSearch = value; }, 200);
+            });
 
-            this._restoreListFilters();
-            ['clientFilter', 'dueFilter', 'statusFilter']
-                .forEach(f => this.$watch(f, () => this._saveListFilters()));
+            // Бесконечная прокрутка: при смене фильтра/сортировки начинаем показ заново с 20.
+            ['dueFilter', 'listSearch', 'assignedOnly', 'sortDir', 'sortBy']
+                .forEach(f => this.$watch(f, () => { this.visibleLimit = 20; }));
+
+            // Ссылка с отбором сильнее памяти браузера: пришли по ней — показываем ровно
+            // то, что в ней написано, и запомненный свой срез не подмешиваем.
+            if (!this._readListFiltersFromUrl()) {
+                this._restoreListFilters();
+                // Адрес всегда описывает то, что на экране: иначе скопированная ссылка
+                // отдала бы коллеге чистый список вместо того же среза.
+                this._syncListFiltersToUrl();
+            }
+
+            // Отбор кнопками над таблицей запоминается и попадает в адрес так же, как
+            // выбранное в воронках (там этим занимается afterFilterChange).
+            ['dueFilter', 'assignedOnly'].forEach(f => this.$watch(f, () => {
+                this._saveListFilters();
+                this._syncListFiltersToUrl();
+            }));
+            // Поиск в память не пишем (см. _saveListFilters), но в ссылке он нужен.
+            this.$watch('listSearch', () => this._syncListFiltersToUrl());
+            // Счётчики в открытом меню считаются от остального отбора — держим их свежими.
+            this.$watch('filterSearch', () => this.refreshMenuOptions());
 
             // «/» ставит курсор в поиск, Esc его чистит (обработчик на самом поле).
             // Не перехватываем клавишу, когда человек уже печатает в поле или в модалке.
@@ -3033,9 +3086,9 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         _saveListFilters() {
             try {
                 localStorage.setItem(this._listFiltersKey(), JSON.stringify({
-                    clientFilter: this.clientFilter,
+                    filters: this.filters,
                     dueFilter: this.dueFilter,
-                    statusFilter: this.statusFilter,
+                    assignedOnly: this.assignedOnly,
                 }));
             } catch (e) { /* приватный режим — просто не запоминаем */ }
         },
@@ -3047,18 +3100,55 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             } catch (e) { return; }
             if (!saved) return;
 
-            // Компания могла уйти из списка (задачи закрыты, клиента передали) — тогда
-            // сохранённый фильтр показал бы пустой экран. Проверяем и откатываем на «все».
-            if (saved.clientFilter && saved.clientFilter !== 'all'
-                && this.clientOptions.some(c => String(c.id) === String(saved.clientFilter))) {
-                this.clientFilter = saved.clientFilter;
+            // Значения могли уйти из списка: задачи закрыли, компанию передали другому.
+            // Восстанавливаем только те, что сегодня есть, иначе запомненный отбор
+            // встречал бы человека пустым экраном.
+            if (saved.filters) {
+                this.facets.forEach(f => {
+                    const alive = new Set(this.facetSource.flatMap(t => this.facetValues(t, f.key)));
+                    this.filters[f.key] = (saved.filters[f.key] || []).filter(v => alive.has(v));
+                });
             }
             if (['overdue', 'today'].includes(saved.dueFilter)) {
                 this.dueFilter = saved.dueFilter;
             }
-            if (['pending', 'paused', 'running', 'review', 'rework'].includes(saved.statusFilter)) {
-                this.statusFilter = saved.statusFilter;
-            }
+            this.assignedOnly = !!saved.assignedOnly;
+        },
+
+        // --- Отбор в адресе страницы ---
+        // Ссылку со своим срезом («мои просроченные по этой компании») можно сохранить
+        // в закладки и переслать. Возврат кнопкой «назад» тоже ничего не теряет.
+
+        _syncListFiltersToUrl() {
+            // Чужие параметры адреса не трогаем: на страницу приходят и по ссылкам
+            // из уведомлений, со своими метками.
+            const params = new URLSearchParams(location.search);
+            this.facets.forEach(f => params.delete(f.key));
+            ['q', 'due', 'assigned'].forEach(k => params.delete(k));
+
+            this.facetsToParams(params);
+            if (this.listSearch.trim()) params.set('q', this.listSearch.trim());
+            if (this.dueFilter !== 'all') params.set('due', this.dueFilter);
+            if (this.assignedOnly) params.set('assigned', '1');
+
+            const qs = params.toString();
+            window.history.replaceState(null, '', qs ? location.pathname + '?' + qs : location.pathname);
+        },
+
+        /** Прочитать отбор из адреса. Возвращает false, если в ссылке его нет. */
+        _readListFiltersFromUrl() {
+            const params = new URLSearchParams(location.search);
+            const hasOwn = this.facets.some(f => params.getAll(f.key).length > 0)
+                || ['q', 'due', 'assigned'].some(k => params.has(k));
+            if (!hasOwn) return false;
+
+            this.facetsFromParams(params);
+            this.listSearch = params.get('q') || '';
+            this.listSearchInput = this.listSearch;
+            this.dueFilter = ['overdue', 'today'].includes(params.get('due')) ? params.get('due') : 'all';
+            this.assignedOnly = params.get('assigned') === '1';
+
+            return true;
         },
 
         getElapsed(task) {
@@ -3642,8 +3732,8 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             return { rows: found.slice(0, PICKER_LIMIT), total: found.length };
         },
 
-        // Имена намеренно длинные: clientOptions уже занят списком компаний для
-        // фильтра над таблицей, и одноимённый геттер молча перетёр бы его.
+        // Имена намеренно длинные: списки в попапе «Добавить задачу» — не то же самое,
+        // что значения воронки «Компания», и одноимённый геттер молча перетёр бы соседа.
         get clientPickerOptions()  { return this.filterOptions(this.allClients, this.picker.client.q); },
         get catalogPickerOptions() { return this.filterOptions(this.catalog, this.picker.catalog.q); },
 
@@ -3797,7 +3887,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
 
             this.creating = false;
         },
-    };
+    });
 }
 
 // «Сроки по клиентам» — уведомление (только чтение): срез просроченных/сегодняшних задач.
