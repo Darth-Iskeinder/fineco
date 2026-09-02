@@ -101,8 +101,14 @@ $servicesJson = $services->map(fn($s) => array_merge([
                 <input type="checkbox" x-model="groupBySphere" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/20">
                 Группировать по сферам
             </label>
-            <span class="text-xs text-slate-400" x-show="activeFilterCount || serviceTypeFilter || searchQuery.trim()" x-text="visibleServices.length + ' из ' + services.length"></span>
-            <button type="button" x-show="activeFilterCount || serviceTypeFilter || searchQuery.trim()"
+            {{-- Архивные скрыты по умолчанию. Показываем тумблер, только когда архив
+                 непустой: у свежего каталога он был бы галочкой ни о чём. --}}
+            <label x-show="archivedCount" class="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
+                <input type="checkbox" x-model="showArchived" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500/20">
+                <span>Показать архивные <span class="text-slate-400" x-text="'(' + archivedCount + ')'"></span></span>
+            </label>
+            <span class="text-xs text-slate-400" x-show="activeFilterCount || serviceTypeFilter || searchQuery.trim() || (archivedCount && !showArchived)" x-text="visibleServices.length + ' из ' + services.length"></span>
+            <button type="button" x-show="activeFilterCount || serviceTypeFilter || searchQuery.trim() || showArchived"
                     @click="resetFilters()"
                     class="text-xs text-slate-500 hover:text-indigo-600 underline decoration-dotted underline-offset-2">
                 Сбросить всё
@@ -969,7 +975,7 @@ function servicesPage() {
 
             // Поиск, тип и группировка правятся напрямую через x-model, поэтому в адрес
             // их переносим наблюдателями, а не из каждого обработчика.
-            ['searchQuery', 'serviceTypeFilter', 'groupBySphere'].forEach(prop => {
+            ['searchQuery', 'serviceTypeFilter', 'groupBySphere', 'showArchived'].forEach(prop => {
                 this.$watch(prop, () => {
                     this.refreshMenuOptions();
                     this.syncFiltersToUrl();
@@ -995,6 +1001,11 @@ function servicesPage() {
         serviceTypeFilter: '',
         searchQuery: '',
         groupBySphere: false,
+
+        // Архивные по умолчанию скрыты: их не ведут, а в общем списке они занимают
+        // строки, находятся поиском и считаются в воронках наравне с рабочими.
+        // Из каталога клиента, сметы и задачника они и так не подтягиваются.
+        showArchived: false,
 
         // --- Фильтры по колонкам ---
         // Воронка в шапке колонки, как в таблицах, к которым бухгалтер привык. Внутри
@@ -1141,7 +1152,13 @@ function servicesPage() {
         },
 
         get untypedCount() {
-            return this.services.filter(s => !s.service_type).length;
+            // Считаем по тому же списку, что и показываем: размечать типом архивный
+            // БП незачем, и в скрытом виде он раздувал бы число «без типа».
+            return this.services.filter(s => !s.service_type && (this.showArchived || !s.archived_at)).length;
+        },
+
+        get archivedCount() {
+            return this.services.filter(s => s.archived_at).length;
         },
 
         // --- Фильтры по колонкам: значения, счётчики, выбор ---
@@ -1201,8 +1218,10 @@ function servicesPage() {
             return this.facetValues(svc, key).some(v => chosen.includes(v));
         },
 
-        /** Поиск и тип обслуживания — общая часть отбора, отдельная от фасетов. */
+        /** Поиск, тип обслуживания и архив — общая часть отбора, отдельная от фасетов. */
         matchesBase(svc) {
+            if (svc.archived_at && !this.showArchived) return false;
+
             if (this.serviceTypeFilter) {
                 const ok = this.serviceTypeFilter === 'none'
                     ? !svc.service_type
@@ -1394,6 +1413,7 @@ function servicesPage() {
             this.facets.forEach(f => { this.filters[f.key] = []; });
             this.searchQuery = '';
             this.serviceTypeFilter = '';
+            this.showArchived = false;
             this.afterFilterChange();
         },
 
@@ -1409,6 +1429,7 @@ function servicesPage() {
             if (this.searchQuery.trim()) params.set('q', this.searchQuery.trim());
             if (this.serviceTypeFilter) params.set('type', this.serviceTypeFilter);
             if (this.groupBySphere) params.set('group', '1');
+            if (this.showArchived) params.set('archived', '1');
 
             const qs = params.toString();
             window.history.replaceState(null, '', qs ? location.pathname + '?' + qs : location.pathname);
@@ -1420,6 +1441,7 @@ function servicesPage() {
             this.searchQuery = params.get('q') || '';
             this.serviceTypeFilter = params.get('type') || '';
             this.groupBySphere = params.get('group') === '1';
+            this.showArchived = params.get('archived') === '1';
         },
         childMatchesSearch(s, q) {
             return (s.children || []).some(c => (c.name || '').toLowerCase().includes(q));
@@ -1676,7 +1698,12 @@ function servicesPage() {
                 if (d.success) {
                     const svc = this.services.find(s => s.id === this.archiveItem.id);
                     if (svc) { svc.archived_at = d.item.archived_at; svc.active_from = null; svc.is_active = false; }
-                    this.showToast(d.message, 'success');
+                    // Со скрытым архивом строка пропадает из списка сразу, поэтому
+                    // говорим, где её теперь искать: иначе выглядит как удаление.
+                    this.showToast(
+                        this.showArchived ? d.message : d.message + '. Строка скрыта, включите «Показать архивные»',
+                        'success',
+                    );
                     this.showArchiveModal = false;
                 } else { this.showToast(d.message || 'Ошибка', 'error'); }
             } catch { this.showToast('Не удалось заархивировать', 'error'); }
