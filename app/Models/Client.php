@@ -88,6 +88,7 @@ class Client extends Model
         'contract_with',
         'service_start_date',
         'service_end_date',
+        'tasks_start_from',
         'contract_url',
         'founding_docs_urls',
         'requisites_url',
@@ -209,6 +210,7 @@ class Client extends Model
         // Даты
         'service_start_date' => 'date',
         'service_end_date' => 'date',
+        'tasks_start_from' => 'date',
         'power_of_attorney_expires' => 'date',
         'eds_expires' => 'date',
         'tax_system_changed_at' => 'date',
@@ -453,6 +455,80 @@ class Client extends Model
         return $this->service_end_date
             ? CarbonImmutable::parse($this->service_end_date)->endOfDay()
             : null;
+    }
+
+    /**
+     * Первый день, за который клиенту снова положены задачи по смете.
+     *
+     * Ставится при возврате в работу после перерыва (`serviceResumeAttributes`)
+     * и работает нижней границей окна: сроки раньше неё не считает ни генератор
+     * напоминаний, ни живой список бухзадачника.
+     *
+     * Без неё возврат означал бы обвал просрочки за весь простой. Ни генератор,
+     * ни список памяти не имеют: каждый прогон они пересчитывают сроки по смете
+     * заново, а снятая верхняя граница открывает им весь перерыв разом.
+     *
+     * Пусто у всех, кто ни разу не останавливался: окно у них прежнее.
+     */
+    public function tasksStartFrom(): ?CarbonImmutable
+    {
+        return $this->tasks_start_from
+            ? CarbonImmutable::parse($this->tasks_start_from)->startOfDay()
+            : null;
+    }
+
+    /** Обслуживание сейчас не идёт: клиент на паузе или завершён. */
+    public function serviceIsStopped(): bool
+    {
+        return !$this->is_active || $this->service_end_date !== null;
+    }
+
+    /**
+     * Поля клиента, обслуживание которого останавливают.
+     *
+     * Дата остановки закрывает окно сверху: задачи со сроком после неё не
+     * заводятся, а незакрытые хвосты до неё остаются на виду.
+     *
+     * @return array<string, mixed>
+     */
+    public static function serviceStopAttributes(?string $stoppedAt = null): array
+    {
+        return [
+            'service_end_date' => $stoppedAt ?: now()->toDateString(),
+            'is_active'        => false,
+        ];
+    }
+
+    /**
+     * Поля клиента, которого возвращают в работу.
+     *
+     * Верхнюю границу снимаем, нижнюю поднимаем на месяц вперёд: месяц возврата
+     * холостой, как у только что добавленного в смету БП. За перерыв не появится
+     * ничего, а первые задачи пойдут с первого числа следующего месяца.
+     *
+     * Границу двигаем только тому, кто действительно стоял: у работающего
+     * клиента возврат статуса ничего не меняет.
+     *
+     * @return array<string, mixed>
+     */
+    public function serviceResumeAttributes(): array
+    {
+        $attributes = [
+            'service_end_date' => null,
+            'is_active'        => true,
+        ];
+
+        if ($this->serviceIsStopped()) {
+            $attributes['tasks_start_from'] = self::tasksStartAfterResume()->toDateString();
+        }
+
+        return $attributes;
+    }
+
+    /** С какого дня пойдут задачи у клиента, которого возвращают прямо сейчас. */
+    public static function tasksStartAfterResume(): CarbonImmutable
+    {
+        return CarbonImmutable::now()->addMonth()->startOfMonth();
     }
 
     public function scopeActive($query)

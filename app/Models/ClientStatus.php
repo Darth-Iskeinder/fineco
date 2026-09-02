@@ -11,11 +11,13 @@ class ClientStatus extends Model
         'name',
         'color',
         'closes_service',
+        'stops_tasks',
         'sort_order',
     ];
 
     protected $casts = [
         'closes_service' => 'boolean',
+        'stops_tasks' => 'boolean',
         'sort_order' => 'integer',
     ];
 

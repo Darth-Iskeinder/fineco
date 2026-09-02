@@ -268,6 +268,13 @@ class BuhTasksController extends Controller
             if ($estimate && $estimate->tasksStartFrom()->gt($lookbackStart)) {
                 $lookbackStart = $estimate->tasksStartFrom();
             }
+            // Клиент вернулся в работу после перерыва: задачи считаем с даты возврата.
+            // За месяцы, когда его не обслуживали, на экране не должно быть ничего.
+            if ($resumedFrom = $client->tasksStartFrom()) {
+                if ($resumedFrom->gt($lookbackStart)) {
+                    $lookbackStart = $resumedFrom;
+                }
+            }
 
             // Верхняя граница — конец обслуживания, если он назначен. У действующих
             // клиентов дата пуста, и окно остаётся прежним.

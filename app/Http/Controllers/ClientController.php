@@ -26,7 +26,7 @@ class ClientController extends Controller
         // Вторичная сортировка по id: у импортированных клиентов created_at совпадает
         // с точностью до секунды, и без неё порядок «последний созданный сверху» плавает.
         $clients = Client::visibleTo($me)
-            ->with(['taxSystem', 'tariff', 'responsibleEmployee', 'organizationForm'])
+            ->with(['taxSystem', 'tariff', 'responsibleEmployee', 'organizationForm', 'clientStatus'])
             ->withCount('estimateRootItems')
             ->filter($request->only(Client::FILTER_KEYS))
             ->orderBy('created_at', 'desc')
@@ -76,7 +76,12 @@ class ClientController extends Controller
             'organization_form_name' => $client->organizationForm?->name,
             'tariff_id' => $client->tariff_id,
             'tariff_name' => $client->tariff?->name ?? '—',
+            // Статус клиента, а не флаг активности: бейдж в списке и бейдж в карточке
+            // должны говорить одно и то же. Флаг оставлен для старых клиентов, кому
+            // статус ещё не проставили.
             'is_active' => $client->is_active,
+            'status_name' => $client->clientStatus?->name,
+            'status_color' => $client->clientStatus?->color,
             'responsible_employee_id' => $client->responsible_employee_id,
             'responsible_name' => $client->responsibleEmployee?->full_name ?? '—',
             'estimate_items_count' => $client->estimate_root_items_count,
@@ -90,7 +95,7 @@ class ClientController extends Controller
         $filters['search'] = $filters['search'] ?? $request->get('q', '');
 
         $clients = Client::visibleTo(auth('employee')->user())
-            ->with(['taxSystem', 'tariff', 'responsibleEmployee', 'organizationForm'])
+            ->with(['taxSystem', 'tariff', 'responsibleEmployee', 'organizationForm', 'clientStatus'])
             ->withCount('estimateRootItems')
             ->filter($filters)
             ->orderBy('created_at', 'desc')
@@ -146,7 +151,6 @@ class ClientController extends Controller
             'tax_system_id' => ['nullable', 'exists:tax_systems,id'],
             'tariff_id' => ['nullable', 'exists:tariffs,id'],
             'responsible_employee_id' => ['nullable', 'exists:employees,id'],
-            'is_active' => ['boolean'],
             'notes' => ['nullable', 'string'],
         ], [
             'inn.required' => 'Введите ИНН',
@@ -160,8 +164,8 @@ class ClientController extends Controller
             'tax_system_id' => $validated['tax_system_id'] ?? null,
             'tariff_id' => $validated['tariff_id'] ?? null,
             'responsible_employee_id' => $validated['responsible_employee_id'] ?? null,
-            'is_active' => $validated['is_active'] ?? true,
-            'client_status_id' => ClientStatus::where('closes_service', false)
+            'is_active' => true,
+            'client_status_id' => ClientStatus::where('stops_tasks', false)
                 ->orderBy('sort_order')
                 ->value('id'),
             'notes' => $validated['notes'] ?? null,
@@ -224,13 +228,16 @@ class ClientController extends Controller
             'tax_system_id' => ['nullable', 'exists:tax_systems,id'],
             'tariff_id' => ['nullable', 'exists:tariffs,id'],
             'responsible_employee_id' => ['nullable', 'exists:employees,id'],
-            'is_active' => ['boolean'],
             'notes' => ['nullable', 'string'],
         ], [
             'inn.required' => 'Введите ИНН',
             'inn.unique' => 'Клиент с таким ИНН уже существует',
         ]);
 
+        // `is_active` тут нет намеренно: обслуживанием распоряжается статус клиента
+        // в карточке, и только он. Пока флаг был ещё и в этой форме, список и
+        // карточка показывали про одного клиента разное: тумблер гасил флаг, а
+        // статус оставался «Активен» — и задачи продолжали идти.
         $this->saveClient($client, [
             'name' => $validated['name'],
             'organization_form_id' => $validated['organization_form_id'] ?? null,
@@ -238,7 +245,6 @@ class ClientController extends Controller
             'tax_system_id' => $validated['tax_system_id'] ?? null,
             'tariff_id' => $validated['tariff_id'] ?? null,
             'responsible_employee_id' => $validated['responsible_employee_id'] ?? null,
-            'is_active' => $request->boolean('is_active'),
             'notes' => $validated['notes'] ?? null,
         ]);
 
@@ -246,7 +252,7 @@ class ClientController extends Controller
         // поэтому прокрутка, поиск и фильтры остаются на месте. Со ста клиентами
         // перезагрузка означала «листай вниз заново».
         if ($request->expectsJson()) {
-            $client->load(['taxSystem', 'tariff', 'responsibleEmployee', 'organizationForm'])->loadCount('estimateRootItems');
+            $client->load(['taxSystem', 'tariff', 'responsibleEmployee', 'organizationForm', 'clientStatus'])->loadCount('estimateRootItems');
 
             return response()->json([
                 'success' => true,
@@ -387,7 +393,6 @@ class ClientController extends Controller
             ],
             'notes' => [
                 'notes' => ['nullable', 'string'],
-                'is_active' => ['boolean'],
             ],
             default => [],
         };
@@ -404,7 +409,10 @@ class ClientController extends Controller
             unset($validated['employees']);
         }
 
-        // Логика статуса: синхронизация статуса, даты завершения и is_active
+        // Логика статуса: статус, границы окна задач и флаг активности едут вместе.
+        // Останавливающий статус («Приостановлен», «Завершен») закрывает окно сверху
+        // датой остановки, возврат в работу открывает его снизу — первым числом
+        // следующего месяца, чтобы за перерыв не приехала просрочка.
         if ($section === 'status') {
             $statusChanged = array_key_exists('client_status_id', $validated)
                 && (string) $validated['client_status_id'] !== (string) $client->client_status_id;
@@ -415,17 +423,9 @@ class ClientController extends Controller
                 // Пользователь поменял статус — он главный
                 $status = ClientStatus::find($validated['client_status_id']);
                 if ($status) {
-                    if ($status->closes_service) {
-                        // «Завершен» — закрываем обслуживание, при необходимости проставляем дату
-                        if (empty($validated['service_end_date'])) {
-                            $validated['service_end_date'] = now()->toDateString();
-                        }
-                        $validated['is_active'] = false;
-                    } else {
-                        // «Активен» / «Приостановлен» — снимаем дату завершения
-                        $validated['service_end_date'] = null;
-                        $validated['is_active'] = true;
-                    }
+                    $validated = $status->stops_tasks
+                        ? array_merge($validated, Client::serviceStopAttributes($validated['service_end_date'] ?? null))
+                        : array_merge($validated, $client->serviceResumeAttributes());
                 }
             } elseif ($endDateAdded) {
                 // Поставили дату завершения → статус «Завершен»

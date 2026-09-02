@@ -132,6 +132,13 @@ class GenerateTaskReminders extends Command
             $activeKeys = [];        // "employee|service|office|due", которые должны существовать
             $clientHadWork = false;
 
+            // Клиента возвращали в работу после перерыва: сроки до возврата не считаем.
+            // Иначе снятая верхняя граница открыла бы весь простой разом, и на экран
+            // приехала бы просрочка за месяцы, когда клиента не обслуживали.
+            // Прунинг ниже держится того же окна: то, что старше границы, не трогаем.
+            $clientFrom = $client->tasksStartFrom();
+            $clientFrom = $clientFrom && $clientFrom->gt($from) ? $clientFrom : $from;
+
             // За конец обслуживания задачи не заводим. Окно прунинга при этом остаётся
             // общим: напоминания после этой даты не попадут в $activeKeys и уйдут как
             // устаревшие — а всё, что внутри периода, продолжает жить по прежним правилам.
@@ -141,7 +148,7 @@ class GenerateTaskReminders extends Command
             // Обслуживание закончилось раньше окна — заводить нечего. Из цикла при этом
             // не выходим: клиенту нужен прунинг, иначе напоминания, созданные до
             // завершения, остались бы висеть навсегда.
-            $serviceOver = $clientTo->lt($from);
+            $serviceOver = $clientTo->lt($clientFrom);
 
             foreach ($serviceOver ? [] : $estimate->rootItems as $item) {
                 // Исполнитель позиции: assignee_id, при пустом — ответственный клиента.
@@ -162,7 +169,7 @@ class GenerateTaskReminders extends Command
                 // периода БП и границы самой позиции сметы. У действующих БП период
                 // не ограничен, у давних позиций граница пуста — тогда ничего не режет.
                 [$bpFrom, $bpTo] = $service->workPeriod();
-                $itemFrom = $bpFrom && $bpFrom->gt($from) ? $bpFrom : $from;
+                $itemFrom = $bpFrom && $bpFrom->gt($clientFrom) ? $bpFrom : $clientFrom;
                 $itemTo   = $bpTo && $bpTo->lt($clientTo) ? $bpTo : $clientTo;
 
                 // БП, добавленный в смету в середине месяца, начинает работать
@@ -217,7 +224,7 @@ class GenerateTaskReminders extends Command
             $stale = TaskReminder::query()
                 ->where('client_id', $client->id)
                 ->where('status', TaskReminder::STATUS_PENDING)
-                ->whereBetween('due_date', [$from->toDateString(), $to->toDateString()])
+                ->whereBetween('due_date', [$clientFrom->toDateString(), $to->toDateString()])
                 ->get()
                 ->filter(function ($r) use ($activeKeys, $employees) {
                     $emp = $employees->get($r->employee_id);

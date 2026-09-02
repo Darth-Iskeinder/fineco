@@ -288,9 +288,10 @@ final class ClientImportPlanner
             : null;
 
         if ($status) {
-            if ($status->closes_service) {
-                // Завершающий статус закрывает обслуживание: без даты завершения
-                // задачи по смете продолжали бы считаться вперёд.
+            if ($status->stops_tasks) {
+                // Останавливающий статус («Приостановлен», «Завершен») закрывает
+                // обслуживание: без даты остановки задачи по смете продолжали бы
+                // считаться вперёд.
                 $attributes['is_active'] = false;
                 $attributes['service_end_date'] ??= now()->toDateString();
             } else {
@@ -306,7 +307,7 @@ final class ClientImportPlanner
         // между ними велика (второе закрывает обслуживание) — угадывать не будем.
         if (($attributes['is_active'] ?? null) === true) {
             $active = $this->statuses->first(fn (ClientStatus $s) => mb_strtolower($s->name) === 'активен')
-                ?? $this->statuses->first(fn (ClientStatus $s) => !$s->closes_service);
+                ?? $this->statuses->first(fn (ClientStatus $s) => !$s->stops_tasks);
 
             if ($active) {
                 $attributes['client_status_id'] = $active->id;

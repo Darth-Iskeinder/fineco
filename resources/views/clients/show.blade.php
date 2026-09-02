@@ -185,6 +185,7 @@
                                     <template x-if="!client.client_status">
                                         <span class="text-sm text-slate-500">—</span>
                                     </template>
+                                    <p x-show="serviceStateHint()" class="mt-1 text-xs text-slate-500" x-text="serviceStateHint()"></p>
                                 </dd>
                             </div>
                             <div>
@@ -208,8 +209,8 @@
                                         <option :value="String(cs.id)" :selected="String(cs.id) === form.status.client_status_id" x-text="cs.name"></option>
                                     </template>
                                 </select>
-                                <template x-if="form.status.client_status_id && clientStatuses.find(cs => String(cs.id) === form.status.client_status_id)?.closes_service">
-                                    <p class="mt-1 text-xs text-amber-600">Этот статус завершает обслуживание: клиент станет неактивным, а новые задачи по смете перестанут появляться.</p>
+                                <template x-if="form.status.client_status_id && clientStatuses.find(cs => String(cs.id) === form.status.client_status_id)?.stops_tasks">
+                                    <p class="mt-1 text-xs text-amber-600">Этот статус останавливает обслуживание: клиент станет неактивным, а новые задачи по смете перестанут появляться. Когда вернёте «Активен», задачи пойдут с первого числа следующего месяца.</p>
                                 </template>
                             </div>
                             <div>
@@ -1695,7 +1696,7 @@
                         </svg>
                     </div>
                     <div class="text-sm text-slate-600 space-y-3">
-                        <p class="text-base font-semibold text-slate-800">Завершить обслуживание клиента?</p>
+                        <p class="text-base font-semibold text-slate-800">Остановить обслуживание клиента?</p>
                         <p>
                             Задачи по смете считаются до
                             <span class="font-medium text-slate-800" x-text="formatDate(form.status.service_end_date) || 'сегодняшнего дня'"></span>.
@@ -1715,7 +1716,7 @@
                                 <span>Выполненные задачи остаются все: это история работы, её ничто не стирает.</span>
                             </li>
                         </ul>
-                        <p class="text-xs text-slate-400">Если вернуть статус «Активен», дата снимется и задачи пойдут дальше — ничего не теряется навсегда.</p>
+                        <p class="text-xs text-slate-400">Если вернуть статус «Активен», задачи пойдут с первого числа следующего месяца. За время перерыва не появится ничего: просрочка за месяцы, когда клиента не обслуживали, задним числом не приезжает.</p>
                     </div>
                 </div>
                 <div class="px-6 py-4 bg-slate-50 flex justify-end gap-2">
@@ -1725,7 +1726,7 @@
                     </button>
                     <button type="button" @click="showEndServiceWarning = false; saveSection('status', true)"
                             class="px-4 py-2 text-sm font-semibold text-white bg-amber-600 rounded-xl hover:bg-amber-700 transition-colors">
-                        Завершить обслуживание
+                        Остановить обслуживание
                     </button>
                 </div>
             </div>
@@ -2901,13 +2902,33 @@ function clientShow() {
             this.resetForm(section);
         },
 
-        /** Секция «Статус» переводит клиента в завершённые — и это стоит подтвердить. */
-        serviceWillEnd() {
+        /** Секция «Статус» останавливает обслуживание — и это стоит подтвердить. */
+        serviceWillStop() {
             const status = this.clientStatuses.find(cs => String(cs.id) === this.form.status.client_status_id);
-            const closing = Boolean(status?.closes_service) || Boolean(this.form.status.service_end_date);
+            const stopping = Boolean(status?.stops_tasks) || Boolean(this.form.status.service_end_date);
 
-            // Уже завершённого второй раз не переспрашиваем.
-            return closing && !this.client.service_end_date;
+            // Уже остановленного второй раз не переспрашиваем.
+            return stopping && !this.client.service_end_date;
+        },
+
+        /**
+         * Строка под статусом: где сейчас клиент по обслуживанию.
+         *
+         * Дата остановки и дата возврата живут в разных полях, а человеку нужно
+         * одно: идут по клиенту задачи или нет, и с какого числа пойдут.
+         */
+        serviceStateHint() {
+            if (this.client.service_end_date) {
+                return 'Обслуживание остановлено ' + this.formatDate(this.client.service_end_date)
+                    + ', новые задачи по смете не появляются.';
+            }
+
+            const resumeFrom = this.client.tasks_start_from;
+            if (resumeFrom && new Date(resumeFrom) > new Date()) {
+                return 'После перерыва задачи пойдут с ' + this.formatDate(resumeFrom) + '.';
+            }
+
+            return '';
         },
 
         /** Ответственного в секции «Договор» поменяли на другого (или сняли). */
@@ -2917,7 +2938,7 @@ function clientShow() {
         },
 
         async saveSection(section, confirmed = false) {
-            if (section === 'status' && !confirmed && this.serviceWillEnd()) {
+            if (section === 'status' && !confirmed && this.serviceWillStop()) {
                 this.showEndServiceWarning = true;
                 return;
             }

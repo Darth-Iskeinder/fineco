@@ -255,6 +255,24 @@
         }
     },
 
+    // Цвет бейджа статуса — тот же набор, что в карточке клиента (clients/show).
+    statusBadgeClass(color) {
+        const map = {
+            emerald: 'bg-emerald-100 text-emerald-700',
+            red: 'bg-red-100 text-red-700',
+            amber: 'bg-amber-100 text-amber-700',
+            blue: 'bg-blue-100 text-blue-700',
+            violet: 'bg-violet-100 text-violet-700',
+            indigo: 'bg-indigo-100 text-indigo-700',
+            teal: 'bg-teal-100 text-teal-700',
+            rose: 'bg-rose-100 text-rose-700',
+            orange: 'bg-orange-100 text-orange-700',
+            cyan: 'bg-cyan-100 text-cyan-700',
+            slate: 'bg-slate-100 text-slate-600',
+        };
+        return map[color] || 'bg-slate-100 text-slate-600';
+    },
+
     showToast(message) {
         this.toast = { show: true, message };
         setTimeout(() => { this.toast.show = false; }, 3000);
@@ -578,10 +596,17 @@
                                 <div class="text-sm text-slate-600 max-w-[200px] truncate" x-text="client.responsible_name" :title="client.responsible_name"></div>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
-                                <span x-show="client.is_active" class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-emerald-100 text-emerald-700">
+                                <!-- Статус клиента, тот же, что в карточке: менять его можно только там.
+                                     Пока рядом жил тумблер «Активный клиент», список показывал «Неактивен»,
+                                     а карточка того же клиента — «Активен». -->
+                                <span x-show="client.status_name"
+                                      :class="statusBadgeClass(client.status_color)"
+                                      class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium"
+                                      x-text="client.status_name"></span>
+                                <span x-show="!client.status_name && client.is_active" class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-emerald-100 text-emerald-700">
                                     Активен
                                 </span>
-                                <span x-show="!client.is_active" class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-100 text-slate-600">
+                                <span x-show="!client.status_name && !client.is_active" class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-100 text-slate-600">
                                     Неактивен
                                 </span>
                             </td>
@@ -745,15 +770,6 @@
                             </div>
 
                             <div class="sm:col-span-2">
-                                <label class="inline-flex items-center cursor-pointer">
-                                    <input type="hidden" name="is_active" value="0">
-                                    <input type="checkbox" name="is_active" value="1" checked class="sr-only peer">
-                                    <div class="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-500/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-                                    <span class="ms-3 text-sm font-medium text-slate-700">Активный клиент</span>
-                                </label>
-                            </div>
-
-                            <div class="sm:col-span-2">
                                 <label for="create_notes" class="block text-sm font-medium text-slate-700 mb-2">Примечания</label>
                                 <textarea name="notes" id="create_notes" rows="3" class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200 resize-none" placeholder="Дополнительная информация о клиенте..."></textarea>
                             </div>
@@ -884,15 +900,6 @@
                                     </template>
                                 </select>
                                 <p class="mt-1 text-xs text-slate-500">На это лицо будут ассайниться все БП клиента</p>
-                            </div>
-
-                            <div class="sm:col-span-2">
-                                <label class="inline-flex items-center cursor-pointer">
-                                    <input type="hidden" name="is_active" value="0">
-                                    <input type="checkbox" name="is_active" value="1" :checked="editClient?.is_active" class="sr-only peer">
-                                    <div class="relative w-11 h-6 bg-slate-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-500/20 rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-                                    <span class="ms-3 text-sm font-medium text-slate-700">Активный клиент</span>
-                                </label>
                             </div>
                         </div>
                     </div>

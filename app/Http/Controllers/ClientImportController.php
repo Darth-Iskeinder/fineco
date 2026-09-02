@@ -150,16 +150,25 @@ class ClientImportController extends Controller
                     continue;
                 }
 
+                $attributes = $row['attributes'];
+
+                // Клиента возвращают в работу файлом — двигаем границу задач так же,
+                // как это делает карточка: иначе после перерыва на экран приедет
+                // просрочка за все месяцы, когда его не обслуживали.
+                if (($attributes['is_active'] ?? null) === true && $client->serviceIsStopped()) {
+                    $attributes = array_merge($attributes, $client->serviceResumeAttributes());
+                }
+
                 // Снимок только тех полей, которые сейчас перезапишем: откат
                 // должен вернуть их, а не затереть всё остальное в карточке.
-                $before = collect($row['attributes'])
+                $before = collect($attributes)
                     ->keys()
                     ->mapWithKeys(fn (string $field) => [$field => $client->getAttribute($field)])
                     ->all();
 
                 $previousResponsibleId = $client->responsible_employee_id;
 
-                $client->update($row['attributes']);
+                $client->update($attributes);
 
                 // Импорт меняет ответственного так же, как карточка, значит и работа по
                 // клиенту должна переехать так же — иначе задачи остались бы на прежнем.
