@@ -45,6 +45,8 @@ class ClientController extends Controller
             // Всего клиентов без фильтров — для счётчика «Найдено N из M»
             'totalClients' => Client::visibleTo($me)->count(),
             'taxSystems' => TaxSystem::active()->ordered()->get(),
+            // Статусы для фильтра: те же, что в карточке клиента.
+            'clientStatuses' => ClientStatus::orderBy('sort_order')->orderBy('name')->get(['id', 'name']),
             // Список сотрудников нужен и рядовым: из него выбирают ответственного
             // в модалке правки клиента. Скрыт от них только фильтр по ответственному.
             'employees' => Employee::active()->orderBy('full_name')->get(),

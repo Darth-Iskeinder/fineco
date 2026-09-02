@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Client;
+use App\Models\ClientStatus;
 use App\Models\Employee;
 use App\Models\OrganizationForm;
 use App\Models\Module;
@@ -75,6 +76,16 @@ class ClientsFilterTest extends TestCase
         ], $attributes));
     }
 
+    private function clientStatus(string $name): ClientStatus
+    {
+        return ClientStatus::firstOrCreate(['name' => $name], [
+            'color' => 'slate',
+            'closes_service' => $name === 'Завершен',
+            'stops_tasks' => $name !== 'Активен',
+            'sort_order' => 1,
+        ]);
+    }
+
     /** Имена клиентов, которые вернул живой поиск с этими параметрами. */
     private function foundNames(array $params): array
     {
@@ -108,6 +119,39 @@ class ClientsFilterTest extends TestCase
         $this->assertNotContains($assigned->name, $names);
     }
 
+    /**
+     * Фильтр по статусу различает приостановленных и завершённых.
+     *
+     * По флагу `is_active` они одинаковые: оба нерабочие. Разница видна только по
+     * статусу, поэтому фильтр ходит по нему.
+     */
+    public function test_filters_by_client_status(): void
+    {
+        $paused = $this->clientStatus('Приостановлен');
+        $closed = $this->clientStatus('Завершен');
+
+        $onPause  = $this->client(['client_status_id' => $paused->id, 'is_active' => false]);
+        $finished = $this->client(['client_status_id' => $closed->id, 'is_active' => false]);
+
+        $names = $this->foundNames(['status' => $paused->id]);
+
+        $this->assertContains($onPause->name, $names);
+        $this->assertNotContains($finished->name, $names, 'Приостановленные и завершённые слиплись в одну кучу');
+    }
+
+    /** Клиенты без статуса: их находит только отдельный пункт «без статуса». */
+    public function test_filters_clients_without_status(): void
+    {
+        $withStatus = $this->client(['client_status_id' => $this->clientStatus('Активен')->id]);
+        $without    = $this->client(['client_status_id' => null]);
+
+        $names = $this->foundNames(['status' => 'none']);
+
+        $this->assertContains($without->name, $names);
+        $this->assertNotContains($withStatus->name, $names);
+    }
+
+    /** Старые ссылки вида /clients?status=inactive продолжают работать. */
     public function test_filters_by_status(): void
     {
         $active   = $this->client(['is_active' => true]);

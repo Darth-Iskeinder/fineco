@@ -43,6 +43,7 @@
     },
     allEmployees: @js($employees->map(fn($e) => ['id' => $e->id, 'name' => $e->full_name])),
     taxSystems: @js($taxSystems->map(fn($t) => ['id' => $t->id, 'name' => $t->name])),
+    clientStatuses: @js($clientStatuses),
     tariffs: @js($tariffs->map(fn($t) => ['id' => $t->id, 'name' => $t->name])),
     organizationForms: @js($organizationForms),
 
@@ -74,7 +75,10 @@
         if (this.filters.responsible === 'none') chips.push({ key: 'responsible', label: 'Без ответственного' });
         else if (this.filters.responsible) chips.push({ key: 'responsible', label: named(this.allEmployees, this.filters.responsible) });
 
-        if (this.filters.status) chips.push({ key: 'status', label: this.filters.status === 'active' ? 'Активные' : 'Неактивные' });
+        if (this.filters.status === 'none') chips.push({ key: 'status', label: 'Без статуса' });
+        else if (this.filters.status === 'active') chips.push({ key: 'status', label: 'Активные' });
+        else if (this.filters.status === 'inactive') chips.push({ key: 'status', label: 'Неактивные' });
+        else if (this.filters.status) chips.push({ key: 'status', label: named(this.clientStatuses, this.filters.status) });
 
         if (this.filters.tax_system === 'none') chips.push({ key: 'tax_system', label: 'Без СНО' });
         else if (this.filters.tax_system) chips.push({ key: 'tax_system', label: named(this.taxSystems, this.filters.tax_system) });
@@ -258,7 +262,8 @@
     // Цвет бейджа статуса — тот же набор, что в карточке клиента (clients/show).
     statusBadgeClass(color) {
         const map = {
-            emerald: 'bg-emerald-100 text-emerald-700',
+            // Тот же зелёный, что у бейджа «Смета» в списке: спокойный, глаз не режет.
+            emerald: 'bg-emerald-50 text-emerald-700',
             red: 'bg-red-100 text-red-700',
             amber: 'bg-amber-100 text-amber-700',
             blue: 'bg-blue-100 text-blue-700',
@@ -444,8 +449,10 @@
                         :class="filters.status ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-slate-50/50 text-slate-600'"
                         class="px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 transition-colors">
                     <option value="">Статус: все</option>
-                    <option value="active">Активные</option>
-                    <option value="inactive">Неактивные</option>
+                    <option value="none">— без статуса —</option>
+                    <template x-for="cs in clientStatuses" :key="cs.id">
+                        <option :value="cs.id" x-text="cs.name"></option>
+                    </template>
                 </select>
 
                 <select x-model="filters.tax_system" @change="applyFilters()"
@@ -603,7 +610,7 @@
                                       :class="statusBadgeClass(client.status_color)"
                                       class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium"
                                       x-text="client.status_name"></span>
-                                <span x-show="!client.status_name && client.is_active" class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-emerald-100 text-emerald-700">
+                                <span x-show="!client.status_name && client.is_active" class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-emerald-50 text-emerald-700">
                                     Активен
                                 </span>
                                 <span x-show="!client.status_name && !client.is_active" class="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-100 text-slate-600">

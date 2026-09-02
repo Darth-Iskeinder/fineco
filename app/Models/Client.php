@@ -598,9 +598,15 @@ class Client extends Model
         $byId('tax_system', 'tax_system_id');
         $byId('organization_form', 'organization_form_id');
 
+        // Статус клиента — id из справочника, как у остальных селектов. Старые
+        // значения 'active' и 'inactive' продолжают работать: они лежат в
+        // сохранённых ссылках, а по флагу «неактивен» это приостановленные и
+        // завершённые вместе.
         $status = $filters['status'] ?? null;
         if (in_array($status, ['active', 'inactive'], true)) {
             $query->where('is_active', $status === 'active');
+        } else {
+            $byId('status', 'client_status_id');
         }
 
         return $query;
