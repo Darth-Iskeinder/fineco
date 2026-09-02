@@ -727,7 +727,7 @@ class SettingsController extends Controller
         $service->update([
             'is_active'   => true,
             'archived_at' => null,
-            'active_from' => now()->addMonth()->startOfMonth()->toDateString(),
+            'active_from' => now()->startOfMonth()->addMonth()->toDateString(),
         ]);
 
         return response()->json([

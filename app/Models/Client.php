@@ -528,7 +528,8 @@ class Client extends Model
     /** С какого дня пойдут задачи у клиента, которого возвращают прямо сейчас. */
     public static function tasksStartAfterResume(): CarbonImmutable
     {
-        return CarbonImmutable::now()->addMonth()->startOfMonth();
+        // Первое число, потом месяц: иначе возврат 31 числа уехал бы через месяц.
+        return CarbonImmutable::now()->startOfMonth()->addMonth();
     }
 
     public function scopeActive($query)
@@ -703,7 +704,7 @@ class Client extends Model
 
         $changed   = CarbonImmutable::parse($this->tax_system_changed_at)->startOfDay();
         $twoWeeks  = $changed->addDays(14);
-        $nextMonth = $changed->addMonth()->startOfMonth();
+        $nextMonth = $changed->startOfMonth()->addMonth();
 
         return $twoWeeks->gt($nextMonth) ? $twoWeeks : $nextMonth;
     }

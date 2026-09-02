@@ -139,6 +139,15 @@ class GenerateTaskReminders extends Command
             $clientFrom = $client->tasksStartFrom();
             $clientFrom = $clientFrom && $clientFrom->gt($from) ? $clientFrom : $from;
 
+            // Месяц заведения сметы холостой: клиента в это время подключают, собирают
+            // документы. Живой список это правило знает давно (BuhTasksController), а
+            // воркер до сих пор не знал — и заводил напоминания за месяцы до старта,
+            // которых на экране нет. Один и тот же клиент отвечал по-разному.
+            $estimateFrom = $estimate->tasksStartFrom();
+            if ($estimateFrom->gt($clientFrom)) {
+                $clientFrom = $estimateFrom;
+            }
+
             // За конец обслуживания задачи не заводим. Окно прунинга при этом остаётся
             // общим: напоминания после этой даты не попадут в $activeKeys и уйдут как
             // устаревшие — а всё, что внутри периода, продолжает жить по прежним правилам.

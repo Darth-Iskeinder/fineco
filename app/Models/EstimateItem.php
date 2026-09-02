@@ -48,7 +48,9 @@ class EstimateItem extends Model
      */
     public static function tasksStartForNew(): CarbonImmutable
     {
-        return CarbonImmutable::now()->addMonth()->startOfMonth();
+        // Порядок важен: «31 августа плюс месяц» переливается на 1 октября, а
+        // «первое число августа плюс месяц» честно даёт 1 сентября.
+        return CarbonImmutable::now()->startOfMonth()->addMonth();
     }
 
     /**

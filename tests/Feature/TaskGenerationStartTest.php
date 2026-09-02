@@ -9,6 +9,7 @@ use App\Models\Module;
 use App\Models\Periodicity;
 use App\Models\Role;
 use App\Models\Service;
+use App\Models\TaskReminder;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Tests\TestCase;
@@ -128,6 +129,50 @@ class TaskGenerationStartTest extends TestCase
 
         $this->assertNotContains($prev->year . '-' . $prev->month, $months);
         $this->assertContains($now->year . '-' . $now->month, $months);
+    }
+
+    /**
+     * Смета, заведённая 31 числа, начинает работать с 1 числа следующего месяца.
+     *
+     * «31 августа плюс месяц» это несуществующее 31 сентября, PHP переливает его
+     * на 1 октября, и клиент терял целый месяц задач. На бою так и вышло: у всех
+     * смет одного бухгалтера дата 31 августа, и экран был пуст весь сентябрь.
+     */
+    public function test_estimate_created_on_the_31st_starts_next_month(): void
+    {
+        $estimate = new Estimate();
+        $estimate->created_at = CarbonImmutable::parse('2026-08-31 12:00:00');
+
+        $this->assertSame('2026-09-01', $estimate->tasksStartFrom()->toDateString());
+
+        $estimate->created_at = CarbonImmutable::parse('2026-01-31 12:00:00');
+
+        $this->assertSame('2026-02-01', $estimate->tasksStartFrom()->toDateString());
+    }
+
+    /**
+     * Воркер напоминаний держится того же холостого месяца, что и экран.
+     *
+     * Раньше он знал только границу позиции сметы, поэтому заводил напоминания за
+     * месяцы до старта: на экране пусто, а ночью человеку приходили сроки.
+     */
+    public function test_worker_respects_the_idle_month_of_the_estimate(): void
+    {
+        $client = $this->clientWithEstimateCreatedAt(
+            CarbonImmutable::now()->subMonth()->endOfMonth()->startOfDay(),
+        );
+
+        $this->artisan('tasks:generate', ['--horizon' => 45, '--lookback' => 190])
+            ->assertSuccessful();
+
+        $start = $client->estimates()->first()->tasksStartFrom();
+        $dates = TaskReminder::where('client_id', $client->id)->pluck('due_date');
+
+        $this->assertTrue($dates->isNotEmpty(), 'Напоминаний нет вовсе — проверять нечего');
+        $this->assertTrue(
+            $dates->every(fn ($d) => $d->toDateString() >= $start->toDateString()),
+            'Воркер завёл напоминания раньше старта сметы: ' . $dates->map->toDateString()->implode(', '),
+        );
     }
 
     public function test_old_estimate_still_shows_past_overdue(): void

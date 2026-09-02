@@ -44,7 +44,10 @@ class Estimate extends Model
      */
     public function tasksStartFrom(): CarbonImmutable
     {
-        return CarbonImmutable::parse($this->created_at)->addMonth()->startOfMonth();
+        // Сначала первое число месяца, потом плюс месяц, а не наоборот: у сметы,
+        // заведённой 31 августа, «плюс месяц» даёт несуществующее 31 сентября, PHP
+        // переливает его на 1 октября, и клиент теряет целый месяц задач.
+        return CarbonImmutable::parse($this->created_at)->startOfMonth()->addMonth();
     }
 
     public function recalculateTotal(): void
