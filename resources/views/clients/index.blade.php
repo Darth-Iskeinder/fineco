@@ -47,8 +47,9 @@
     tariffs: @js($tariffs->map(fn($t) => ['id' => $t->id, 'name' => $t->name])),
     organizationForms: @js($organizationForms),
 
-    // Live search
-    searchQuery: '',
+    // Live search. Значение приходит с сервера: по ссылке /clients?search=ромашка
+    // список уже отфильтрован, и поле должно показывать, чем именно.
+    searchQuery: @js((string) ($search ?? '')),
     clients: @js($clientRows),
     loading: false,
     searchTimeout: null,
@@ -407,7 +408,7 @@
                                x-model="searchQuery"
                                @input="onSearchInput()"
                                class="block w-full pl-11 pr-10 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200 sm:text-sm"
-                               placeholder="Поиск по названию, ИНН...">
+                               placeholder="Поиск по названию, ИНН, телефону, контактному лицу...">
                         <button x-show="searchQuery.length > 0"
                                 @click="clearSearch()"
                                 type="button"

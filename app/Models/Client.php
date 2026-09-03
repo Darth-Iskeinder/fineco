@@ -554,17 +554,127 @@ class Client extends Model
             ->where('eds_expires', '>=', now());
     }
 
+    /** Сколько слов запроса учитываем: остальное — почти наверняка вставленный кусок текста. */
+    private const SEARCH_MAX_WORDS = 5;
+
+    /**
+     * Поиск по клиентам.
+     *
+     * Три правила, из-за отсутствия которых им было неудобно пользоваться:
+     *
+     * 1. Регистр и ё/е не должны мешать. Раньше стоял простой LIKE, а на боевом
+     *    PostgreSQL он регистрозависим (в MySQL нет, поэтому локально всё выглядело
+     *    исправным): «ромашка» не находила «ОсОО «Ромашка»». Приводим к нижнему
+     *    регистру обе стороны и там же схлопываем ё в е.
+     * 2. Запрос — это слова, а не одна подстрока. Каждое слово должно найтись хоть
+     *    в одном поле, поэтому работают и «осоо ромашка», и «ромашка 12345».
+     * 3. ИНН сверяем по цифрам: его копируют из писем с пробелами и дефисами.
+     *
+     * Ищем по названию, ИНН, ИНН директора, коду налогового органа, а также по
+     * контактам и связанным лицам — они лежат в JSON, но искать «кто это звонил»
+     * людям нужно чаще, чем разбирать структуру.
+     */
     public function scopeSearch($query, ?string $search)
     {
-        if (!$search) {
+        $words = self::searchWords($search);
+
+        if (!$words) {
             return $query;
         }
 
-        return $query->where(function ($q) use ($search) {
-            $q->where('name', 'like', "%{$search}%")
-              ->orWhere('inn', 'like', "%{$search}%")
-              ->orWhere('director_inn', 'like', "%{$search}%");
-        });
+        $driver = $query->getConnection()->getDriverName();
+
+        foreach ($words as $word) {
+            $query->where(function ($q) use ($word, $driver) {
+                $needle = '%' . $word . '%';
+
+                foreach (['name', 'tax_office_code', 'contacts', 'related_persons'] as $column) {
+                    $q->orWhereRaw(self::normalizedColumn($column, $driver) . ' like ?', [$needle]);
+                }
+
+                if ($digits = preg_replace('/\D+/', '', $word)) {
+                    $q->orWhereRaw(self::digitsColumn('inn') . ' like ?', ['%' . $digits . '%'])
+                      ->orWhereRaw(self::digitsColumn('director_inn') . ' like ?', ['%' . $digits . '%']);
+                }
+            });
+        }
+
+        return $query;
+    }
+
+    /**
+     * Порядок выдачи поиска: сначала точный ИНН, потом название с начала строки.
+     *
+     * Отдельно от scopeSearch: тот отвечает за отбор и один на все экраны, включая
+     * выгрузку CSV, а порядок нужен только там, где человек смотрит список.
+     */
+    public function scopeSortBySearch($query, ?string $search)
+    {
+        $words = self::searchWords($search);
+
+        if (!$words) {
+            return $query;
+        }
+
+        $driver = $query->getConnection()->getDriverName();
+        $digits = preg_replace('/\D+/', '', implode('', $words));
+        $starts = implode(' ', $words) . '%';
+
+        $cases    = [];
+        $bindings = [];
+
+        if ($digits !== '') {
+            $cases[]    = 'when ' . self::digitsColumn('inn') . ' = ? then 0';
+            $bindings[] = $digits;
+        }
+
+        $cases[]    = 'when ' . self::normalizedColumn('name', $driver) . ' like ? then 1';
+        $bindings[] = $starts;
+
+        return $query->orderByRaw('case ' . implode(' ', $cases) . ' else 2 end', $bindings);
+    }
+
+    /**
+     * Слова запроса, приведённые к виду для сравнения.
+     *
+     * @return array<int, string>
+     */
+    private static function searchWords(?string $search): array
+    {
+        $search = self::searchNormalize(trim((string) $search));
+
+        if ($search === '') {
+            return [];
+        }
+
+        return array_slice(preg_split('/\s+/u', $search, -1, PREG_SPLIT_NO_EMPTY), 0, self::SEARCH_MAX_WORDS);
+    }
+
+    /** Строка в том же виде, в каком её сравнивает база: нижний регистр и ё → е. */
+    private static function searchNormalize(string $value): string
+    {
+        return str_replace('ё', 'е', mb_strtolower($value, 'UTF-8'));
+    }
+
+    /**
+     * Колонка, приведённая к тому же виду, что и запрос.
+     *
+     * JSON приходится сначала превращать в текст, и диалекты делают это по-разному:
+     * в PostgreSQL это text, в MySQL char.
+     */
+    private static function normalizedColumn(string $column, string $driver): string
+    {
+        $text = in_array($column, ['contacts', 'related_persons'], true)
+            ? ($driver === 'pgsql' ? "cast($column as text)" : "cast($column as char)")
+            : $column;
+
+        return "replace(lower(coalesce($text, '')), 'ё', 'е')";
+    }
+
+    /** Колонка с ИНН без пробелов и дефисов: их ставят при копировании. */
+    private static function digitsColumn(string $column): string
+    {
+        return "replace(replace(coalesce($column, ''), ' ', ''), '-', '')";
     }
 
     /**

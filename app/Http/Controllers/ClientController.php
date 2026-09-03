@@ -29,6 +29,8 @@ class ClientController extends Controller
             ->with(['taxSystem', 'tariff', 'responsibleEmployee', 'organizationForm', 'clientStatus'])
             ->withCount('estimateRootItems')
             ->filter($request->only(Client::FILTER_KEYS))
+            // При поиске сверху то, что человек искал: точный ИНН и название с начала строки.
+            ->sortBySearch($request->search)
             ->orderBy('created_at', 'desc')
             ->orderBy('id', 'desc')
             ->get();
@@ -100,6 +102,7 @@ class ClientController extends Controller
             ->with(['taxSystem', 'tariff', 'responsibleEmployee', 'organizationForm', 'clientStatus'])
             ->withCount('estimateRootItems')
             ->filter($filters)
+            ->sortBySearch($filters['search'])
             ->orderBy('created_at', 'desc')
             ->orderBy('id', 'desc')
             ->get()
