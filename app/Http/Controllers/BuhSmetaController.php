@@ -61,11 +61,14 @@ class BuhSmetaController extends Controller
 
         $client->load('taxSystem');
 
-        // Выполненные плановые задачи
+        // Выполненные плановые задачи. Только корневые: подпункт — не отдельная работа,
+        // а галочка внутри своей задачи, и в смете его цена уже сидит в строке основного БП
+        // (родительский total = сумма подпунктов). Отдельной строкой он удваивал бы сумму акта.
         $plannedLogs = BuhTaskLog::where('client_id', $client->id)
             ->where('year', $year)
             ->where('month', $month)
             ->where('status', 'completed')
+            ->whereHas('estimateItem', fn ($q) => $q->whereNull('parent_id'))
             ->with(['employee', 'estimateItem'])
             ->get();
 

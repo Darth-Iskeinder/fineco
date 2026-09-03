@@ -564,6 +564,7 @@ class BuhTasksController extends Controller
             $reviewPlanned = BuhTaskLog::where('status', 'review')
                 ->whereIn('client_id', $myClientIds)
                 ->where('employee_id', '!=', $employee->id)
+                ->whereHas('estimateItem', fn ($q) => $q->whereNull('parent_id')) // подпункты на проверку не ходят
                 ->with(['estimateItem.service', 'client:id,name', 'employee:id,full_name', 'documents'])
                 ->get();
             foreach ($reviewPlanned as $log) {
@@ -660,10 +661,14 @@ class BuhTasksController extends Controller
         }
 
         // Вкладка «Выполненные» — история за последние 90 дней (read-only): плановые + внеплановые.
+        // Только корневые логи: подпункт — не самостоятельная задача, а галочка внутри своей
+        // (то же правило, что в ClientTaskHistory). Иначе каждая отмеченная галочка вставала
+        // во «Выполненных» отдельной строкой рядом со своим же БП.
         $completedPlanned = BuhTaskLog::where('employee_id', $employee->id)
             ->where('status', 'completed')
             ->whereNotNull('completed_at')
             ->where('completed_at', '>=', $historyFrom)
+            ->whereHas('estimateItem', fn ($q) => $q->whereNull('parent_id'))
             ->with(['estimateItem.service', 'estimateItem.children.service', 'client:id,name', 'documents'])
             ->get()
             ->map(function ($l) use ($logs, $today) {
@@ -752,6 +757,7 @@ class BuhTasksController extends Controller
                 ->where('status', 'completed')
                 ->whereNotNull('completed_at')
                 ->where('completed_at', '>=', $historyFrom)
+                ->whereHas('estimateItem', fn ($q) => $q->whereNull('parent_id')) // подпункты — внутри своей задачи
                 ->with(['estimateItem.service', 'estimateItem.children.service', 'client:id,name', 'documents'])
                 ->get()
                 ->map(function ($l) use ($logs, $employeeNames, $today) {
@@ -1076,12 +1082,7 @@ class BuhTasksController extends Controller
             $log->paused_seconds += max(0, $now->timestamp - $log->resumed_at->timestamp);
         }
 
-        // На проверку идёт задача с requires_review, ТОЛЬКО если её выполнил не сам главбух клиента:
-        // проверяет главбух (responsible_employee_id), поэтому свою же работу он не проверяет —
-        // такая задача закрывается сразу (шаг 7.3).
-        $responsibleId = Client::whereKey($log->client_id)->value('responsible_employee_id');
-        $needsReview = ($log->estimateItem?->service?->requires_review)
-            && (int) $log->employee_id !== (int) $responsibleId;
+        $needsReview = $this->needsReview($log); // шаг 7.3, условия — в самом методе
 
         if ($needsReview) {
             $log->status            = 'review';
@@ -1129,9 +1130,7 @@ class BuhTasksController extends Controller
         $log->force_closed        = true;
         $log->force_close_comment = $validated['comment'];
 
-        $responsibleId = Client::whereKey($log->client_id)->value('responsible_employee_id');
-        $needsReview = ($log->estimateItem?->service?->requires_review)
-            && (int) $log->employee_id !== (int) $responsibleId;
+        $needsReview = $this->needsReview($log);
 
         if ($needsReview) {
             $log->status            = 'review';
@@ -1796,6 +1795,28 @@ class BuhTasksController extends Controller
     {
         $employee = auth('employee')->user();
         abort_if($task->employee_id !== $employee->id, 403);
+    }
+
+    /**
+     * Уходит ли задача на проверку вместо закрытия.
+     *
+     * Проверяет главбух клиента (responsible_employee_id), поэтому свою же работу он
+     * не проверяет: такая задача закрывается сразу.
+     *
+     * Подпункт на проверку не ходит вовсе: он не самостоятельная задача, а галочка
+     * внутри своей. Иначе отмеченный подпункт зависал бы в review и родителя было бы
+     * не закрыть — закрытие считает выполненными только подпункты со статусом completed.
+     */
+    private function needsReview(BuhTaskLog $log): bool
+    {
+        if ($log->estimateItem?->parent_id !== null) {
+            return false;
+        }
+
+        $responsibleId = Client::whereKey($log->client_id)->value('responsible_employee_id');
+
+        return (bool) $log->estimateItem?->service?->requires_review
+            && (int) $log->employee_id !== (int) $responsibleId;
     }
 
     /** Документы задачи для фронта: [{id, name, url}], по порядку добавления. */

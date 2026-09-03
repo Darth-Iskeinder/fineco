@@ -100,6 +100,7 @@ class Audit extends Model
         return BuhTaskLog::query()
             ->where('client_id', $this->client_id)
             ->where('status', 'completed')
+            ->whereHas('estimateItem', fn ($q) => $q->whereNull('parent_id')) // подпункт — не отдельная задача
             ->whereRaw('(year * 12 + month) between ? and ?', [$from, $to])
             ->with(['employee', 'estimateItem.service', 'documents'])
             ->orderBy('year')

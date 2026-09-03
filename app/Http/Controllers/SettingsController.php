@@ -435,6 +435,37 @@ class SettingsController extends Controller
         ];
     }
 
+    /**
+     * Поля подпункта. Подпункт — не самостоятельный БП, а строка внутри основного:
+     * своей карточки в настройках у него нет, задаются только название и стоимость.
+     *
+     * Всё остальное приходит от родителя или гасится:
+     *  - биллинг, ставка и количество наследуются, чтобы строка считалась в смете так же;
+     *  - расписания у подпункта нет вовсе (задачи строятся только по корневым позициям),
+     *    поэтому периодичность и её даты держим пустыми, иначе в смете висела бы подпись
+     *    от расписания, которого не существует;
+     *  - документ и проверка живут на основном БП: подпункт закрывается галочкой, и
+     *    отдельный статус «на проверке» у него только застопорил бы родителя.
+     */
+    private function childAttributes(Service $parent, array $data, int $sortOrder): array
+    {
+        return [
+            'name'              => $data['name'],
+            'cost'              => $data['cost'],
+            'billing'           => $parent->billing,
+            'rate_id'           => $parent->rate_id,
+            'allows_quantity'   => $parent->allows_quantity,
+            'periodicity'       => null,
+            'due_day'           => null,
+            'start_month'       => null,
+            'start_day'         => null,
+            'deadline_days'     => null,
+            'requires_document' => false,
+            'requires_review'   => false,
+            'sort_order'        => $sortOrder,
+        ];
+    }
+
     public function storeService(Request $request)
     {
         $request->validate([
@@ -470,7 +501,6 @@ class SettingsController extends Controller
             'children'                      => 'nullable|array',
             'children.*.name'               => 'required|string|max:255',
             'children.*.cost'               => 'required|numeric|min:0',
-            'children.*.periodicity'        => 'nullable|string|max:100',
             'triggers_on_event'             => 'boolean',
         ] + $this->scheduleRules($request) + $this->eventTriggerRules($request),
             self::SCHEDULE_MESSAGES + self::EVENT_MESSAGES);
@@ -507,17 +537,9 @@ class SettingsController extends Controller
         $service->taxSystems()->sync($request->input('tax_systems', []));
 
         foreach ($request->input('children', []) as $idx => $childData) {
-            $service->children()->create([
-                'name'            => $childData['name'],
-                'cost'            => $childData['cost'],
-                // Биллинг, ставка и количество живут только на основном БП — подпункт их наследует.
-                'billing'         => $service->billing,
-                'rate_id'         => $service->rate_id,
-                'periodicity'     => $childData['periodicity'] ?? null,
-                'allows_quantity' => $service->allows_quantity,
-                'is_active'       => true,
-                'sort_order'      => $idx,
-            ]);
+            $service->children()->create(
+                $this->childAttributes($service, $childData, $idx) + ['is_active' => true]
+            );
         }
 
         $service->load(['taxSystems', 'children.rate', 'rate', 'eventChild:id,name']);
@@ -565,7 +587,6 @@ class SettingsController extends Controller
             'children.*.id'                 => 'nullable|integer',
             'children.*.name'               => 'required|string|max:255',
             'children.*.cost'               => 'required|numeric|min:0',
-            'children.*.periodicity'        => 'nullable|string|max:100',
             'triggers_on_event'             => 'boolean',
         ] + $this->scheduleRules($request) + $this->eventTriggerRules($request, $service),
             self::SCHEDULE_MESSAGES + self::EVENT_MESSAGES);
@@ -599,7 +620,14 @@ class SettingsController extends Controller
             'allows_quantity'    => $allowsQty,
             'splits_by_branch'   => $request->boolean('splits_by_branch', false),
             'sort_order'         => $request->input('sort_order', $service->sort_order),
-        ], $this->serviceFlagValues($request)));
+        ], $this->serviceFlagValues($request),
+            // Подпункт своей карточки не имеет, но запрос по нему прийти может: тогда
+            // всё, кроме названия и стоимости, всё равно берём по правилам подпункта.
+            $parent ? $this->childAttributes($parent, [
+                'name' => $request->name,
+                'cost' => $request->cost,
+            ], (int) $service->sort_order) : []
+        ));
 
         $service->taxSystems()->sync($request->input('tax_systems', []));
 
@@ -611,26 +639,12 @@ class SettingsController extends Controller
 
         foreach ($incomingChildren as $idx => $childData) {
             if (!empty($childData['id'])) {
-                $service->children()->where('id', $childData['id'])->update([
-                    'name'            => $childData['name'],
-                    'cost'            => $childData['cost'],
-                    'billing'         => $service->billing,
-                    'rate_id'         => $service->rate_id,
-                    'periodicity'     => $childData['periodicity'] ?? null,
-                    'allows_quantity' => $service->allows_quantity,
-                    'sort_order'      => $idx,
-                ]);
+                $service->children()->where('id', $childData['id'])
+                    ->update($this->childAttributes($service, $childData, $idx));
             } else {
-                $service->children()->create([
-                    'name'            => $childData['name'],
-                    'cost'            => $childData['cost'],
-                    'billing'         => $service->billing,
-                    'rate_id'         => $service->rate_id,
-                    'periodicity'     => $childData['periodicity'] ?? null,
-                    'allows_quantity' => $service->allows_quantity,
-                    'is_active'       => true,
-                    'sort_order'      => $idx,
-                ]);
+                $service->children()->create(
+                    $this->childAttributes($service, $childData, $idx) + ['is_active' => true]
+                );
             }
         }
 

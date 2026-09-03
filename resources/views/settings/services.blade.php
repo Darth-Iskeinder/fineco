@@ -50,7 +50,6 @@ $servicesJson = $services->map(fn($s) => array_merge([
         'billing'         => $c->billing,
         'rate_id'         => $c->rate_id,
         'rate'            => $c->rate ? ['id' => $c->rate->id, 'name' => $c->rate->name, 'unit' => $c->rate->unit, 'price' => $c->rate->price] : null,
-        'periodicity'     => $c->periodicity,
         'is_active'       => $c->is_active,
         'allows_quantity' => $c->allows_quantity,
         'sort_order'      => $c->sort_order,
@@ -270,14 +269,17 @@ $servicesJson = $services->map(fn($s) => array_merge([
                         </tr>
 
                         <template x-for="child in (row.type === 'service' && childrenVisible(row.svc) ? (row.svc.children || []) : [])" :key="child.id">
+                            {{-- Подпункт открыть отдельной карточкой нельзя: он не самостоятельный БП,
+                                 а строка внутри родителя. Правят его в карточке основного БП. --}}
                             <tr @click="selectedRowId = (selectedRowId === 'c' + child.id ? null : 'c' + child.id)"
-                                @dblclick="openServiceModal(child)"
                                 :class="selectedRowId === 'c' + child.id ? 'bg-indigo-100/70 ring-1 ring-inset ring-indigo-200' : 'bg-slate-50/50 hover:bg-slate-50'"
                                 class="group cursor-pointer select-none">
-                                <td class="pl-10 pr-4 py-2.5 text-sm text-slate-600 sticky left-0 z-10 border-r border-slate-200"
+                                {{-- Стрелки у подпункта нет: разворачивать ему нечего, а рисованная
+                                     стрелка выглядела как кнопка, которая ничего не делает. Вложенность
+                                     показывает отступ, поэтому он вырос ровно на её место. --}}
+                                <td class="pl-14 pr-4 py-2.5 text-sm text-slate-600 sticky left-0 z-10 border-r border-slate-200"
                                     :class="selectedRowId === 'c' + child.id ? 'bg-indigo-100' : 'bg-slate-50'">
-                                    <div class="flex items-center gap-1.5 w-[18.5rem]">
-                                        <svg class="w-3 h-3 text-slate-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                                    <div class="flex items-center gap-1.5 w-[17.5rem]">
                                         <span class="truncate" :title="child.name" x-text="child.name"></span>
                                         <span x-show="child.allows_quantity" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 flex-shrink-0">кол-во</span>
                                     </div>
@@ -287,7 +289,7 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                 {{-- TODO: ячейка "Бизнес процесс" удалена — см. комментарий в thead --}}
                                 <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
                                 <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
-                                    <td class="px-4 py-2.5 whitespace-nowrap text-sm text-slate-400" x-text="child.periodicity || '—'"></td>
+                                <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
                                 <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
                                 <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
                                 <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
@@ -295,16 +297,9 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                 <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
                                 {{-- TODO: ячейка "Стоимость" скрыта — см. комментарий в thead --}}
                                 <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
-                                <td class="px-4 py-2.5 whitespace-nowrap text-right">
-                                    <div class="flex items-center justify-end gap-1">
-                                        <button @click="openServiceModal(child)" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Редактировать">
-                                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-                                        </button>
-                                        <button @click="openDeleteModal(child, row.svc.id)" class="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Удалить">
-                                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                                        </button>
-                                    </div>
-                                </td>
+                                {{-- Действий у подпункта нет: и правка, и удаление живут в блоке
+                                     «Подпункты» карточки основного БП. --}}
+                                <td class="px-4 py-2.5"></td>
                             </tr>
                         </template>
                     </tbody>
@@ -325,7 +320,7 @@ $servicesJson = $services->map(fn($s) => array_merge([
                 <div class="fixed inset-0 bg-slate-500/75" @click="showServiceModal = false"></div>
                 <div class="relative w-full max-w-2xl bg-white rounded-2xl shadow-xl p-6 z-10">
                     <div class="flex items-center justify-between mb-6">
-                        <h3 class="text-lg font-semibold text-slate-900" x-text="serviceForm.id ? (serviceForm.parent_id ? 'Редактирование подпункта' : 'Редактирование БП') : 'Новый бизнес-процесс'"></h3>
+                        <h3 class="text-lg font-semibold text-slate-900" x-text="serviceForm.id ? 'Редактирование БП' : 'Новый бизнес-процесс'"></h3>
                         <button @click="showServiceModal = false" class="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100">
                             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                         </button>
@@ -1298,6 +1293,13 @@ function servicesPage() {
         toast: { show: false, message: '', type: 'success' },
 
         openServiceModal(svc = null) {
+            // Подпункт своей карточки не имеет: он строка внутри основного БП и правится
+            // в его блоке «Подпункты». Выходим здесь, а не только убираем обработчики,
+            // чтобы новый вызов случайно не вернул отдельное окно подпункта.
+            if (svc?.parent_id) {
+                return;
+            }
+
             // Архивный открывается только на чтение — правка расписания сдвинула бы
             // уже посчитанные задачи. Двойной клик по строке сюда тоже приходит.
             if (svc?.archived_at) {
@@ -1325,7 +1327,7 @@ function servicesPage() {
                     allows_quantity: svc.allows_quantity || false,
                     splits_by_branch: svc.splits_by_branch || false,
                     flags: this.flagsFromSvc(svc),
-                    children: (svc.children || []).map(c => ({ id: c.id, name: c.name, cost: c.cost, periodicity: c.periodicity || '' })),
+                    children: (svc.children || []).map(c => ({ id: c.id, name: c.name, cost: c.cost })),
                 };
             } else {
                 this.serviceForm = {
@@ -1494,7 +1496,7 @@ function servicesPage() {
             this.restoring = false;
         },
 
-        addChildForm() { this.serviceForm.children.push({ id: null, name: '', cost: 0, periodicity: '' }); },
+        addChildForm() { this.serviceForm.children.push({ id: null, name: '', cost: 0 }); },
         removeChildForm(cidx) { this.serviceForm.children.splice(cidx, 1); },
 
         isTaxSystemSelected(id) { return this.serviceForm.tax_systems.includes(id); },
