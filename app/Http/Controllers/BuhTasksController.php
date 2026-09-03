@@ -1172,6 +1172,15 @@ class BuhTasksController extends Controller
     {
         $this->authorizeLog($log);
 
+        // Количество живёт только на основном БП: у подпункта числа нет ни в смете,
+        // ни в задаче, он отмечается галочкой.
+        if ($log->estimateItem?->parent_id !== null) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Количество указывается у основной задачи, а не у подпункта',
+            ], 422);
+        }
+
         $validated = $request->validate([
             'actual_quantity' => ['nullable', 'integer', 'min:0'],
         ]);

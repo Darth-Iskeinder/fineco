@@ -1704,17 +1704,6 @@
                                         <span x-show="child.status === 'review'" class="text-xs text-sky-600 font-medium">на проверке</span>
                                         <span x-show="child.status === 'rework'" class="text-xs text-rose-600 font-medium">на доработку</span>
                                     </label>
-                                    <template x-if="child.allows_quantity">
-                                        <div class="flex items-center gap-2 mt-1 ml-6 text-xs text-slate-500">
-                                            <span>План: <span class="font-medium text-slate-700" x-text="child.quantity"></span></span>
-                                            <span>Факт:</span>
-                                            <input type="number" min="0"
-                                                   :placeholder="child.quantity"
-                                                   :value="child.actual_quantity"
-                                                   @change="updateChildQuantity(taskModalIdx, cidx, $event.target.value)"
-                                                   class="w-16 px-1.5 py-0.5 border border-slate-200 rounded text-xs text-right focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-                                        </div>
-                                    </template>
                                     <template x-if="child.requires_document">
                                         <div class="mt-1 ml-6 text-xs">
                                             <template x-for="doc in (child.documents || [])" :key="doc.id">
@@ -1989,8 +1978,6 @@
                                         <span class="text-sm flex-1"
                                               :class="child.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-700'"
                                               x-text="child.name"></span>
-                                        <span x-show="child.allows_quantity" class="text-xs text-slate-400 whitespace-nowrap"
-                                              x-text="'факт: ' + (child.actual_quantity ?? '—') + ' / ' + child.quantity"></span>
                                     </div>
                                     <template x-if="child.requires_document && (child.documents || []).length > 0">
                                         <div class="mt-1 text-xs space-y-0.5" style="margin-left:1.625rem">
@@ -2534,19 +2521,6 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             const data = await this.post(`/buhtasks/logs/${logId}/quantity`, { actual_quantity: value });
             if (data.success) {
                 this.patch(taskIdx, { actual_quantity: data.log.actual_quantity });
-            }
-        },
-
-        async updateChildQuantity(taskIdx, cidx, rawValue) {
-            const task = this.tasks[taskIdx];
-            const value = rawValue === '' ? null : Math.max(0, parseInt(rawValue, 10) || 0);
-
-            const logId = await this.ensureChildLog(taskIdx, cidx);
-            if (!logId) return;
-
-            const data = await this.post(`/buhtasks/logs/${logId}/quantity`, { actual_quantity: value });
-            if (data.success) {
-                task.children[cidx] = { ...task.children[cidx], actual_quantity: data.log.actual_quantity };
             }
         },
 

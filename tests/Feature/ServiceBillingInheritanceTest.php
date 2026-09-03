@@ -86,7 +86,8 @@ class ServiceBillingInheritanceTest extends TestCase
         foreach ($service->children as $child) {
             $this->assertSame($this->paidBilling, $child->billing);
             $this->assertSame($this->rate->id, $child->rate_id);
-            $this->assertTrue((bool) $child->allows_quantity);
+            // Количество не наследуется: число одно, на основном БП.
+            $this->assertFalse((bool) $child->allows_quantity);
         }
     }
 
@@ -115,8 +116,14 @@ class ServiceBillingInheritanceTest extends TestCase
         $this->assertNull($child->fresh()->rate_id);
     }
 
-    /** Флаг «можно указывать количество» переехал к биллингу — на основной БП. */
-    public function test_children_follow_parent_quantity_flag(): void
+    /**
+     * Флаг «можно указывать количество» живёт только на основном БП.
+     *
+     * Раньше он наследовался подпунктами, и в смете количество вводили по каждому из них,
+     * а цена строки собиралась из подпунктов. Теперь число одно, у основного БП, а подпункт
+     * задаёт только состав работы.
+     */
+    public function test_quantity_flag_never_lands_on_children(): void
     {
         $service = Service::create([
             'name' => 'БП ' . uniqid(), 'cost' => 0,
@@ -134,17 +141,17 @@ class ServiceBillingInheritanceTest extends TestCase
             'cost'            => 0,
             'billing'         => $this->paidBilling,
             'rate_id'         => $this->rate->id,
-            'allows_quantity' => false,
+            'allows_quantity' => true,
             'children'        => [
                 ['id' => $child->id, 'name' => 'Подпункт', 'cost' => 0],
             ],
         ])->assertSuccessful();
 
-        $this->assertFalse((bool) $service->fresh()->allows_quantity);
+        $this->assertTrue((bool) $service->fresh()->allows_quantity);
         $this->assertFalse((bool) $child->fresh()->allows_quantity);
     }
 
-    /** Подпункт правят отдельной карточкой — свой биллинг и количество он там задать не может. */
+    /** Своей карточки у подпункта нет, но и прямой запрос не даст ему свой биллинг и количество. */
     public function test_child_cannot_set_own_billing(): void
     {
         $service = Service::create([
@@ -170,6 +177,6 @@ class ServiceBillingInheritanceTest extends TestCase
         $this->assertSame('Подпункт переименован', $child->name);
         $this->assertSame($this->paidBilling, $child->billing);
         $this->assertSame($this->rate->id, $child->rate_id);
-        $this->assertTrue((bool) $child->allows_quantity);
+        $this->assertFalse((bool) $child->allows_quantity);
     }
 }

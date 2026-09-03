@@ -51,7 +51,6 @@ $servicesJson = $services->map(fn($s) => array_merge([
         'rate_id'         => $c->rate_id,
         'rate'            => $c->rate ? ['id' => $c->rate->id, 'name' => $c->rate->name, 'unit' => $c->rate->unit, 'price' => $c->rate->price] : null,
         'is_active'       => $c->is_active,
-        'allows_quantity' => $c->allows_quantity,
         'sort_order'      => $c->sort_order,
         'children'        => [],
     ])->values(),
@@ -281,7 +280,6 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                     :class="selectedRowId === 'c' + child.id ? 'bg-indigo-100' : 'bg-slate-50'">
                                     <div class="flex items-center gap-1.5 w-[17.5rem]">
                                         <span class="truncate" :title="child.name" x-text="child.name"></span>
-                                        <span x-show="child.allows_quantity" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 flex-shrink-0">кол-во</span>
                                     </div>
                                 </td>
                                 <td class="px-4 py-2.5 text-sm text-slate-300">—</td>
@@ -709,13 +707,13 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                     <p class="text-xs text-slate-500 mb-2" x-show="serviceForm.children.length > 0"
                                        x-text="isPaidBilling
                                             ? (selectedRate
-                                                ? 'Биллинг из основного БП: ' + formatPrice(selectedRate.price) + (selectedRate.unit ? ' / ' + selectedRate.unit : '') + ' × кол-во по каждому подпункту'
+                                                ? 'Биллинг из основного БП: ' + formatPrice(selectedRate.price) + (selectedRate.unit ? ' / ' + selectedRate.unit : '') + ' × количество основного БП'
                                                 : 'Биллинг из основного БП — выберите ставку выше')
                                             : (isFreeBilling
                                                 ? (selectedBillingCode === 'included' ? 'Биллинг из основного БП: входит в абонентку — 0' : 'Биллинг из основного БП: не тарифицируется — 0')
                                                 : 'Биллинг наследуется от основного БП')"></p>
                                     <p class="text-xs text-slate-400 mb-2" x-show="serviceForm.children.length > 0"
-                                       x-text="serviceForm.allows_quantity ? 'Количество можно указывать по каждому подпункту' : 'Количество в смете не вводится'"></p>
+                                       x-text="serviceForm.allows_quantity ? 'Количество вводится один раз, у основного БП: у подпунктов своего числа нет' : 'Количество в смете не вводится'"></p>
                                     <div class="space-y-2">
                                         <template x-for="(child, cidx) in serviceForm.children" :key="cidx">
                                             <div class="flex items-start gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200">

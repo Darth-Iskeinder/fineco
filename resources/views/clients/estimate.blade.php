@@ -229,18 +229,6 @@
                                             <div class="flex-1">
                                                 <p class="text-sm text-slate-700" x-text="child.name"></p>
                                             </div>
-                                            <template x-if="child.allows_quantity && extraChildEnabled(eIdx, child.id)">
-                                                <div class="flex items-center gap-1.5">
-                                                    <span class="text-xs text-slate-500">Кол-во:</span>
-                                                    <div class="flex items-center border border-slate-200 rounded-lg overflow-hidden">
-                                                        <button type="button" @click="setExtraChildQty(eIdx, child.id, Math.max(1, getExtraChildQty(eIdx, child.id) - 1))"
-                                                                class="px-2 py-1 text-slate-500 hover:bg-slate-100 text-sm leading-none select-none">−</button>
-                                                        <span class="px-3 py-1 text-sm min-w-[2rem] text-center" x-text="getExtraChildQty(eIdx, child.id)"></span>
-                                                        <button type="button" @click="setExtraChildQty(eIdx, child.id, getExtraChildQty(eIdx, child.id) + 1)"
-                                                                class="px-2 py-1 text-slate-500 hover:bg-slate-100 text-sm leading-none select-none">+</button>
-                                                    </div>
-                                                </div>
-                                            </template>
                                         </div>
                                     </template>
                                 </div>
@@ -733,25 +721,12 @@ function estimatePage(clientId, tariffBPs, extras, closed, initialNotes, initial
                     name: child.name,
                     periodicity: child.periodicity,
                     cost: child.cost,
-                    quantity: 1,
-                    allows_quantity: child.allows_quantity,
+                    quantity: 1,   // у подпункта числа нет, количество задаётся у самой услуги
                     enabled: true,
                 });
             } else {
                 extra.children.splice(idx, 1);
             }
-        },
-
-        getExtraChildQty(eIdx, childServiceId) {
-            const extra = this.extras[eIdx];
-            const child = (extra.children || []).find(c => c.service_id === childServiceId);
-            return child ? child.quantity : 1;
-        },
-
-        setExtraChildQty(eIdx, childServiceId, val) {
-            const extra = this.extras[eIdx];
-            const child = (extra.children || []).find(c => c.service_id === childServiceId);
-            if (child) child.quantity = parseInt(val) || 1;
         },
 
         // Первое (по порядку конфига) условие, которым помечен БП, иначе null
@@ -828,19 +803,18 @@ function estimatePage(clientId, tariffBPs, extras, closed, initialNotes, initial
         get regularBPsGrouped() { return this.groupBySphere(this.regularBPs); },
         flagBPsGrouped(key) { return this.groupBySphere(this.flagBPs(key)); },
 
+        // Цена строки живёт на основном БП: цена за единицу × его количество.
+        // Подпункты в сумму не складываются, они задают состав работы, а не цену.
+        // Пустой состав (подпункты есть, но ни один не выбран) стоит ноль.
         bpTotal(bp) {
             if (!bp.enabled) return 0;
-            if (bp.children && bp.children.length > 0) {
-                return (bp.children || [])
-                    .filter(c => c.enabled)
-                    .reduce((s, c) => s + c.cost * (c.allows_quantity ? c.quantity : 1), 0);
-            }
+            if (bp.children && bp.children.length > 0 && !bp.children.some(c => c.enabled)) return 0;
+
             return bp.cost * (bp.allows_quantity ? bp.quantity : 1);
         },
 
         extraTotal(ex) {
-            const childSum = (ex.children || []).reduce((cs, c) => cs + c.cost * (c.allows_quantity ? c.quantity : 1), 0);
-            return childSum > 0 ? childSum : ex.cost * (ex.allows_quantity ? ex.quantity : 1);
+            return ex.cost * (ex.allows_quantity ? ex.quantity : 1);
         },
 
         grandTotal() {

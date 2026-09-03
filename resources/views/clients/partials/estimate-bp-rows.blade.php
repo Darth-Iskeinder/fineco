@@ -34,7 +34,9 @@
                 @include('clients.partials.estimate-schedule-assignee', ['row' => 'bp', 'assigneeShow' => 'bp.enabled'])
             </div>
 
-            <template x-if="bp.allows_quantity && bp.enabled && !bp.children.some(c => c.enabled)">
+            {{-- Количество у основного БП, одно на всю группу: подпункт говорит только,
+                 входит ли эта часть работы в состав, своего числа у него нет. --}}
+            <template x-if="bp.allows_quantity && bp.enabled">
                 <div class="flex items-center gap-1.5">
                     <span class="text-xs text-slate-500">Кол-во:</span>
                     <div class="flex items-center border border-slate-200 rounded-lg overflow-hidden">
@@ -52,8 +54,9 @@
                 <span class="text-xs text-slate-400 italic flex-shrink-0">выберите подпункты</span>
             </template>
 
-            {{-- Сумма строки (цена×кол-во), для платных БП без подпунктов --}}
-            <template x-if="bp.enabled && bp.cost > 0 && bp.children.length === 0">
+            {{-- Сумма строки (цена×кол-во). У БП с подпунктами показываем её, только когда
+                 выбран хотя бы один подпункт: пустой состав работы стоит ноль. --}}
+            <template x-if="bp.enabled && bp.cost > 0 && (bp.children.length === 0 || bp.children.some(c => c.enabled))">
                 <span class="text-sm font-semibold text-slate-700 flex-shrink-0 tabular-nums" x-text="fmt(bpTotal(bp))"></span>
             </template>
         </div>
@@ -76,18 +79,6 @@
                             <p class="text-xs text-slate-400" x-show="child.periodicity" x-text="child.periodicity"></p>
                         </div>
 
-                        <template x-if="child.allows_quantity && child.enabled">
-                            <div class="flex items-center gap-1.5">
-                                <span class="text-xs text-slate-500">Кол-во:</span>
-                                <div class="flex items-center border border-slate-200 rounded-lg overflow-hidden">
-                                    <button type="button" @click="child.quantity = Math.max(1, child.quantity - 1)"
-                                            class="px-2 py-1 text-slate-500 hover:bg-slate-100 text-sm leading-none select-none">−</button>
-                                    <span class="px-3 py-1 text-sm min-w-[2rem] text-center" x-text="child.quantity"></span>
-                                    <button type="button" @click="child.quantity++"
-                                            class="px-2 py-1 text-slate-500 hover:bg-slate-100 text-sm leading-none select-none">+</button>
-                                </div>
-                            </div>
-                        </template>
                     </div>
                 </template>
             </div>

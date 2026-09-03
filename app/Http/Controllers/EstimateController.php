@@ -471,8 +471,9 @@ class EstimateController extends Controller
                 $service = Service::with('rate')->find($bpData['service_id']);
                 if (!$service) continue;
 
-                $qty      = (int) ($bpData['quantity'] ?? 1);
-                $children = collect($bpData['children'] ?? [])->filter(fn($c) => !empty($c['enabled']));
+                $qty         = (int) ($bpData['quantity'] ?? 1);
+                $allChildren = collect($bpData['children'] ?? []);
+                $children    = $allChildren->filter(fn($c) => !empty($c['enabled']));
 
                 $key      = $this->itemKey($service->id, $bpData['tax_office_code'] ?? null, $bpData['branch_label'] ?? null, $service->name, 'recurring');
                 // Забираем строку из очереди — «использована», второй раз не сматчится
@@ -520,7 +521,6 @@ class EstimateController extends Controller
                     ]);
                 }
 
-                $childTotal = 0;
                 $childOrder = 0;
                 $childByKey = [];
                 foreach (($existing->children ?? collect()) as $c) {
@@ -529,13 +529,11 @@ class EstimateController extends Controller
                 $keptChildIds = [];
 
                 foreach ($children as $childData) {
-                    $childService = Service::with('rate')->find($childData['service_id']);
+                    $childService = Service::find($childData['service_id']);
                     if (!$childService) continue;
 
-                    $cqty   = (int) ($childData['quantity'] ?? 1);
-                    $cTotal = $pricing->lineTotal($childService, $cqty);
-                    $childTotal += $cTotal;
-
+                    // Подпункт — состав работы, а не строка прайса: цена и количество
+                    // целиком на основном БП, поэтому у подпункта они нулевые.
                     $cAttrs = [
                         'parent_id'   => $parent->id,
                         'service_id'  => $childService->id,
@@ -543,9 +541,9 @@ class EstimateController extends Controller
                         'name'        => $childService->name,
                         'periodicity' => $childService->periodicity,
                         'due_day'     => $childService->due_day,
-                        'cost'        => $pricing->unitPrice($childService),
-                        'quantity'    => $cqty,
-                        'total'       => $cTotal,
+                        'cost'        => 0,
+                        'quantity'    => 1,
+                        'total'       => 0,
                         'sort_order'  => $childOrder++,
                     ];
                     $ckey  = $this->itemKey($childService->id, null, null, $childService->name, 'recurring');
@@ -563,8 +561,11 @@ class EstimateController extends Controller
                     $parent->children()->whereNotIn('id', $keptChildIds ?: [0])->delete();
                 }
 
-                $parentTotal = $children->isNotEmpty()
-                    ? $childTotal
+                // Цена строки — цена за единицу основного БП × его количество. Подпункты
+                // на неё не влияют, но пустой состав (подпункты есть, ни один не выбран)
+                // стоит ноль: работы по такой строке не будет.
+                $parentTotal = $allChildren->isNotEmpty() && $children->isEmpty()
+                    ? 0.0
                     : $pricing->lineTotal($service, $qty);
 
                 $parent->update(['total' => $parentTotal]);
@@ -625,7 +626,6 @@ class EstimateController extends Controller
                         : []));
                 }
 
-                $childTotal = 0;
                 $childByKey = [];
                 foreach (($existing->children ?? collect()) as $c) {
                     $childByKey[$this->itemKey($c->service_id, null, null, $c->name, $c->type)] = $c;
@@ -635,20 +635,18 @@ class EstimateController extends Controller
 
                 foreach ($extraData['children'] ?? [] as $childData) {
                     if (empty($childData['name'])) continue;
-                    $cc = (float) ($childData['cost'] ?? 0);
-                    $cq = (int) ($childData['quantity'] ?? 1);
-                    $ct = round($cc * $cq, 2);
-                    $childTotal += $ct;
 
+                    // Как и у тарифных БП: подпункт задаёт состав, цена и количество
+                    // остаются на самой услуге.
                     $cAttrs = [
                         'parent_id'   => $parent->id,
                         'service_id'  => $childData['service_id'] ?? null,
                         'type'        => $extraType,
                         'name'        => $childData['name'],
                         'periodicity' => $childData['periodicity'] ?? null,
-                        'cost'        => $cc,
-                        'quantity'    => $cq,
-                        'total'       => $ct,
+                        'cost'        => 0,
+                        'quantity'    => 1,
+                        'total'       => 0,
                         'sort_order'  => $childOrder++,
                     ];
                     $ckey  = $this->itemKey($childData['service_id'] ?? null, null, null, $childData['name'], $extraType);
@@ -665,12 +663,7 @@ class EstimateController extends Controller
                     $parent->children()->whereNotIn('id', $keptChildIds ?: [0])->delete();
                 }
 
-                if (!empty($extraData['children'])) {
-                    $parent->update(['total' => $childTotal]);
-                    $total += $childTotal;
-                } else {
-                    $total += $rowTotal;
-                }
+                $total += $rowTotal;
                 $keptRootIds[] = $parent->id;
             }
 
