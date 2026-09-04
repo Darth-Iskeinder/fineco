@@ -396,6 +396,75 @@ class DashboardTest extends TestCase
         $this->assertSame('удалён', $row['note']['label']);
     }
 
+    /**
+     * Клиент на паузе задач не даёт: у возвращённого в работу есть дата, раньше
+     * которой задач нет. Без неё приостановленный клиент рисовал план каждый месяц,
+     * и он оседал на том, за кем клиент числится — в том числе на уволенном.
+     */
+    public function test_paused_client_gives_no_tasks_before_resume_date(): void
+    {
+        [$head, $client] = $this->clientWithMonthlyItem('ТОО На Паузе', 'DASH0000000P');
+
+        // Возврат в работу с первого числа следующего месяца
+        $client->forceFill(['tasks_start_from' => now()->addMonth()->startOfMonth()->toDateString()])->save();
+
+        $response = $this->actingAs($this->manager, 'employee')
+            ->get(route('dashboard.index'))->assertOk();
+
+        $this->assertNull(
+            collect($response->viewData('leads'))->firstWhere('id', $head->id),
+            'У клиента на паузе задач в текущем месяце быть не должно',
+        );
+    }
+
+    /** Завершённый клиент после даты завершения задач не даёт. */
+    public function test_finished_client_gives_no_tasks_after_end_date(): void
+    {
+        [$head, $client] = $this->clientWithMonthlyItem('ТОО Завершён', 'DASH0000000E');
+
+        $client->forceFill(Client::serviceStopAttributes(now()->subMonths(2)->toDateString()))->save();
+
+        $response = $this->actingAs($this->manager, 'employee')
+            ->get(route('dashboard.index'))->assertOk();
+
+        $this->assertNull(
+            collect($response->viewData('leads'))->firstWhere('id', $head->id),
+            'У завершённого клиента задач после даты завершения быть не должно',
+        );
+    }
+
+    /**
+     * Клиент со сметой и одной помесячной позицией; возвращает главбуха и клиента.
+     *
+     * @return array{0: Employee, 1: Client}
+     */
+    private function clientWithMonthlyItem(string $clientName, string $inn): array
+    {
+        $headRole = Role::firstOrCreate(['name' => Role::HEAD_ACCOUNTANT], ['display_name' => 'Главбух']);
+        $head = Employee::create([
+            'full_name' => 'Главбух ' . uniqid(), 'position' => 'Главбух',
+            'email' => 'head_' . uniqid() . '@test.kg', 'password' => bcrypt('x'),
+            'role_id' => $headRole->id, 'status' => Employee::STATUS_ACTIVE,
+        ]);
+
+        $service = Service::create([
+            'name' => 'Услуга ' . uniqid(), 'periodicity' => 'Ежемесячно',
+            'start_day' => [25], 'is_active' => true,
+        ]);
+        $client = Client::create([
+            'name' => $clientName, 'inn' => $inn, 'responsible_employee_id' => $head->id,
+        ]);
+        $estimate = Estimate::create(['client_id' => $client->id, 'total' => 5000]);
+        $estimate->forceFill(['created_at' => now()->subMonths(3)])->save();
+        $estimate->items()->create([
+            'service_id' => $service->id, 'type' => 'recurring', 'name' => 'Позиция',
+            'periodicity' => 'Ежемесячно', 'cost' => 5000, 'quantity' => 1,
+            'total' => 5000, 'sort_order' => 0, 'assignee_id' => $head->id,
+        ]);
+
+        return [$head, $client->fresh()];
+    }
+
     /** Клиент со сметой и одной помесячной позицией на этом сотруднике. */
     private function seedTaskFor(Employee $doer, string $clientName, string $inn): void
     {

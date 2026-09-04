@@ -182,6 +182,25 @@ class DashboardController extends Controller
                 $clientFrom = $estimate->tasksStartFrom();
             }
 
+            // Возврат после перерыва: за месяцы простоя задач нет. Без этой границы
+            // приостановленный клиент продолжал давать план, и он оседал на том, за
+            // кем клиент числится — в том числе на уволенном.
+            if ($resumedFrom = $client->tasksStartFrom()) {
+                if ($resumedFrom->gt($clientFrom)) {
+                    $clientFrom = $resumedFrom;
+                }
+            }
+
+            // Верхняя граница — конец обслуживания, если он назначен. У действующих
+            // клиентов дата пуста, и окно остаётся прежним. Обе границы — те же, что
+            // в BuhTasksController: экраны обязаны показывать один и тот же набор задач.
+            $clientTo = $scanTo;
+            if ($serviceEnd = $client->serviceEndsAt()) {
+                if ($serviceEnd->lt($clientTo)) {
+                    $clientTo = $serviceEnd;
+                }
+            }
+
             foreach ($items as $item) {
                 $assigneeId = (int) ($item->assignee_id ?? $client->responsible_employee_id);
 
@@ -194,7 +213,8 @@ class DashboardController extends Controller
                 }
 
                 // Верхняя граница позиции: закрытый БП после своей даты задач не даёт.
-                $itemTo = $scanTo;
+                // Дальше конца обслуживания клиента она в любом случае не уходит.
+                $itemTo = $clientTo;
                 if ($closedAt = $item->tasksEndAt()) {
                     $itemTo = $closedAt->lt($itemTo) ? $closedAt : $itemTo;
                 }
