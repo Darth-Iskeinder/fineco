@@ -1679,10 +1679,12 @@
 
     </div>
 
-    <!-- ==================== ПРЕДПРОСМОТР ДОКУМЕНТА ==================== -->
+    {{-- Каждому окну свой x-teleport: Alpine переносит в body только первый
+         корневой элемент шаблона, а остальные молча выбрасывает. --}}
+
+    {{-- Подтверждение завершения обслуживания: последствия не видны в самой карточке,
+         поэтому проговариваем их до сохранения. --}}
     <template x-teleport="body">
-        {{-- Подтверждение завершения обслуживания: последствия не видны в самой карточке,
-             поэтому проговариваем их до сохранения. --}}
         <div x-show="showEndServiceWarning" x-cloak
              class="fixed inset-0 z-[70] flex items-center justify-center p-4"
              @keydown.escape.window="showEndServiceWarning = false">
@@ -1731,7 +1733,10 @@
                 </div>
             </div>
         </div>
+    </template>
 
+    <!-- ==================== ПРЕДПРОСМОТР ДОКУМЕНТА ==================== -->
+    <template x-teleport="body">
         <div x-show="showPreview" x-cloak
              class="fixed inset-0 z-[60] flex items-center justify-center p-4"
              @keydown.escape.window="closePreview()">
