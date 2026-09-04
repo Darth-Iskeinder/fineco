@@ -241,6 +241,114 @@ class DashboardTest extends TestCase
         $this->assertSame(50, $company['pct']);
     }
 
+    /**
+     * Закрытую задачу засчитываем тому, кто её закрыл, а не тому, за кем она числится.
+     * Позиции сметы переезжают при смене ответственного, логи — нет, и по назначению
+     * закрытый месяц переписывался бы после каждого перевода.
+     */
+    public function test_completed_task_counts_for_the_one_who_closed_it(): void
+    {
+        $headRole = Role::firstOrCreate(['name' => Role::HEAD_ACCOUNTANT], ['display_name' => 'Главбух']);
+        $head = Employee::create([
+            'full_name' => 'Тест Главбух Три', 'position' => 'Главбух',
+            'email' => 'head3_' . uniqid() . '@test.kg', 'password' => bcrypt('x'),
+            'role_id' => $headRole->id, 'status' => Employee::STATUS_ACTIVE,
+        ]);
+        $closer = Employee::create([
+            'full_name' => 'Тест Закрывший', 'position' => 'Бухгалтер',
+            'email' => 'closer_' . uniqid() . '@test.kg', 'password' => bcrypt('x'),
+            'role_id' => $this->accountant->role_id, 'status' => Employee::STATUS_ACTIVE,
+        ]);
+
+        $service = Service::create([
+            'name' => 'Учёт ' . uniqid(), 'periodicity' => 'Ежемесячно',
+            'start_day' => [25], 'is_active' => true,
+        ]);
+        $client = Client::create([
+            'name' => 'ТОО Кто Закрыл', 'inn' => 'DASH0000000C',
+            'responsible_employee_id' => $head->id,
+        ]);
+        $estimate = Estimate::create(['client_id' => $client->id, 'total' => 10000]);
+        $estimate->forceFill(['created_at' => now()->subMonths(3)])->save();
+
+        // Позиция числится за одним бухгалтером, а закрыл её другой
+        $item = $estimate->items()->create([
+            'service_id' => $service->id, 'type' => 'recurring', 'name' => 'Позиция',
+            'periodicity' => 'Ежемесячно', 'cost' => 10000, 'quantity' => 1,
+            'total' => 10000, 'sort_order' => 0, 'assignee_id' => $this->accountant->id,
+        ]);
+        \App\Models\BuhTaskLog::create([
+            'employee_id' => $closer->id, 'client_id' => $client->id,
+            'estimate_item_id' => $item->id, 'year' => now()->year, 'month' => now()->month,
+            'status' => 'completed', 'completed_at' => now(),
+        ]);
+
+        $response = $this->actingAs($this->manager, 'employee')
+            ->get(route('dashboard.index'))->assertOk();
+
+        $lead = collect($response->viewData('leads'))->firstWhere('id', $head->id);
+        $this->assertNotNull($lead);
+        $this->assertSame(1, $lead['total']);
+        $this->assertSame(1, $lead['completed']);
+
+        $members = collect($lead['members']);
+        $this->assertSame([$closer->full_name], $members->pluck('name')->all());
+        $this->assertSame(1, $members->first()['completed']);
+
+        // Тот, за кем позиция числится, эту закрытую задачу себе не забирает
+        $this->assertNull(
+            collect($response->viewData('accountants'))->firstWhere('id', $this->accountant->id)
+        );
+    }
+
+    /**
+     * Закрытая задача без слота в этом месяце всё равно в разрезе: у позиции без
+     * периодичности слот создаётся только на текущий месяц, и работа за прошлый
+     * иначе исчезала бы из отчёта целиком.
+     */
+    public function test_completed_task_without_slot_is_still_counted(): void
+    {
+        $headRole = Role::firstOrCreate(['name' => Role::HEAD_ACCOUNTANT], ['display_name' => 'Главбух']);
+        $head = Employee::create([
+            'full_name' => 'Тест Главбух Четыре', 'position' => 'Главбух',
+            'email' => 'head4_' . uniqid() . '@test.kg', 'password' => bcrypt('x'),
+            'role_id' => $headRole->id, 'status' => Employee::STATUS_ACTIVE,
+        ]);
+
+        // Услуга без периодичности: расписания у неё нет вовсе
+        $service = Service::create([
+            'name' => 'Разовая ' . uniqid(), 'periodicity' => null, 'is_active' => true,
+        ]);
+        $client = Client::create([
+            'name' => 'ТОО Без Расписания', 'inn' => 'DASH0000000S',
+            'responsible_employee_id' => $head->id,
+        ]);
+        $estimate = Estimate::create(['client_id' => $client->id, 'total' => 5000]);
+        $estimate->forceFill(['created_at' => now()->subMonths(3)])->save();
+        $item = $estimate->items()->create([
+            'service_id' => $service->id, 'type' => 'recurring', 'name' => 'Разовая позиция',
+            'cost' => 5000, 'quantity' => 1, 'total' => 5000, 'sort_order' => 0,
+            'assignee_id' => $this->accountant->id,
+        ]);
+
+        $prev = now()->subMonth();
+        \App\Models\BuhTaskLog::create([
+            'employee_id' => $this->accountant->id, 'client_id' => $client->id,
+            'estimate_item_id' => $item->id, 'year' => $prev->year, 'month' => $prev->month,
+            'status' => 'completed', 'completed_at' => $prev,
+        ]);
+
+        $response = $this->actingAs($this->manager, 'employee')
+            ->get(route('dashboard.index', ['year' => $prev->year, 'month' => $prev->month]))
+            ->assertOk();
+
+        $lead = collect($response->viewData('leads'))->firstWhere('id', $head->id);
+        $this->assertNotNull($lead, 'Закрытая задача без слота должна попасть в разрез');
+        $this->assertSame(1, $lead['total']);
+        $this->assertSame(1, $lead['completed']);
+        $this->assertSame(100, $lead['pct']);
+    }
+
     /** Бухгалтер в своём списке один раз и только со сметными задачами. */
     public function test_accountant_row_counts_own_estimate_tasks_only(): void
     {

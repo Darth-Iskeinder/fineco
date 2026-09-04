@@ -78,11 +78,21 @@ class DashboardController extends Controller
 
         // Логи всех сотрудников, ключ — «слот» (year-month-item[-дата для weekly]).
         // После переназначения у слота могут быть логи разных исполнителей — берём последний.
-        $logs = BuhTaskLog::where('year', '>=', min($scanFrom->year, $year))
+        $logRows = BuhTaskLog::where('year', '>=', min($scanFrom->year, $year))
             ->orderBy('id')
-            ->get()
-            ->keyBy(fn ($l) => $l->year . '-' . $l->month . '-' . $l->estimate_item_id
-                . ($l->due_date ? '-' . $l->due_date->toDateString() : ''));
+            ->get();
+
+        $logs = $logRows->keyBy(fn ($l) => $l->year . '-' . $l->month . '-' . $l->estimate_item_id
+            . ($l->due_date ? '-' . $l->due_date->toDateString() : ''));
+
+        // Второй, свободный индекс: у части помесячных логов срок всё-таки проставлен,
+        // и точный ключ по ним не сходится — закрытая задача выглядела незакрытой.
+        // Для недельных им пользоваться нельзя: там дата и есть различитель вхождений.
+        $logsByMonth = $logRows->keyBy(fn ($l) => $l->year . '-' . $l->month . '-' . $l->estimate_item_id);
+
+        // Логи выбранного месяца, которые уже нашли свой слот. Всё закрытое, что осталось
+        // за пределами этого списка, добавляем в разрез отдельно — см. ниже про сирот.
+        $matchedLogIds = [];
 
         // Роль нужна для подписи в строке: разрез делится на главбухов и бухгалтеров
         $employees     = Employee::with('role:id,display_name')->get(['id', 'full_name', 'role_id']);
@@ -197,7 +207,16 @@ class DashboardController extends Controller
                 foreach ($occurrences as [$wy, $wm, $dueObj]) {
                     $slotKey = ($kind === 'weekly' && $dueObj) ? '-' . $dueObj->toDateString() : '';
                     $log     = $logs->get($wy . '-' . $wm . '-' . $item->id . $slotKey);
-                    $status  = $log?->status ?? 'pending';
+
+                    if (!$log && $kind !== 'weekly') {
+                        $log = $logsByMonth->get($wy . '-' . $wm . '-' . $item->id);
+                    }
+
+                    $status = $log?->status ?? 'pending';
+
+                    if ($log && $wy === $year && $wm === $month) {
+                        $matchedLogIds[$log->id] = true;
+                    }
 
                     $this->classifyDiscipline($discipline, $wy, $wm, $dueObj, $status, $log?->completed_at, $today);
 
@@ -205,12 +224,15 @@ class DashboardController extends Controller
                         $elapsed = $this->calcElapsed($log);
                         $this->accumulate($stats, $status, $dueObj, $log?->completed_at, $elapsed);
 
+                        // Закрытую задачу засчитываем тому, кто её закрыл, а не тому, за кем
+                        // она числится сейчас: позиции переезжают при смене ответственного, и
+                        // прошлый месяц иначе переписывается задним числом.
                         $this->accumulateTeam(
                             $team,
                             (int) $client->id,
                             $client->name,
                             (int) ($client->responsible_employee_id ?? 0),
-                            $assigneeId,
+                            $this->doerOf($status, $log, $assigneeId),
                             $status,
                             $dueObj,
                             $today,
@@ -274,6 +296,43 @@ class DashboardController extends Controller
             }
         }
 
+        /**
+         * Закрытые задачи, которым слота в этом месяце нет.
+         *
+         * Так выходит у позиций без периодичности (для них слот создаётся только на
+         * текущий месяц, и в прошлом их работа исчезала) и у тех, чьё расписание после
+         * закрытия поменяли. Работа сделана, и в разрезе по сотрудникам она должна быть,
+         * иначе прошлый месяц занижен. В сводку и в разрез по компаниям такие задачи не
+         * идут: там счёт по плану месяца, и трогать его отдельным решением.
+         */
+        $clientsById = $clients->keyBy('id');
+
+        foreach ($logRows as $log) {
+            if ((int) $log->year !== $year || (int) $log->month !== $month) {
+                continue;
+            }
+
+            if ($log->status !== 'completed' || !$log->estimate_item_id || isset($matchedLogIds[$log->id])) {
+                continue;
+            }
+
+            $client = $clientsById->get($log->client_id);
+            if (!$client) {
+                continue;
+            }
+
+            $this->accumulateTeam(
+                $team,
+                (int) $client->id,
+                $client->name,
+                (int) ($client->responsible_employee_id ?? 0),
+                (int) $log->employee_id,
+                'completed',
+                null,
+                $today,
+            );
+        }
+
         usort($overdue, fn ($x, $y) => [$y['days'], $x['client_name']] <=> [$x['days'], $y['client_name']]);
 
         $leads       = $this->buildLeads($team, $employeeNames, $employeeRoles);
@@ -335,6 +394,18 @@ class DashboardController extends Controller
                 array_values($discipline)
             )),
         ]);
+    }
+
+    /**
+     * Кому засчитать задачу: закрытую — тому, кто её закрыл, остальные — тому, за кем
+     * она числится. Логи при переносе работы не двигаются, а позиции сметы двигаются,
+     * поэтому по назначению закрытый месяц меняется каждый раз после смены ответственного.
+     */
+    private function doerOf(string $status, ?BuhTaskLog $log, int $assigneeId): int
+    {
+        return $status === 'completed' && $log?->employee_id
+            ? (int) $log->employee_id
+            : $assigneeId;
     }
 
     /**
