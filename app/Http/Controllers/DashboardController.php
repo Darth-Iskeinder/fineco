@@ -84,7 +84,10 @@ class DashboardController extends Controller
             ->keyBy(fn ($l) => $l->year . '-' . $l->month . '-' . $l->estimate_item_id
                 . ($l->due_date ? '-' . $l->due_date->toDateString() : ''));
 
-        $employeeNames = Employee::pluck('full_name', 'id');
+        // Роль нужна для подписи в строке: разрез делится на главбухов и бухгалтеров
+        $employees     = Employee::with('role:id,display_name')->get(['id', 'full_name', 'role_id']);
+        $employeeNames = $employees->pluck('full_name', 'id');
+        $employeeRoles = $employees->mapWithKeys(fn ($e) => [$e->id => $e->role?->display_name]);
 
         $stats = [
             'total'     => 0, // задач в выбранном месяце
@@ -114,9 +117,21 @@ class DashboardController extends Controller
             $dCursor = $dCursor->addMonth();
         }
 
-        // Разрез по сотрудникам: те же счётчики + просрочка (вне фильтра периода),
-        // возвраты с проверки и список задач месяца для раскрытия строки
-        $byEmployee = [];
+        /**
+         * Разрез «по сотрудникам» — две группы, обе только по сметным задачам.
+         *
+         * `leads` — тот, на ком компания (clients.responsible_employee_id). В его
+         * объём входят все задачи его компаний, включая розданные: спрашивают за
+         * компанию с него. Внутри — доли исполнителей, из них рисуется кольцо.
+         *
+         * `people` — объём самого исполнителя, все его компании сразу. Поэтому
+         * бухгалтер, работающий на двух главбухов, в своей строке один раз и со
+         * всем объёмом, а в кольцах виден у обоих, каждый раз своей частью.
+         *
+         * Внеплановых тут нет: их объём не запланирован сметой, сравнивать по нему
+         * людей нельзя. Из-за этого числа блока меньше, чем в сводке страницы.
+         */
+        $team = ['leads' => [], 'people' => []];
 
         // Разрез по компаниям: счётчики месяца + просрочка + смета и сом/час.
         // Показываем всё, что есть: клиент без времени/сметы получает «—» в этих колонках
@@ -190,13 +205,15 @@ class DashboardController extends Controller
                         $elapsed = $this->calcElapsed($log);
                         $this->accumulate($stats, $status, $dueObj, $log?->completed_at, $elapsed);
 
-                        $this->ensureEmployeeRow($byEmployee, $assigneeId, $employeeNames);
-                        $this->accumulate($byEmployee[$assigneeId], $status, $dueObj, $log?->completed_at, $elapsed);
-                        $byEmployee[$assigneeId]['rework'] += (int) ($log?->rework_count ?? 0);
-                        $byEmployee[$assigneeId]['tasks'][] = $this->drillTask(
-                            $item->name . ($item->branch_label ? ' — ' . $item->branch_label : ''),
-                            $client->name, $dueObj, $status, $log?->completed_at, $elapsed,
-                            (int) ($log?->rework_count ?? 0), false, $today
+                        $this->accumulateTeam(
+                            $team,
+                            (int) $client->id,
+                            $client->name,
+                            (int) ($client->responsible_employee_id ?? 0),
+                            $assigneeId,
+                            $status,
+                            $dueObj,
+                            $today,
                         );
 
                         $this->accumulate($byCompany[$client->id], $status, $dueObj, $log?->completed_at, $elapsed);
@@ -204,8 +221,6 @@ class DashboardController extends Controller
 
                     if ($dueObj && $dueObj->lt($today) && $dueObj->gte($cutoff)
                         && in_array($status, self::OPEN_STATUSES, true)) {
-                        $this->ensureEmployeeRow($byEmployee, $assigneeId, $employeeNames);
-                        $byEmployee[$assigneeId]['overdue']++;
                         $byCompany[$client->id]['overdue']++;
                         $overdue[] = [
                             'name'        => $item->name . ($item->branch_label ? ' — ' . $item->branch_label : ''),
@@ -228,8 +243,7 @@ class DashboardController extends Controller
                     ->addDays(min((int) $a->due_day, CarbonImmutable::create($a->year, $a->month, 1)->daysInMonth) - 1)
                 : null;
 
-            $assigneeId = (int) $a->employee_id;
-            $companyId  = (int) ($a->client_id ?? 0);
+            $companyId = (int) ($a->client_id ?? 0);
 
             $this->classifyDiscipline($discipline, (int) $a->year, (int) $a->month, $dueObj, $a->status, $a->completed_at, $today);
 
@@ -237,15 +251,6 @@ class DashboardController extends Controller
                 $elapsed = $this->calcElapsed($a);
                 $stats['adhoc']++;
                 $this->accumulate($stats, $a->status, $dueObj, $a->completed_at, $elapsed);
-
-                $this->ensureEmployeeRow($byEmployee, $assigneeId, $employeeNames);
-                $byEmployee[$assigneeId]['adhoc']++;
-                $this->accumulate($byEmployee[$assigneeId], $a->status, $dueObj, $a->completed_at, $elapsed);
-                $byEmployee[$assigneeId]['rework'] += (int) $a->rework_count;
-                $byEmployee[$assigneeId]['tasks'][] = $this->drillTask(
-                    $a->name, $a->client?->name ?? '—', $dueObj, $a->status,
-                    $a->completed_at, $elapsed, (int) $a->rework_count, true, $today
-                );
 
                 // Внеплановая может прийти от клиента без сметы или вовсе без клиента
                 $this->ensureCompanyRow($byCompany, $companyId, $a->client?->name ?? 'Без компании', null);
@@ -255,8 +260,6 @@ class DashboardController extends Controller
 
             if ($dueObj && $dueObj->lt($today) && $dueObj->gte($cutoff)
                 && in_array($a->status, self::OPEN_STATUSES, true)) {
-                $this->ensureEmployeeRow($byEmployee, $assigneeId, $employeeNames);
-                $byEmployee[$assigneeId]['overdue']++;
                 $this->ensureCompanyRow($byCompany, $companyId, $a->client?->name ?? 'Без компании', null);
                 $byCompany[$companyId]['overdue']++;
                 $overdue[] = [
@@ -273,13 +276,8 @@ class DashboardController extends Controller
 
         usort($overdue, fn ($x, $y) => [$y['days'], $x['client_name']] <=> [$x['days'], $y['client_name']]);
 
-        // Проблемные сотрудники сверху: по просрочке, затем по объёму задач
-        foreach ($byEmployee as &$row) {
-            usort($row['tasks'], fn ($x, $y) => [$x['due_sort'], $x['client_name'], $x['name']] <=> [$y['due_sort'], $y['client_name'], $y['name']]);
-            $row['time'] = $row['elapsed'] > 0 ? $this->formatDuration($row['elapsed']) : null;
-        }
-        unset($row);
-        uasort($byEmployee, fn ($x, $y) => [$y['overdue'], $y['total'], $x['name']] <=> [$x['overdue'], $x['total'], $y['name']]);
+        $leads       = $this->buildLeads($team, $employeeNames, $employeeRoles);
+        $accountants = $this->buildAccountants($team, $employeeNames, $employeeRoles);
 
         // сом/час = смета месяца ÷ часы по таймерам; без времени или без сметы — null («—»).
         // Колонки «Смета, сом» и «сом/час» пока скрыты в таблице (решение 15.07.2026), расчёт оставлен
@@ -325,7 +323,8 @@ class DashboardController extends Controller
             'avgTime'      => $stats['with_time'] > 0 ? $this->formatDuration(intdiv($stats['elapsed'], $stats['with_time'])) : null,
             'overdue'      => $overdue,
             'overdueEmployees' => count(array_unique(array_column($overdue, 'assignee'))),
-            'byEmployee'   => $byEmployee,
+            'leads'        => $leads,
+            'accountants'  => $accountants,
             'byCompany'    => $byCompany,
             'timeTop'      => $timeTop,
             'timeRest'     => $timeRest,
@@ -338,24 +337,199 @@ class DashboardController extends Controller
         ]);
     }
 
-    /** Заводит строку сотрудника в разрезе «по сотрудникам» (счётчики совместимы с accumulate). */
-    private function ensureEmployeeRow(array &$byEmployee, int $id, $employeeNames): void
+    /**
+     * Копит одну сметную задачу в оба разреза «по сотрудникам».
+     *
+     * Задача идёт и главбуху компании (он отвечает за всё, что по ней делается),
+     * и тому, кто её делает. Просрочка тут месячная: задача выбранного месяца,
+     * срок прошёл, а она открыта. Просрочка «вообще» живёт в своём блоке выше.
+     */
+    private function accumulateTeam(
+        array &$team,
+        int $clientId,
+        string $clientName,
+        int $leadId,
+        int $assigneeId,
+        string $status,
+        ?CarbonImmutable $due,
+        CarbonImmutable $today,
+    ): void {
+        $done = $status === 'completed';
+        $late = !$done && $due && $due->lt($today) && in_array($status, self::OPEN_STATUSES, true);
+
+        $lead = &$team['leads'][$leadId];
+        $lead ??= ['total' => 0, 'completed' => 0, 'overdue' => 0, 'companies' => [], 'members' => []];
+        $lead['companies'][$clientId] ??= ['name' => $clientName, 'total' => 0, 'completed' => 0];
+        $lead['members'][$assigneeId] ??= ['total' => 0, 'completed' => 0, 'overdue' => 0];
+
+        $lead['total']++;
+        $lead['companies'][$clientId]['total']++;
+        $lead['members'][$assigneeId]['total']++;
+
+        if ($done) {
+            $lead['completed']++;
+            $lead['companies'][$clientId]['completed']++;
+            $lead['members'][$assigneeId]['completed']++;
+        }
+
+        if ($late) {
+            $lead['overdue']++;
+            $lead['members'][$assigneeId]['overdue']++;
+        }
+
+        unset($lead);
+
+        $person = &$team['people'][$assigneeId];
+        $person ??= ['total' => 0, 'completed' => 0, 'overdue' => 0, 'companies' => [], 'leads' => []];
+        $person['companies'][$clientId] ??= ['name' => $clientName, 'total' => 0, 'completed' => 0];
+        $person['leads'][$leadId] = true;
+
+        $person['total']++;
+        $person['companies'][$clientId]['total']++;
+
+        if ($done) {
+            $person['completed']++;
+            $person['companies'][$clientId]['completed']++;
+        }
+
+        if ($late) {
+            $person['overdue']++;
+        }
+
+        unset($person);
+    }
+
+    /**
+     * Строки главбухов: доли исполнителей для кольца плюс список компаний.
+     *
+     * Долей в кольце не больше шести: дальше цвета перестают различаться, поэтому
+     * хвост сворачивается в «Другие». Сам главбух в списке всегда первый.
+     */
+    private function buildLeads(array $team, $names, $roles): array
     {
-        $byEmployee[$id] ??= [
-            'name'      => $employeeNames->get($id) ?? 'Не назначено',
-            'total'     => 0,
-            'adhoc'     => 0,
-            'completed' => 0,
-            'on_time'   => 0,
-            'review'    => 0,
-            'in_progress' => 0,
-            'pending'   => 0,
-            'elapsed'   => 0,
-            'with_time' => 0,
-            'overdue'   => 0, // просрочено сейчас — вне фильтра периода, как и одноимённый блок
-            'rework'    => 0, // возвраты с проверки по задачам выбранного месяца
-            'tasks'     => [],
+        $rows = [];
+
+        foreach ($team['leads'] as $id => $row) {
+            $members = [];
+
+            foreach ($row['members'] as $memberId => $member) {
+                $members[] = [
+                    'name'      => $names->get($memberId) ?? 'Не назначено',
+                    'self'      => $memberId === $id,
+                    'total'     => $member['total'],
+                    'completed' => $member['completed'],
+                    'overdue'   => $member['overdue'],
+                    'pct'       => $this->pct($member['completed'], $member['total']),
+                ];
+            }
+
+            // Сам первым, дальше по объёму: кольцо читается от большей доли
+            usort($members, fn ($x, $y) => [!$x['self'], $y['total'], $x['name']]
+                <=> [!$y['self'], $x['total'], $y['name']]);
+
+            $rows[] = [
+                'id'        => $id,
+                'name'      => $names->get($id) ?? 'Не назначено',
+                'role'      => $roles->get($id) ?? 'Главбух',
+                'total'     => $row['total'],
+                'completed' => $row['completed'],
+                'overdue'   => $row['overdue'],
+                'pct'       => $this->pct($row['completed'], $row['total']),
+                'members'   => $this->foldMembers($members),
+                'companies' => $this->sortCompanies($row['companies']),
+            ];
+        }
+
+        return $this->sortByPct($rows);
+    }
+
+    /** Строки бухгалтеров: только свои задачи, зато по всем компаниям сразу. */
+    private function buildAccountants(array $team, $names, $roles): array
+    {
+        $rows = [];
+
+        foreach ($team['people'] as $id => $row) {
+            // Тот, на ком есть компании, уже показан выше — со всем объёмом команды
+            if (isset($team['leads'][$id])) {
+                continue;
+            }
+
+            $leadNames = array_map(
+                fn ($leadId) => $names->get($leadId) ?? 'Не назначено',
+                array_keys($row['leads']),
+            );
+            sort($leadNames);
+
+            $rows[] = [
+                'id'        => $id,
+                'name'      => $names->get($id) ?? 'Не назначено',
+                'role'      => $roles->get($id) ?? 'Бухгалтер',
+                'total'     => $row['total'],
+                'completed' => $row['completed'],
+                'overdue'   => $row['overdue'],
+                'pct'       => $this->pct($row['completed'], $row['total']),
+                'leads'     => $leadNames,
+                'companies' => $this->sortCompanies($row['companies']),
+            ];
+        }
+
+        return $this->sortByPct($rows);
+    }
+
+    /** Больше шести долей кольцо не различает: хвост уходит в «Другие». */
+    private function foldMembers(array $members): array
+    {
+        if (count($members) <= 6) {
+            return $members;
+        }
+
+        $head = array_slice($members, 0, 5);
+        $tail = array_slice($members, 5);
+
+        $head[] = [
+            'name'      => 'Другие · ' . count($tail),
+            'self'      => false,
+            'other'     => true,
+            'total'     => array_sum(array_column($tail, 'total')),
+            'completed' => array_sum(array_column($tail, 'completed')),
+            'overdue'   => array_sum(array_column($tail, 'overdue')),
+            'pct'       => $this->pct(
+                array_sum(array_column($tail, 'completed')),
+                array_sum(array_column($tail, 'total')),
+            ),
         ];
+
+        return $head;
+    }
+
+    /** Компании внутри строки: где просело сильнее, то и сверху. */
+    private function sortCompanies(array $companies): array
+    {
+        $rows = [];
+
+        foreach ($companies as $id => $company) {
+            $rows[] = $company + [
+                'id'  => $id,
+                'pct' => $this->pct($company['completed'], $company['total']),
+            ];
+        }
+
+        usort($rows, fn ($x, $y) => [$x['pct'], $x['name']] <=> [$y['pct'], $y['name']]);
+
+        return $rows;
+    }
+
+    /** Слабые сверху: разговор руководителя начинается с них. */
+    private function sortByPct(array $rows): array
+    {
+        usort($rows, fn ($x, $y) => [$x['pct'], $x['name']] <=> [$y['pct'], $y['name']]);
+
+        return $rows;
+    }
+
+    private function pct(int $completed, int $total): ?int
+    {
+        return $total > 0 ? (int) round($completed / $total * 100) : null;
     }
 
     /** Заводит строку компании (счётчики совместимы с accumulate); смета null = у клиента её нет. */
@@ -379,30 +553,6 @@ class DashboardController extends Controller
         if ($estimate !== null) {
             $byCompany[$id]['estimate'] = $estimate;
         }
-    }
-
-    /** Строка задачи для раскрытия сотрудника. */
-    private function drillTask(
-        string $name, string $clientName, ?CarbonImmutable $dueObj, string $status,
-        $completedAt, int $elapsed, int $reworkCount, bool $isAdhoc, CarbonImmutable $today
-    ): array {
-        // «Поздно»: открытая задача с прошедшим сроком или выполненная после срока
-        $late = $dueObj && (
-            ($status === 'completed' && $completedAt && $completedAt->gt($dueObj->endOfDay()))
-            || (in_array($status, self::OPEN_STATUSES, true) && $dueObj->lt($today))
-        );
-
-        return [
-            'name'        => $name,
-            'client_name' => $clientName,
-            'due_date'    => $dueObj?->format('d.m'),
-            'due_sort'    => $dueObj?->toDateString() ?? '9999-99-99',
-            'status'      => $status,
-            'late'        => $late,
-            'time'        => $elapsed > 0 ? $this->formatDuration($elapsed) : null,
-            'rework'      => $reworkCount,
-            'is_adhoc'    => $isAdhoc,
-        ];
     }
 
     /**

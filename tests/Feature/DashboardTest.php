@@ -157,54 +157,141 @@ class DashboardTest extends TestCase
         }
     }
 
-    public function test_by_employee_breakdown_with_rework_and_overdue(): void
+    /**
+     * Разрез «по сотрудникам»: главбух отвечает за весь объём своих компаний,
+     * включая розданное, а бухгалтер виден отдельной строкой со своими задачами.
+     * Внеплановые в этот разрез не идут вовсе.
+     */
+    public function test_lead_row_covers_delegated_tasks(): void
     {
-        $client = Client::create([
-            'name' => 'ТОО Сотрудники Тест', 'inn' => 'DASH0000000B',
-            'responsible_employee_id' => $this->accountant->id,
+        $headRole = Role::firstOrCreate(
+            ['name' => Role::HEAD_ACCOUNTANT],
+            ['display_name' => 'Главбух'],
+        );
+        $head = Employee::create([
+            'full_name' => 'Тест Главбух', 'position' => 'Главбух',
+            'email' => 'head_' . uniqid() . '@test.kg', 'password' => bcrypt('x'),
+            'role_id' => $headRole->id, 'status' => Employee::STATUS_ACTIVE,
         ]);
 
-        // Выполненная внеплановая с двумя возвратами с проверки
+        $service = Service::create([
+            'name' => 'Ведение учёта ' . uniqid(), 'periodicity' => 'Ежемесячно',
+            'start_day' => [25], 'is_active' => true,
+        ]);
+        $client = Client::create([
+            'name' => 'ТОО Команда Тест', 'inn' => 'DASH0000000T',
+            'responsible_employee_id' => $head->id,
+        ]);
+        $estimate = Estimate::create(['client_id' => $client->id, 'total' => 20000]);
+        // Месяц создания сметы холостой — сдвигаем её в прошлое, чтобы задачи были
+        $estimate->forceFill(['created_at' => now()->subMonths(3)])->save();
+
+        $mine = $estimate->items()->create([
+            'service_id' => $service->id, 'type' => 'recurring', 'name' => 'Своя позиция',
+            'periodicity' => 'Ежемесячно', 'cost' => 10000, 'quantity' => 1,
+            'total' => 10000, 'sort_order' => 0, 'assignee_id' => $head->id,
+        ]);
+        $estimate->items()->create([
+            'service_id' => $service->id, 'type' => 'recurring', 'name' => 'Розданная позиция',
+            'periodicity' => 'Ежемесячно', 'cost' => 10000, 'quantity' => 1,
+            'total' => 10000, 'sort_order' => 1, 'assignee_id' => $this->accountant->id,
+        ]);
+
+        // Закрыта только позиция главбуха: у команды выходит половина
+        \App\Models\BuhTaskLog::create([
+            'employee_id' => $head->id, 'client_id' => $client->id,
+            'estimate_item_id' => $mine->id, 'year' => now()->year, 'month' => now()->month,
+            'status' => 'completed', 'completed_at' => now(),
+        ]);
+
+        // Внеплановая бухгалтера: в этот разрез она не попадает
         BuhAdhocTask::create([
             'employee_id' => $this->accountant->id, 'client_id' => $client->id,
             'name' => 'Сверка с поставщиком', 'year' => now()->year, 'month' => now()->month,
-            'status' => 'completed', 'started_at' => now()->subHours(2),
-            'paused_seconds' => 3600, 'completed_at' => now(), 'rework_count' => 2,
-        ]);
-
-        // Просроченная внеплановая: срок 1-го числа текущего месяца, не начата
-        // (прошлые месяцы до отсечки backlog 2026-07-01 в просрочку не попадают)
-        BuhAdhocTask::create([
-            'employee_id' => $this->accountant->id, 'client_id' => $client->id,
-            'name' => 'Старый долг', 'year' => now()->year, 'month' => now()->month,
-            'due_day' => 1, 'status' => 'pending',
+            'status' => 'completed', 'completed_at' => now(),
         ]);
 
         $response = $this->actingAs($this->manager, 'employee')
             ->get(route('dashboard.index'))
             ->assertOk()
-            ->assertSee('По сотрудникам');
+            ->assertSee('По сотрудникам')
+            ->assertSee('Главные бухгалтеры');
 
-        $byEmployee = $response->viewData('byEmployee');
-        $this->assertArrayHasKey($this->accountant->id, $byEmployee);
+        $lead = collect($response->viewData('leads'))->firstWhere('id', $head->id);
+        $this->assertNotNull($lead);
+        $this->assertSame('Тест Главбух', $lead['name']);
+        $this->assertSame(2, $lead['total']);      // своя плюс розданная
+        $this->assertSame(1, $lead['completed']);
+        $this->assertSame(50, $lead['pct']);
 
-        $row = $byEmployee[$this->accountant->id];
-        $this->assertSame('Тест Бухгалтер', $row['name']);
-        $this->assertGreaterThanOrEqual(1, $row['total']);
-        $this->assertGreaterThanOrEqual(1, $row['adhoc']);
-        $this->assertGreaterThanOrEqual(1, $row['completed']);
-        $this->assertGreaterThanOrEqual(2, $row['rework']);
-        if (now()->day > 1) {
-            $this->assertGreaterThanOrEqual(1, $row['overdue']);
-        }
-        $names = array_column($row['tasks'], 'name');
-        $this->assertContains('Сверка с поставщиком', $names);
-        // Просроченная задача текущего месяца — в списке, помечена как поздняя
-        $late = collect($row['tasks'])->firstWhere('name', 'Старый долг');
-        $this->assertNotNull($late);
-        if (now()->day > 1) {
-            $this->assertTrue($late['late']);
-        }
+        $members = collect($lead['members']);
+        $this->assertSame($head->full_name, $members->first()['name']); // сам всегда первый
+        $this->assertTrue($members->first()['self']);
+        $this->assertSame(100, $members->first()['pct']);
+
+        $helper = $members->firstWhere('name', $this->accountant->full_name);
+        $this->assertNotNull($helper);
+        $this->assertSame(1, $helper['total']);
+        $this->assertSame(0, $helper['completed']);
+
+        // Компании раскрытия — та же половина
+        $company = collect($lead['companies'])->firstWhere('id', $client->id);
+        $this->assertNotNull($company);
+        $this->assertSame(2, $company['total']);
+        $this->assertSame(50, $company['pct']);
+    }
+
+    /** Бухгалтер в своём списке один раз и только со сметными задачами. */
+    public function test_accountant_row_counts_own_estimate_tasks_only(): void
+    {
+        $headRole = Role::firstOrCreate(
+            ['name' => Role::HEAD_ACCOUNTANT],
+            ['display_name' => 'Главбух'],
+        );
+        $head = Employee::create([
+            'full_name' => 'Тест Главбух Два', 'position' => 'Главбух',
+            'email' => 'head2_' . uniqid() . '@test.kg', 'password' => bcrypt('x'),
+            'role_id' => $headRole->id, 'status' => Employee::STATUS_ACTIVE,
+        ]);
+
+        $service = Service::create([
+            'name' => 'Отчётность ' . uniqid(), 'periodicity' => 'Ежемесячно',
+            'start_day' => [25], 'is_active' => true,
+        ]);
+        $client = Client::create([
+            'name' => 'ТОО Помощник Тест', 'inn' => 'DASH0000000H',
+            'responsible_employee_id' => $head->id,
+        ]);
+        $estimate = Estimate::create(['client_id' => $client->id, 'total' => 10000]);
+        $estimate->forceFill(['created_at' => now()->subMonths(3)])->save();
+        $estimate->items()->create([
+            'service_id' => $service->id, 'type' => 'recurring', 'name' => 'Розданная позиция',
+            'periodicity' => 'Ежемесячно', 'cost' => 10000, 'quantity' => 1,
+            'total' => 10000, 'sort_order' => 0, 'assignee_id' => $this->accountant->id,
+        ]);
+
+        // Внеплановая того же бухгалтера: объём строки она не меняет
+        BuhAdhocTask::create([
+            'employee_id' => $this->accountant->id, 'client_id' => $client->id,
+            'name' => 'Разовое поручение', 'year' => now()->year, 'month' => now()->month,
+            'status' => 'completed', 'completed_at' => now(),
+        ]);
+
+        $response = $this->actingAs($this->manager, 'employee')
+            ->get(route('dashboard.index'))
+            ->assertOk()
+            ->assertSee('Бухгалтеры');
+
+        $rows = collect($response->viewData('accountants'))
+            ->where('id', $this->accountant->id);
+        $this->assertCount(1, $rows, 'Бухгалтер должен быть в списке ровно один раз');
+
+        $row = $rows->first();
+        $this->assertSame(1, $row['total']);
+        $this->assertContains($head->full_name, $row['leads']);
+
+        // Главбух в список бухгалтеров не попадает: он показан выше со своей командой
+        $this->assertNull(collect($response->viewData('accountants'))->firstWhere('id', $head->id));
     }
 
     public function test_by_company_breakdown_with_estimate_and_rate(): void

@@ -262,144 +262,177 @@
     </div>
 
     {{-- По сотрудникам --}}
-    <div class="bg-white rounded-2xl border border-slate-200/80 overflow-hidden" x-data="{ open: null }">
-        <div class="flex flex-wrap items-baseline gap-3 px-6 pt-5">
+    @php
+        // Доли кольца. Порядок и оттенки взяты из проверенной палитры (см. dataviz):
+        // соседние доли различимы и при дальтонизме. Порядок не менять и седьмой
+        // цвет не добавлять — хвост сворачивается в «Другие» ещё в контроллере.
+        $ringColors = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300'];
+        $otherColor = '#94a3b8';
+
+        $memberColor = fn (array $m, int $i) => !empty($m['other']) ? $otherColor : ($ringColors[$i] ?? $otherColor);
+
+        // Просрочка в полосе: заливка плюс штриховка, чтобы читалось не одним цветом
+        $overdueFill = 'background:#f0b429;background-image:repeating-linear-gradient(135deg,rgba(255,255,255,.55) 0 2px,transparent 2px 5px)';
+
+        $tasksWord = fn (int $n) => $plural($n, ['задача', 'задачи', 'задач']);
+        $coWord    = fn (int $n) => $plural($n, ['компания', 'компании', 'компаний']);
+        $lateWord  = fn (int $n) => $plural($n, ['просрочена', 'просрочены', 'просрочено']);
+    @endphp
+
+    <div class="bg-white rounded-2xl border border-slate-200/80 overflow-hidden">
+        <div class="flex flex-wrap items-baseline gap-3 px-6 pt-5 pb-4">
             <h2 class="text-base font-semibold text-slate-800">По сотрудникам</h2>
-            <span class="text-xs text-slate-400">{{ $monthLabel }} · строка раскрывает задачи · «Просрочено» — сейчас, вне периода</span>
+            <span class="text-xs text-slate-400">{{ $monthLabel }} · только сметные задачи · строка раскрывает компании</span>
         </div>
 
-        @if(count($byEmployee) === 0)
+        @if(count($leads) === 0 && count($accountants) === 0)
             <div class="px-6 py-10 text-center">
-                <p class="text-sm font-medium text-slate-600">Нет задач в выбранном месяце</p>
+                <p class="text-sm font-medium text-slate-600">Нет сметных задач в выбранном месяце</p>
                 <p class="text-xs text-slate-400 mt-1">Выберите другой период</p>
             </div>
         @else
-            <div class="overflow-x-auto px-2 pb-2 pt-2">
-                <table class="w-full text-sm">
-                    <thead>
-                        <tr class="text-left">
-                            <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200">Сотрудник</th>
-                            <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right">Задач</th>
-                            <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200" title="Состав задач месяца: выполнено / на проверке / в работе / не начато">Состав</th>
-                            <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right" title="Доля закрытых задач месяца: выполнено из всех">Выполнено</th>
-                            <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right" title="Доля выполненных задач, закрытых в срок">Вовремя</th>
-                            <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right">Просрочено</th>
-                            <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right">На проверке</th>
-                            <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right" title="Сколько раз главбух возвращал задачи этого месяца на доработку">Возвраты</th>
-                            <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right">Время</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach($byEmployee as $empId => $row)
+            @if(count($leads) > 0)
+                <div class="flex flex-wrap items-baseline gap-x-3 px-6 py-2 bg-slate-50 border-y border-slate-200/70">
+                    <span class="text-[11px] font-medium uppercase tracking-wider text-slate-400">Главные бухгалтеры</span>
+                    <span class="text-xs text-slate-400">объём по своим компаниям, вместе с розданным</span>
+                </div>
+
+                @foreach($leads as $row)
+                    <div class="px-6 py-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-start gap-5" x-data="{ open: false }">
+                        {{-- Кольцо: доли исполнителей в объёме компаний главбуха --}}
+                        <div class="relative w-28 h-28 shrink-0 mx-auto sm:mx-0">
                             @php
-                                $pct = $row['completed'] > 0 ? (int) round($row['on_time'] / $row['completed'] * 100) : null;
-                                // Доля закрытых задач месяца — по ней решают вопрос о полной выплате ЗП
-                                $donePct = $row['total'] > 0 ? (int) round($row['completed'] / $row['total'] * 100) : null;
+                                $ringR    = 46;
+                                $ringC    = 2 * M_PI * $ringR;
+                                $ringGap  = count($row['members']) > 1 ? 5 : 0;
+                                $ringFree = $ringC - $ringGap * count($row['members']);
+                                $ringAt   = 0;
                             @endphp
-                            <tr class="border-b border-slate-100 cursor-pointer hover:bg-slate-50 transition-colors"
-                                @click="open = open === {{ $empId }} ? null : {{ $empId }}">
-                                <td class="px-4 py-3 font-medium text-slate-700">
-                                    <span class="inline-block w-4 text-slate-300 transition-transform" :class="open === {{ $empId }} && 'rotate-90'">›</span>
-                                    {{ $row['name'] }}
-                                </td>
-                                <td class="px-4 py-3 text-right text-slate-700 tabular-nums">
-                                    {{ $row['total'] }}@if($row['adhoc'] > 0)<span class="text-xs text-slate-400" title="из них вне сметы"> +{{ $row['adhoc'] }}</span>@endif
-                                </td>
-                                <td class="px-4 py-3">
-                                    @if($row['total'] > 0)
-                                        <div class="flex h-1.5 gap-px w-28"
-                                             title="выполнено {{ $row['completed'] }} · на проверке {{ $row['review'] }} · в работе {{ $row['in_progress'] }} · не начато {{ $row['pending'] }}">
-                                            @foreach([['completed', 'bg-emerald-600'], ['review', 'bg-amber-600'], ['in_progress', 'bg-indigo-600'], ['pending', 'bg-slate-300']] as [$k, $cls])
-                                                @if($row[$k] > 0)
-                                                    <div class="{{ $cls }} rounded-full min-w-[3px]" style="width: {{ round($row[$k] / $row['total'] * 100, 1) }}%"></div>
+                            <svg viewBox="0 0 120 120" class="absolute inset-0 w-full h-full -rotate-90" aria-hidden="true">
+                                <circle cx="60" cy="60" r="{{ $ringR }}" fill="none" stroke-width="16" stroke="#f1f5f9" />
+                                @foreach($row['members'] as $i => $m)
+                                    @php
+                                        $len = $row['total'] > 0 ? $ringFree * $m['total'] / $row['total'] : 0;
+                                    @endphp
+                                    <circle cx="60" cy="60" r="{{ $ringR }}" fill="none" stroke-width="16"
+                                            stroke="{{ $memberColor($m, $i) }}"
+                                            stroke-dasharray="{{ round($len, 2) }} {{ round($ringC - $len, 2) }}"
+                                            stroke-dashoffset="{{ round(-$ringAt, 2) }}" />
+                                    @php $ringAt += $len + $ringGap; @endphp
+                                @endforeach
+                            </svg>
+                            <div class="absolute inset-0 flex flex-col items-center justify-center leading-none">
+                                <span class="text-xl font-semibold text-slate-800 tabular-nums">{{ $row['total'] }}</span>
+                                <span class="text-[11px] text-slate-400 mt-1">{{ $tasksWord($row['total']) }}</span>
+                            </div>
+                        </div>
+
+                        <div class="flex-1 min-w-0 space-y-3">
+                            <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                                <span class="text-base font-semibold text-slate-800">{{ $row['name'] }}</span>
+                                <span class="text-[11px] px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">{{ $row['role'] }}</span>
+                                <span class="text-xs text-slate-400 tabular-nums">
+                                    {{ count($row['companies']) }} {{ $coWord(count($row['companies'])) }}
+                                    @if($row['overdue'] > 0)
+                                        · <span class="text-red-600">{{ $row['overdue'] }} {{ $lateWord($row['overdue']) }}</span>
+                                    @endif
+                                </span>
+                                <span class="sm:ml-auto text-sm text-slate-500 tabular-nums whitespace-nowrap">
+                                    закрыто <span class="font-medium text-slate-700">{{ $row['completed'] }}</span> ·
+                                    <span class="text-lg font-semibold text-slate-800">{{ $row['pct'] }}%</span>
+                                </span>
+                            </div>
+
+                            <div>
+                                @foreach($row['members'] as $i => $m)
+                                    @php
+                                        $donePct = $m['total'] > 0 ? round($m['completed'] / $m['total'] * 100, 1) : 0;
+                                        $latePct = $m['total'] > 0 ? round($m['overdue'] / $m['total'] * 100, 1) : 0;
+                                    @endphp
+                                    <div class="grid grid-cols-[minmax(0,1fr)_44px] sm:grid-cols-[minmax(0,1fr)_88px_128px_44px] gap-3 items-center py-1.5 border-t border-slate-100 first:border-t-0">
+                                        <div class="flex items-center gap-2 min-w-0 text-sm">
+                                            <span class="w-2.5 h-2.5 rounded-sm shrink-0" style="background: {{ $memberColor($m, $i) }}"></span>
+                                            <span class="truncate text-slate-700">{{ $m['name'] }}</span>
+                                            @unless(!empty($m['other']))
+                                                <span class="text-xs text-slate-400 shrink-0">{{ $m['self'] ? 'свои задачи' : 'бухгалтер' }}</span>
+                                            @endunless
+                                        </div>
+                                        <div class="hidden sm:block text-right text-xs text-slate-500 tabular-nums">{{ $m['total'] }} {{ $tasksWord($m['total']) }}</div>
+                                        <div class="hidden sm:block">
+                                            <div class="relative h-2 rounded-full bg-slate-100 overflow-hidden"
+                                                 title="закрыто {{ $m['completed'] }} из {{ $m['total'] }}@if($m['overdue'] > 0), просрочено {{ $m['overdue'] }}@endif">
+                                                <span class="absolute inset-y-0 left-0 rounded-l-full" style="width: {{ $donePct }}%; background: {{ $memberColor($m, $i) }}"></span>
+                                                @if($m['overdue'] > 0)
+                                                    <span class="absolute inset-y-0" style="left: {{ $donePct }}%; width: {{ $latePct }}%; {{ $overdueFill }}"></span>
                                                 @endif
-                                            @endforeach
+                                            </div>
                                         </div>
-                                    @else
-                                        <span class="text-slate-300">—</span>
+                                        <div class="text-right text-sm text-slate-700 tabular-nums">{{ $m['pct'] }}%</div>
+                                    </div>
+                                @endforeach
+                            </div>
+
+                            @include('partials.dashboard-companies', ['row' => $row, 'coWord' => $coWord])
+                        </div>
+                    </div>
+                @endforeach
+            @endif
+
+            @if(count($accountants) > 0)
+                <div class="flex flex-wrap items-baseline gap-x-3 px-6 py-2 bg-slate-50 border-y border-slate-200/70">
+                    <span class="text-[11px] font-medium uppercase tracking-wider text-slate-400">Бухгалтеры</span>
+                    <span class="text-xs text-slate-400">только свои задачи, все компании сразу</span>
+                </div>
+
+                @foreach($accountants as $row)
+                    @php
+                        $donePct = $row['total'] > 0 ? round($row['completed'] / $row['total'] * 100, 1) : 0;
+                        $latePct = $row['total'] > 0 ? round($row['overdue'] / $row['total'] * 100, 1) : 0;
+                    @endphp
+                    <div class="px-6 py-4 border-b border-slate-100" x-data="{ open: false }">
+                        <div class="grid grid-cols-[minmax(0,1fr)_44px] sm:grid-cols-[minmax(0,1fr)_88px_128px_44px] gap-3 items-center">
+                            <div class="min-w-0">
+                                <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                                    <span class="font-medium text-slate-700">{{ $row['name'] }}</span>
+                                    <span class="text-[11px] px-2 py-0.5 rounded-full border border-slate-200 text-slate-500">{{ $row['role'] }}</span>
+                                </div>
+                                <div class="text-xs text-slate-400 mt-0.5">
+                                    {{ count($row['companies']) }} {{ $coWord(count($row['companies'])) }}
+                                    @if($row['overdue'] > 0)
+                                        · <span class="text-red-600">{{ $row['overdue'] }} {{ $lateWord($row['overdue']) }}</span>
                                     @endif
-                                </td>
-                                <td class="px-4 py-3 text-right">
-                                    @if($donePct === null)
-                                        <span class="text-slate-300">—</span>
-                                    @else
-                                        <div class="flex items-center justify-end gap-2">
-                                            <span class="w-10 h-1 rounded-full bg-slate-100 overflow-hidden">
-                                                <span class="block h-full rounded-full {{ $meterColor($donePct) }}" style="width: {{ $donePct }}%"></span>
-                                            </span>
-                                            <span class="text-base font-semibold text-slate-800 tabular-nums w-11">{{ $donePct }}%</span>
-                                        </div>
-                                        <div class="mt-0.5 text-xs text-slate-400 tabular-nums">{{ $row['completed'] }} из {{ $row['total'] }}</div>
+                                    @if(count($row['leads']) > 0)
+                                        {{-- Именительный падеж намеренно: «у Айдай Сыдыковой» требует склонения имени,
+                                             а оно бывает любым. Двоеточие решает это без грамматики. --}}
+                                        · {{ $plural(count($row['leads']), ['главбух', 'главбухи', 'главбухи']) }}: {{ implode(', ', $row['leads']) }}
                                     @endif
-                                </td>
-                                <td class="px-4 py-3 text-right">
-                                    @if($pct === null)
-                                        <span class="text-slate-300">—</span>
-                                    @else
-                                        <span class="inline-flex items-center justify-end gap-2">
-                                            <span class="w-10 h-1 rounded-full bg-slate-100 overflow-hidden">
-                                                <span class="block h-full rounded-full {{ $meterColor($pct) }}" style="width: {{ $pct }}%"></span>
-                                            </span>
-                                            <span class="font-medium text-slate-700 tabular-nums w-9">{{ $pct }}%</span>
-                                        </span>
+                                </div>
+                            </div>
+                            <div class="hidden sm:block text-right text-xs text-slate-500 tabular-nums">{{ $row['total'] }} {{ $tasksWord($row['total']) }}</div>
+                            <div class="hidden sm:block">
+                                <div class="relative h-2 rounded-full bg-slate-100 overflow-hidden"
+                                     title="закрыто {{ $row['completed'] }} из {{ $row['total'] }}@if($row['overdue'] > 0), просрочено {{ $row['overdue'] }}@endif">
+                                    <span class="absolute inset-y-0 left-0 rounded-l-full bg-indigo-600" style="width: {{ $donePct }}%"></span>
+                                    @if($row['overdue'] > 0)
+                                        <span class="absolute inset-y-0" style="left: {{ $donePct }}%; width: {{ $latePct }}%; {{ $overdueFill }}"></span>
                                     @endif
-                                </td>
-                                <td class="px-4 py-3 text-right font-semibold tabular-nums {{ $row['overdue'] > 0 ? 'text-red-600' : 'text-slate-300 font-normal' }}">
-                                    {{ $row['overdue'] > 0 ? $row['overdue'] : '—' }}
-                                </td>
-                                <td class="px-4 py-3 text-right tabular-nums {{ $row['review'] > 0 ? 'text-slate-700' : 'text-slate-300' }}">
-                                    {{ $row['review'] > 0 ? $row['review'] : '—' }}
-                                </td>
-                                <td class="px-4 py-3 text-right tabular-nums {{ $row['rework'] > 0 ? 'text-slate-700' : 'text-slate-300' }}">
-                                    {{ $row['rework'] > 0 ? $row['rework'] : '—' }}
-                                </td>
-                                <td class="px-4 py-3 text-right text-slate-500 tabular-nums">{{ $row['time'] ?? '—' }}</td>
-                            </tr>
-                            <tr x-show="open === {{ $empId }}" x-cloak>
-                                <td colspan="9" class="px-4 pb-4 pt-1 bg-slate-50/60">
-                                    @if(count($row['tasks']) === 0)
-                                        <p class="px-4 py-3 text-xs text-slate-400">В этом месяце задач нет — у сотрудника только просрочка за прошлые месяцы (см. «Просрочено сейчас»)</p>
-                                    @else
-                                        <table class="w-full text-xs">
-                                            <thead>
-                                                <tr class="text-left text-[11px] text-slate-400">
-                                                    <th class="px-4 py-2 font-medium">Задача</th>
-                                                    <th class="px-4 py-2 font-medium">Компания</th>
-                                                    <th class="px-4 py-2 font-medium text-right">Срок</th>
-                                                    <th class="px-4 py-2 font-medium">Статус</th>
-                                                    <th class="px-4 py-2 font-medium text-right">Возвраты</th>
-                                                    <th class="px-4 py-2 font-medium text-right">Время</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                @foreach($row['tasks'] as $t)
-                                                    <tr class="border-t border-slate-200/60">
-                                                        <td class="px-4 py-2 text-slate-700">
-                                                            {{ $t['name'] }}
-                                                            @if($t['is_adhoc'])
-                                                                <span class="ml-1.5 inline-block text-[10px] text-slate-400 border border-slate-200 px-1.5 py-px rounded-full align-middle">вне сметы</span>
-                                                            @endif
-                                                        </td>
-                                                        <td class="px-4 py-2 text-slate-500">{{ $t['client_name'] }}</td>
-                                                        <td class="px-4 py-2 text-right tabular-nums {{ $t['late'] ? 'text-red-600 font-semibold' : 'text-slate-400' }}">{{ $t['due_date'] ?? '—' }}</td>
-                                                        <td class="px-4 py-2">
-                                                            @php [$label, $dot] = $statusDot($t['status'], $t['late']); @endphp
-                                                            <span class="inline-flex items-center gap-1.5 text-slate-500">
-                                                                <span class="w-1.5 h-1.5 rounded-full {{ $dot }}"></span>{{ $label }}
-                                                            </span>
-                                                        </td>
-                                                        <td class="px-4 py-2 text-right tabular-nums {{ $t['rework'] > 0 ? 'text-slate-700' : 'text-slate-300' }}">{{ $t['rework'] > 0 ? $t['rework'] : '—' }}</td>
-                                                        <td class="px-4 py-2 text-right text-slate-500 tabular-nums">{{ $t['time'] ?? '—' }}</td>
-                                                    </tr>
-                                                @endforeach
-                                            </tbody>
-                                        </table>
-                                    @endif
-                                </td>
-                            </tr>
-                        @endforeach
-                    </tbody>
-                </table>
+                                </div>
+                            </div>
+                            <div class="text-right text-sm font-semibold text-slate-800 tabular-nums">{{ $row['pct'] }}%</div>
+                        </div>
+
+                        <div class="mt-2">
+                            @include('partials.dashboard-companies', ['row' => $row, 'coWord' => $coWord])
+                        </div>
+                    </div>
+                @endforeach
+            @endif
+
+            <div class="flex flex-wrap gap-x-5 gap-y-2 px-6 py-3 bg-slate-50 text-xs text-slate-500">
+                <span class="inline-flex items-center gap-2"><span class="w-5 h-2 rounded-full bg-indigo-600"></span> закрыто</span>
+                <span class="inline-flex items-center gap-2"><span class="w-5 h-2 rounded-full" style="{{ $overdueFill }}"></span> срок прошёл, не закрыто</span>
+                <span class="inline-flex items-center gap-2"><span class="w-5 h-2 rounded-full bg-slate-100"></span> в работе, срок не наступил</span>
+                <span>Цвета кольца работают внутри строки главбуха, а не сквозь страницу</span>
             </div>
         @endif
     </div>
