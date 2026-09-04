@@ -349,6 +349,79 @@ class DashboardTest extends TestCase
         $this->assertSame(100, $lead['pct']);
     }
 
+    /**
+     * Уволенный виден с меткой и датой. Метка про сегодняшний день, а не про месяц:
+     * в августе человек мог ещё работать, и его закрытые задачи за тот месяц законны.
+     */
+    public function test_fired_employee_is_marked_with_date(): void
+    {
+        $fired = Employee::create([
+            'full_name' => 'Тест Уволенный', 'position' => 'Бухгалтер',
+            'email' => 'fired_' . uniqid() . '@test.kg', 'password' => bcrypt('x'),
+            'role_id' => $this->accountant->role_id, 'status' => Employee::STATUS_ACTIVE,
+            'employment_status' => Employee::EMPLOYMENT_FIRED, 'fired_at' => '2026-08-26',
+        ]);
+
+        $this->seedTaskFor($fired, 'ТОО Уволенный Тест', 'DASH0000000F');
+
+        $rows = $this->actingAs($this->manager, 'employee')
+            ->get(route('dashboard.index'))->assertOk()
+            ->viewData('accountants');
+
+        $row = collect($rows)->firstWhere('id', $fired->id);
+        $this->assertNotNull($row);
+        $this->assertSame('уволен', $row['note']['label']);
+        $this->assertSame('Уволен 26.08.2026', $row['note']['title']);
+    }
+
+    /** У удалённой карточки имя сохраняется: иначе задачи сливались в общее «Не назначено». */
+    public function test_deleted_employee_keeps_name(): void
+    {
+        $gone = Employee::create([
+            'full_name' => 'Тест Удалённый', 'position' => 'Бухгалтер',
+            'email' => 'gone_' . uniqid() . '@test.kg', 'password' => bcrypt('x'),
+            'role_id' => $this->accountant->role_id, 'status' => Employee::STATUS_ACTIVE,
+        ]);
+
+        $this->seedTaskFor($gone, 'ТОО Удалённый Тест', 'DASH0000000G');
+        $gone->delete();
+
+        $rows = $this->actingAs($this->manager, 'employee')
+            ->get(route('dashboard.index'))->assertOk()
+            ->viewData('accountants');
+
+        $row = collect($rows)->firstWhere('id', $gone->id);
+        $this->assertNotNull($row, 'Строка удалённого сотрудника должна остаться');
+        $this->assertSame('Тест Удалённый', $row['name']);
+        $this->assertSame('удалён', $row['note']['label']);
+    }
+
+    /** Клиент со сметой и одной помесячной позицией на этом сотруднике. */
+    private function seedTaskFor(Employee $doer, string $clientName, string $inn): void
+    {
+        $headRole = Role::firstOrCreate(['name' => Role::HEAD_ACCOUNTANT], ['display_name' => 'Главбух']);
+        $head = Employee::create([
+            'full_name' => 'Главбух для ' . $doer->full_name, 'position' => 'Главбух',
+            'email' => 'lead_' . uniqid() . '@test.kg', 'password' => bcrypt('x'),
+            'role_id' => $headRole->id, 'status' => Employee::STATUS_ACTIVE,
+        ]);
+
+        $service = Service::create([
+            'name' => 'Услуга ' . uniqid(), 'periodicity' => 'Ежемесячно',
+            'start_day' => [25], 'is_active' => true,
+        ]);
+        $client = Client::create([
+            'name' => $clientName, 'inn' => $inn, 'responsible_employee_id' => $head->id,
+        ]);
+        $estimate = Estimate::create(['client_id' => $client->id, 'total' => 5000]);
+        $estimate->forceFill(['created_at' => now()->subMonths(3)])->save();
+        $estimate->items()->create([
+            'service_id' => $service->id, 'type' => 'recurring', 'name' => 'Позиция',
+            'periodicity' => 'Ежемесячно', 'cost' => 5000, 'quantity' => 1,
+            'total' => 5000, 'sort_order' => 0, 'assignee_id' => $doer->id,
+        ]);
+    }
+
     /** Бухгалтер в своём списке один раз и только со сметными задачами. */
     public function test_accountant_row_counts_own_estimate_tasks_only(): void
     {

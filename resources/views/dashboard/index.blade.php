@@ -331,6 +331,13 @@
                             <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                                 <span class="text-base font-semibold text-slate-800">{{ $row['name'] }}</span>
                                 <span class="text-[11px] px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">{{ $row['role'] }}</span>
+                                @if($row['note'])
+                                    {{-- Метка про сегодняшний день, а не про выбранный месяц:
+                                         дата увольнения в подсказке, чтобы прошлый месяц не
+                                         выглядел «неправильным» — тогда человек ещё работал. --}}
+                                    <span class="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500"
+                                          title="{{ $row['note']['title'] }}">{{ $row['note']['label'] }}</span>
+                                @endif
                                 <span class="text-xs text-slate-400 tabular-nums">
                                     {{ count($row['companies']) }} {{ $coWord(count($row['companies'])) }}
                                     @if($row['overdue'] > 0)
@@ -353,6 +360,10 @@
                                         <div class="flex items-center gap-2 min-w-0 text-sm">
                                             <span class="w-2.5 h-2.5 rounded-sm shrink-0" style="background: {{ $memberColor($m, $i) }}"></span>
                                             <span class="truncate text-slate-700">{{ $m['name'] }}</span>
+                                            @if(!empty($m['note']))
+                                                <span class="text-[11px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 shrink-0"
+                                                      title="{{ $m['note']['title'] }}">{{ $m['note']['label'] }}</span>
+                                            @endif
                                             @unless(!empty($m['other']))
                                                 <span class="text-xs text-slate-400 shrink-0">{{ $m['self'] ? 'свои задачи' : 'бухгалтер' }}</span>
                                             @endunless
@@ -395,6 +406,13 @@
                                 <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                                     <span class="font-medium text-slate-700">{{ $row['name'] }}</span>
                                     <span class="text-[11px] px-2 py-0.5 rounded-full border border-slate-200 text-slate-500">{{ $row['role'] }}</span>
+                                    @if($row['note'])
+                                    {{-- Метка про сегодняшний день, а не про выбранный месяц:
+                                         дата увольнения в подсказке, чтобы прошлый месяц не
+                                         выглядел «неправильным» — тогда человек ещё работал. --}}
+                                    <span class="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500"
+                                          title="{{ $row['note']['title'] }}">{{ $row['note']['label'] }}</span>
+                                @endif
                                 </div>
                                 <div class="text-xs text-slate-400 mt-0.5">
                                     {{ count($row['companies']) }} {{ $coWord(count($row['companies'])) }}

@@ -94,10 +94,24 @@ class DashboardController extends Controller
         // за пределами этого списка, добавляем в разрез отдельно — см. ниже про сирот.
         $matchedLogIds = [];
 
-        // Роль нужна для подписи в строке: разрез делится на главбухов и бухгалтеров
-        $employees     = Employee::with('role:id,display_name')->get(['id', 'full_name', 'role_id']);
+        // Роль нужна для подписи в строке: разрез делится на главбухов и бухгалтеров.
+        // withTrashed намеренно: у задач удалённого сотрудника иначе пропадает имя, и они
+        // сливаются в общее «Не назначено» вместе с чужими бесхозными.
+        $employees     = Employee::withTrashed()
+            ->with('role:id,display_name')
+            ->get(['id', 'full_name', 'role_id', 'employment_status', 'fired_at', 'deleted_at']);
         $employeeNames = $employees->pluck('full_name', 'id');
         $employeeRoles = $employees->mapWithKeys(fn ($e) => [$e->id => $e->role?->display_name]);
+
+        // Метка «уволен»/«удалён» рядом с именем. Она про сегодняшний день, а не про
+        // выбранный месяц, поэтому в подсказку кладём дату: в августе человек мог ещё
+        // работать, и его закрытые задачи за тот месяц законны.
+        $employeeNotes = $employees->mapWithKeys(fn ($e) => [$e->id => match (true) {
+            $e->deleted_at !== null => ['label' => 'удалён', 'title' => 'Карточка сотрудника удалена'],
+            $e->isFired()           => ['label' => 'уволен', 'title' => 'Уволен'
+                . ($e->fired_at ? ' ' . $e->fired_at->format('d.m.Y') : '')],
+            default                 => null,
+        }]);
 
         $stats = [
             'total'     => 0, // задач в выбранном месяце
@@ -335,8 +349,8 @@ class DashboardController extends Controller
 
         usort($overdue, fn ($x, $y) => [$y['days'], $x['client_name']] <=> [$x['days'], $y['client_name']]);
 
-        $leads       = $this->buildLeads($team, $employeeNames, $employeeRoles);
-        $accountants = $this->buildAccountants($team, $employeeNames, $employeeRoles);
+        $leads       = $this->buildLeads($team, $employeeNames, $employeeRoles, $employeeNotes);
+        $accountants = $this->buildAccountants($team, $employeeNames, $employeeRoles, $employeeNotes);
 
         // сом/час = смета месяца ÷ часы по таймерам; без времени или без сметы — null («—»).
         // Колонки «Смета, сом» и «сом/час» пока скрыты в таблице (решение 15.07.2026), расчёт оставлен
@@ -476,7 +490,7 @@ class DashboardController extends Controller
      * Долей в кольце не больше шести: дальше цвета перестают различаться, поэтому
      * хвост сворачивается в «Другие». Сам главбух в списке всегда первый.
      */
-    private function buildLeads(array $team, $names, $roles): array
+    private function buildLeads(array $team, $names, $roles, $notes): array
     {
         $rows = [];
 
@@ -486,6 +500,7 @@ class DashboardController extends Controller
             foreach ($row['members'] as $memberId => $member) {
                 $members[] = [
                     'name'      => $names->get($memberId) ?? 'Не назначено',
+                    'note'      => $notes->get($memberId),
                     'self'      => $memberId === $id,
                     'total'     => $member['total'],
                     'completed' => $member['completed'],
@@ -501,6 +516,7 @@ class DashboardController extends Controller
             $rows[] = [
                 'id'        => $id,
                 'name'      => $names->get($id) ?? 'Не назначено',
+                'note'      => $notes->get($id),
                 'role'      => $roles->get($id) ?? 'Главбух',
                 'total'     => $row['total'],
                 'completed' => $row['completed'],
@@ -515,7 +531,7 @@ class DashboardController extends Controller
     }
 
     /** Строки бухгалтеров: только свои задачи, зато по всем компаниям сразу. */
-    private function buildAccountants(array $team, $names, $roles): array
+    private function buildAccountants(array $team, $names, $roles, $notes): array
     {
         $rows = [];
 
@@ -534,6 +550,7 @@ class DashboardController extends Controller
             $rows[] = [
                 'id'        => $id,
                 'name'      => $names->get($id) ?? 'Не назначено',
+                'note'      => $notes->get($id),
                 'role'      => $roles->get($id) ?? 'Бухгалтер',
                 'total'     => $row['total'],
                 'completed' => $row['completed'],
@@ -559,6 +576,7 @@ class DashboardController extends Controller
 
         $head[] = [
             'name'      => 'Другие · ' . count($tail),
+            'note'      => null,
             'self'      => false,
             'other'     => true,
             'total'     => array_sum(array_column($tail, 'total')),
