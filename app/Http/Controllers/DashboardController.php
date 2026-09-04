@@ -628,10 +628,10 @@ class DashboardController extends Controller
         return $rows;
     }
 
-    /** Слабые сверху: разговор руководителя начинается с них. */
+    /** Сильные сверху: список читается от лучшего процента к худшему. */
     private function sortByPct(array $rows): array
     {
-        usort($rows, fn ($x, $y) => [$x['pct'], $x['name']] <=> [$y['pct'], $y['name']]);
+        usort($rows, fn ($x, $y) => [$y['pct'], $x['name']] <=> [$x['pct'], $y['name']]);
 
         return $rows;
     }
