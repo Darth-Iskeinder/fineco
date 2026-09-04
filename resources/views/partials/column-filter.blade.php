@@ -13,15 +13,20 @@
      $sort  — ключ сортировки (необязательно): рядом с названием появятся стрелки,
               как было до появления воронки, и оба действия живут в одном заголовке;
      $align — 'right' для колонки действий (необязательно);
+     $wrap  — разрешить подписи переноситься (необязательно). Нужно там, где длинный
+              заголовок задаёт ширину колонки при узком содержимом: «Отчётный период»
+              в одну строку забирал 218 px под слово «за июнь», и таблица переставала
+              влезать в экран;
      $thClass — дополнительные классы ячейки заголовка (необязательно). --}}
 @php
     $sort    = $sort    ?? null;
     $align   = $align   ?? 'left';
+    $wrap    = $wrap    ?? false;
     $thClass = $thClass ?? '';
 @endphp
 {{-- Класс пишем целиком, а не склейкой «text-» с переменной: сканер Tailwind
      читает исходники текстом и склеенного имени в сборке бы не оказалось. --}}
-<th class="px-4 py-3 {{ $align === 'right' ? 'text-right' : 'text-left' }} text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap {{ $thClass }}">
+<th class="px-4 py-3 {{ $align === 'right' ? 'text-right' : 'text-left' }} text-xs font-medium text-slate-500 uppercase tracking-wider {{ $wrap ? '' : 'whitespace-nowrap' }} {{ $thClass }}">
     <div class="inline-flex items-center">
         @if ($sort)
             <button type="button" @click="toggleSort('{{ $sort }}')"

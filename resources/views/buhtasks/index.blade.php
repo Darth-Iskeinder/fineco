@@ -307,10 +307,21 @@
                         <th class="w-6 px-4 py-3"></th>
                         @include('partials.column-filter', ['key' => 'name', 'title' => 'Задача'])
                         @include('partials.column-filter', ['key' => 'client', 'title' => 'Компания'])
-                        @include('partials.column-filter', ['key' => 'periodicity', 'title' => 'Периодичность', 'sort' => 'due'])
-                        @include('partials.column-filter', ['key' => 'reporting_period', 'title' => 'Отчётный период', 'sort' => 'period'])
+                        @include('partials.column-filter', ['key' => 'periodicity', 'title' => 'Периодичность', 'sort' => 'due', 'wrap' => true])
+                        @include('partials.column-filter', ['key' => 'reporting_period', 'title' => 'Отчётный период', 'sort' => 'period', 'wrap' => true])
+                        {{-- Заметка исполнителя: чтобы не открывать карточку ради одной строки.
+                             Колонка тянущаяся и обрезаемая (max-w-0 + w-full), поэтому ширину
+                             таблицы она почти не увеличивает, а на узких экранах прячется совсем.
+                             Подпись короткая намеренно: «Комментарий» одним словом не переносится
+                             и задирал бы минимальную ширину колонки на 60 px. --}}
+                        <th class="hidden xl:table-cell px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Заметка</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider w-24">Время</th>
-                        @include('partials.column-filter', ['key' => 'status', 'title' => 'Действия', 'align' => 'right'])
+                        {{-- Колонка действий приклеена к правому краю: таблица шире экрана уже
+                             на 1280, и кнопки «Старт»/«Стоп» уезжали за край. --}}
+                        @include('partials.column-filter', [
+                            'key' => 'status', 'title' => 'Действия', 'align' => 'right',
+                            'thClass' => 'sticky right-0 z-20 bg-slate-50',
+                        ])
                     </tr>
                 </thead>
                     {{-- Группы: сверху то, что горит. Заголовки появляются, только когда есть
@@ -319,7 +330,7 @@
                         <tbody class="divide-y divide-slate-100">
                         <template x-if="group.label">
                             <tr :class="group.headClass">
-                                <td colspan="7" class="px-4 py-2 text-xs font-semibold uppercase tracking-wider">
+                                <td colspan="8" class="px-4 py-2 text-xs font-semibold uppercase tracking-wider">
                                     <span x-text="group.label"></span>
                                     <span class="opacity-70" x-text="'(' + group.total + ')'"></span>
                                 </td>
@@ -350,9 +361,13 @@
                                      }"></div>
                             </td>
 
-                            <td class="px-4 py-3.5">
-                                <div class="flex items-center gap-2">
-                                    <span class="text-sm font-medium cursor-pointer"
+                            {{-- Ширина ограничена намеренно: название без пробелов (один длинный
+                                 «код» БП) переносить негде, и колонка раздувалась до 800 px, утаскивая
+                                 таблицу вправо. break-words рвёт такое слово, flex-wrap уводит бейджи
+                                 на вторую строку вместо растягивания колонки. --}}
+                            <td class="px-4 py-3.5 min-w-[14rem] max-w-[22rem]">
+                                <div class="flex flex-wrap items-center gap-2 min-w-0">
+                                    <span class="text-sm font-medium cursor-pointer break-words"
                                           :class="task.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-800'"
                                           x-text="task.name"></span>
                                     <span x-show="task.branch_label"
@@ -424,6 +439,13 @@
                                 <span x-show="!task.reporting_period" class="text-slate-300 text-sm">—</span>
                             </td>
 
+                            <td class="hidden xl:table-cell px-4 py-3.5 max-w-0 w-full">
+                                <div class="truncate text-sm"
+                                     :class="task.employee_comment ? 'text-slate-600' : 'text-slate-300'"
+                                     :title="task.employee_comment"
+                                     x-text="task.employee_comment || '—'"></div>
+                            </td>
+
                             <td class="px-4 py-3.5">
                                 <span class="font-mono text-sm font-medium"
                                       :class="{
@@ -437,7 +459,13 @@
                                       x-text="formatTime(getElapsed(task))"></span>
                             </td>
 
-                            <td class="px-4 py-3.5 text-right whitespace-nowrap" @dblclick.stop>
+                            {{-- Фон здесь непрозрачный: сквозь липкую ячейку не должны просвечивать
+                                 уезжающие под неё колонки. Цвет берём из railTone() — это те же
+                                 оттенки строки, но сплошные. --}}
+                            <td class="sticky right-0 z-10 px-4 py-3.5 text-right whitespace-nowrap"
+                                :class="railTone(task)"
+                                style="box-shadow: -8px 0 8px -8px rgba(15, 23, 42, .10)"
+                                @dblclick.stop>
 
                                 {{-- Старт (pending) --}}
                                 <button x-show="task.status === 'pending'"
@@ -2844,6 +2872,29 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         },
         openCompleted(c) {
             this.completedItem = c;
+        },
+
+        /**
+         * Цвет липкой колонки действий.
+         *
+         * Строка красится полупрозрачными оттенками (bg-red-50/40 и т.п.), а липкой
+         * ячейке прозрачность нельзя: под ней проезжают другие колонки. Поэтому здесь
+         * те же цвета, но уже смешанные с белым — совпадают со строкой пиксель в пиксель.
+         * Меняете палитру строки выше — поменяйте и тут.
+         */
+        railTone(task) {
+            if (task.status === 'completed') return 'bg-[#f9fefc]';   // emerald-50/30
+
+            const level = this.urgency(task);
+            if (level === 'overdue') return 'bg-[#fffafa]';           // red-50/40
+            if (level === 'today')   return 'bg-[#fffdfa]';           // orange-50/30
+            if (level === 'soon')    return 'bg-[#fffefb]';           // amber-50/20
+
+            if (task.status === 'review') return 'bg-[#f9fdff]';      // sky-50/40
+            if (task.status === 'rework') return 'bg-[#fff9fa]';      // rose-50/40
+            if (task.is_custom)           return 'bg-[#fcfbff]';      // violet-50/30
+
+            return 'bg-white';
         },
 
         // === Просмотр документа без ухода со страницы ===
