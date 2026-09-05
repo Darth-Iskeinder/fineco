@@ -210,7 +210,7 @@ class BuhTasksController extends Controller
         // уже закрытые прошлые периоды всплывали у нового бухгалтера как «просрочено» —
         // отметка о выполнении оставалась на прежнем исполнителе. Теперь берём логи всей
         // зоны видимости и группируем по слоту без employee_id, а кому какой лог показать,
-        // решает logForEmployee(). Той же картой пользуется вкладка «Задачи бухгалтеров».
+        // решает logForEmployee(). Той же картой пользуется набор задач бухгалтеров.
         $logs = BuhTaskLog::where(fn ($q) => $q
                 ->whereIn('client_id', $clients->pluck('id'))
                 ->orWhere('employee_id', $employee->id))
@@ -225,7 +225,7 @@ class BuhTasksController extends Controller
             ->with('client', 'documents', 'creator:id,full_name')
             ->get();
 
-        // === Задачи бухгалтеров (этап 1): вкладка главбуха ===
+        // === Задачи бухгалтеров: подмешиваются в список главбуха тумблером ===
         // Общий охват «команды» — задачи по МОИМ клиентам, кто бы их ни делал (кроме меня).
         // Применяется к логам и внеплановым, в активном списке и во вкладке «Выполненные».
         $teamScope = fn ($q) => $q->whereIn('client_id', $myClientIds);
@@ -287,7 +287,7 @@ class BuhTasksController extends Controller
 
             foreach ($items as $item) {
                 // Исполнитель позиции: assignee_id, при пустом — ответственный клиента.
-                // Свои БП идут в основной список; во вкладку «задачи бухгалтеров» — БП моих
+                // Свои БП идут в основной список; в набор «задачи бухгалтеров» идут БП моих
                 // клиентов, кто бы их ни делал.
                 $effectiveAssignee = (int) ($item->assignee_id ?? $client->responsible_employee_id);
                 $isMine = $effectiveAssignee === $employee->id;
@@ -349,7 +349,7 @@ class BuhTasksController extends Controller
                     $slot    = $kind === 'weekly' ? $dueDateStr : null;
                     $slotKey = $slot ? '-' . $slot : '';
 
-                    // Задача бухгалтера: во вкладку главбуха попадает только то, что сейчас
+                    // Задача бухгалтера: в набор для главбуха попадает только то, что сейчас
                     // «у бухгалтера» — не начатое, в работе, на паузе или на доработке.
                     // Выполненные — этап 2 (вкладка «Выполненные»), review уже в основном списке.
                     if ($isTeam) {
@@ -514,7 +514,7 @@ class BuhTasksController extends Controller
             ];
         }
 
-        // Внеплановые задачи команды — в ту же вкладку главбуха: по моим клиентам,
+        // Внеплановые задачи команды: в тот же набор для главбуха, по моим клиентам,
         // кто бы ни делал. Задачи бухгалтера по чужим клиентам и без клиента сюда не идут.
         if ($myClientIds->isNotEmpty()) {
             $teamAdhocs = BuhAdhocTask::where('employee_id', '!=', $employee->id)
@@ -576,6 +576,10 @@ class BuhTasksController extends Controller
                     'item_id'         => $item?->id,
                     'log_id'          => $log->id,
                     'review_for_head' => true,
+                    // Номер исполнителя, а не только имя: по нему работает фильтр «Исполнитель»
+                    // в общем списке. Без него задача бухгалтера, дошедшая до проверки, выпадала
+                    // бы из отбора по этому бухгалтеру ровно на той стадии, где её и контролируют.
+                    'doer_id'         => $log->employee_id,
                     'doer_name'       => $log->employee?->full_name,
                     'client_id'       => $log->client_id,
                     'client_name'     => $log->client?->name,
@@ -631,6 +635,7 @@ class BuhTasksController extends Controller
                 'adhoc_id'        => $a->id,
                 'review_for_head' => true,
                 'assigned_by_me'  => (int) $a->created_by === $employee->id, // «я поручил» — подпись в карточке
+                'doer_id'         => $a->employee_id, // для фильтра «Исполнитель», см. плановые выше
                 'doer_name'       => $a->employee?->full_name,
                 'client_id'       => $a->client_id,
                 'client_name'     => $a->client?->name,

@@ -111,17 +111,6 @@
                     <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                     Выполненные
                 </button>
-                {{-- Вкладка главбуха: текущие задачи его бухгалтеров. Видна только когда такие задачи есть. --}}
-                <template x-if="teamTasks.length > 0">
-                    <button @click="viewMode = 'team'"
-                            :class="viewMode === 'team' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'"
-                            class="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all">
-                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-                        Задачи бухгалтеров
-                        <span class="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-600"
-                              x-text="teamTasks.length"></span>
-                    </button>
-                </template>
                 {{-- Вкладка «Я поручил»: задачи, заведённые другим сотрудникам. Видна тем, кто поручал. --}}
                 <template x-if="assignedTasks.length > 0">
                     <button @click="viewMode = 'assigned'"
@@ -180,6 +169,25 @@
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
                 <span>Поручено мне</span>
                 <span class="text-xs opacity-80" x-text="assignedToMeCount"></span>
+            </button>
+
+            {{-- Тумблер «Задачи бухгалтеров»: подмешивает в список задачи бухгалтеров по моим
+                 компаниям. Выключен по умолчанию, поэтому свой список выглядит как раньше.
+                 От фильтра по компании не зависит: включил без компании: видишь всё по всем
+                 своим компаниям, выбрал компанию, видишь только по ней. Видна кнопка только тем,
+                 у кого такие задачи есть, то есть главбуху. --}}
+            <button type="button" x-show="teamRows.length > 0"
+                    @click="toggleTeam()"
+                    :title="showTeam
+                        ? 'Скрыть задачи бухгалтеров'
+                        : 'Показать задачи бухгалтеров по моим компаниям'"
+                    :class="showTeam
+                        ? 'bg-slate-700 text-white border-slate-700'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'"
+                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-sm font-medium transition-colors whitespace-nowrap">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                <span>Задачи бухгалтеров</span>
+                <span class="text-xs opacity-80" x-text="teamRows.length"></span>
             </button>
         </div>
 
@@ -270,19 +278,9 @@
                         : completed.length + ' задач'"></span>
     </div>
 
-    {{-- Фильтр вкладки «Задачи бухгалтеров»: по исполнителю --}}
-    <div x-show="viewMode === 'team'" class="flex items-center gap-3 flex-wrap mb-4">
-        <select x-model="teamFilter"
-                class="px-3 py-2 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
-            <option value="all" x-text="'Все бухгалтеры (' + teamTasks.length + ')'"></option>
-            <template x-for="m in teamMembers" :key="m.id">
-                <option :value="String(m.id)" x-text="m.name + ' (' + teamCountFor(m.id) + ')'"></option>
-            </template>
-        </select>
-    </div>
 
     {{-- Нет задач --}}
-    <div x-show="viewMode !== 'completed' && viewMode !== 'team' && viewMode !== 'assigned' && tasks.length === 0"
+    <div x-show="viewMode !== 'completed' && viewMode !== 'assigned' && tasks.length === 0"
          class="bg-white rounded-2xl border border-slate-200/50 shadow-sm px-6 py-16 text-center">
         <div class="w-14 h-14 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg class="w-7 h-7 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
@@ -296,7 +294,7 @@
         Нет задач по выбранным фильтрам.
     </div>
 
-    <div x-show="viewMode === 'completed' || viewMode === 'team' || viewMode === 'assigned' || (viewMode === 'checklist' && tasks.length > 0) || (viewMode === 'list' && visibleCount > 0)"
+    <div x-show="viewMode === 'completed' || viewMode === 'assigned' || (viewMode === 'checklist' && tasks.length > 0) || (viewMode === 'list' && visibleCount > 0)"
          class="bg-white rounded-2xl border border-slate-200/50 shadow-sm overflow-hidden">
 
         {{-- ===== РЕЖИМ СПИСОК ===== --}}
@@ -307,6 +305,8 @@
                         <th class="w-6 px-4 py-3"></th>
                         @include('partials.column-filter', ['key' => 'name', 'title' => 'Задача'])
                         @include('partials.column-filter', ['key' => 'client', 'title' => 'Компания'])
+                        {{-- Исполнитель: колонка нужна только когда в списке есть чужие строки --}}
+                        @include('partials.column-filter', ['key' => 'doer', 'title' => 'Исполнитель', 'show' => 'showTeam'])
                         @include('partials.column-filter', ['key' => 'periodicity', 'title' => 'Периодичность', 'sort' => 'due', 'wrap' => true])
                         @include('partials.column-filter', ['key' => 'reporting_period', 'title' => 'Отчётный период', 'sort' => 'period', 'wrap' => true])
                         {{-- Заметка исполнителя: чтобы не открывать карточку ради одной строки.
@@ -315,7 +315,11 @@
                              Подпись короткая намеренно: «Комментарий» одним словом не переносится
                              и задирал бы минимальную ширину колонки на 60 px. --}}
                         <th class="hidden xl:table-cell px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Заметка</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider w-24">Время</th>
+                        {{-- «Время» уступает место «Исполнителю»: с двумя этими колонками таблица
+                             перестаёт помещаться в экран, и крайняя уезжает под липкие «Действия».
+                             В разрезе по команде секундомер и не нужен: у чужих задач он всё равно
+                             пуст, а вопрос там про стадию, а не про минуты. --}}
+                        <th x-show="!showTeam" class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider whitespace-nowrap w-24">Время</th>
                         {{-- Колонка действий приклеена к правому краю: таблица шире экрана уже
                              на 1280, и кнопки «Старт»/«Стоп» уезжали за край. --}}
                         @include('partials.column-filter', [
@@ -330,6 +334,8 @@
                         <tbody class="divide-y divide-slate-100">
                         <template x-if="group.label">
                             <tr :class="group.headClass">
+                                {{-- Колонок всегда восемь: «Исполнитель» и «Время» меняют друг друга
+                                     местами по тумблеру, обе разом на экране не бывают. --}}
                                 <td colspan="8" class="px-4 py-2 text-xs font-semibold uppercase tracking-wider">
                                     <span x-text="group.label"></span>
                                     <span class="opacity-70" x-text="'(' + group.total + ')'"></span>
@@ -346,7 +352,10 @@
                                 'border-l-4 border-l-amber-300 bg-amber-50/20': task.status !== 'completed' && urgency(task) === 'soon',
                                 'border-l-4 border-l-violet-400 bg-violet-50/30': task.is_custom && task.status !== 'completed' && !urgency(task),
                                 'hover:bg-slate-50/50': task.status !== 'completed' && !urgency(task) && !task.is_custom,
-                            }" @dblclick="openTaskModal(idx)">
+                            }"
+                            {{-- Карточка задачи только у своих: у чужой строки на клиенте нет
+                                 ни документов, ни подпунктов, ни времени, показывать в окне нечего. --}}
+                            @dblclick="task.is_team || openTaskModal(idx)">
 
                             {{-- Статус-точка --}}
                             <td class="px-4 py-3.5">
@@ -416,6 +425,14 @@
                                 <span class="text-sm text-slate-600" x-text="task.client_name || '—'"></span>
                             </td>
 
+                            {{-- Исполнитель: своё «Я» серым, чужое имя чёрным, чтобы чужая
+                                 строка читалась с одного взгляда, без разглядывания. --}}
+                            <td class="px-4 py-3.5" x-show="showTeam">
+                                <span class="text-sm whitespace-nowrap"
+                                      :class="task.is_team || task.doer_id ? 'text-slate-700 font-medium' : 'text-slate-400'"
+                                      x-text="doerLabel(task)"></span>
+                            </td>
+
                             <td class="px-4 py-3.5">
                                 <div class="flex flex-col gap-0.5">
                                     <span x-show="task.periodicity"
@@ -446,7 +463,7 @@
                                      x-text="task.employee_comment || '—'"></div>
                             </td>
 
-                            <td class="px-4 py-3.5">
+                            <td class="px-4 py-3.5" x-show="!showTeam">
                                 <span class="font-mono text-sm font-medium"
                                       :class="{
                                           'text-slate-300': task.status === 'pending',
@@ -466,6 +483,20 @@
                                 :class="railTone(task)"
                                 style="box-shadow: -8px 0 8px -8px rgba(15, 23, 42, .10)"
                                 @dblclick.stop>
+
+                                {{-- Чужая задача: только стадия, без кнопок. Работать за
+                                     бухгалтера нельзя, а приёмка приходит отдельной строкой,
+                                     уже в своём списке, со своими «Принять» и «Вернуть». --}}
+                                <span x-show="task.is_team" class="text-xs font-medium"
+                                      :class="{
+                                          'text-slate-400': task.status === 'pending',
+                                          'text-indigo-600': task.status === 'running',
+                                          'text-amber-600': task.status === 'paused',
+                                          'text-rose-500': task.status === 'rework',
+                                      }"
+                                      x-text="stageLabel(task.status)"></span>
+
+                                <span x-show="!task.is_team" class="inline-flex items-center gap-1.5">
 
                                 {{-- Старт (pending) --}}
                                 <button x-show="task.status === 'pending'"
@@ -556,6 +587,7 @@
                                     </span>
                                 </span>
 
+                                </span>
                             </td>
                         </tr>
                         </template>
@@ -775,67 +807,6 @@
                         Вперёд
                     </button>
                 </div>
-            </div>
-        </div>
-        </template>
-
-        {{-- ===== РЕЖИМ «ЗАДАЧИ БУХГАЛТЕРОВ» (только главбух) ===== --}}
-        <template x-if="viewMode === 'team'">
-        <div>
-            <div class="px-6 py-3 border-b border-slate-100 flex items-center gap-2 text-sm text-slate-500 bg-slate-50/60">
-                <svg class="w-4 h-4 flex-shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                <span>Текущие задачи ваших бухгалтеров по вашим клиентам — не начатые, в работе и на доработке. Выполненное бухгалтером закрывается у него, задачи «на проверке» — в вашем основном списке.</span>
-            </div>
-            <template x-if="filteredTeamTasks.length === 0">
-                <div class="px-6 py-10 text-center text-sm text-slate-400">По выбранному фильтру задач нет.</div>
-            </template>
-            <div class="divide-y divide-slate-100">
-                <template x-for="t in filteredTeamTasks" :key="t.uid">
-                    <div class="flex items-center gap-3 px-6 py-3">
-                        {{-- Статус-иконка --}}
-                        <span class="flex-shrink-0 w-8 h-8 inline-flex items-center justify-center rounded-full"
-                              :class="{
-                                  'bg-slate-100 text-slate-400':   t.status === 'pending',
-                                  'bg-emerald-50 text-emerald-500': t.status === 'running',
-                                  'bg-amber-50 text-amber-500':     t.status === 'paused',
-                                  'bg-rose-50 text-rose-500':       t.status === 'rework',
-                              }">
-                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                        </span>
-
-                        <div class="flex-1 min-w-0">
-                            <div class="flex items-center gap-2 flex-wrap">
-                                <p class="text-sm font-medium text-slate-700" x-text="t.name"></p>
-                                <span x-show="t.branch_label" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700" x-text="t.branch_label"></span>
-                                <span x-show="t.is_custom" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-sky-100 text-sky-700">вручную</span>
-                            </div>
-                            <p class="text-xs text-slate-400 truncate">
-                                <span x-text="t.client_name"></span><span x-show="t.reporting_period" x-text="' · ' + t.reporting_period"></span>
-                            </p>
-                        </div>
-
-                        {{-- Исполнитель --}}
-                        <span class="hidden sm:inline-flex items-center gap-1.5 text-xs text-slate-500 whitespace-nowrap">
-                            <svg class="w-3.5 h-3.5 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
-                            <span x-text="t.doer_name || '—'"></span>
-                        </span>
-
-                        {{-- Срок --}}
-                        <span class="text-xs whitespace-nowrap"
-                              :class="t.due_date && t.due_date < todayStr && t.status !== 'completed' ? 'text-rose-500 font-medium' : 'text-slate-400'"
-                              x-text="t.due_date ? 'до ' + fmtDue(t.due_date) : 'без срока'"></span>
-
-                        {{-- Статус --}}
-                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap"
-                              :class="{
-                                  'bg-slate-100 text-slate-500':    t.status === 'pending',
-                                  'bg-emerald-100 text-emerald-700': t.status === 'running',
-                                  'bg-amber-100 text-amber-700':     t.status === 'paused',
-                                  'bg-rose-100 text-rose-700':       t.status === 'rework',
-                              }"
-                              x-text="{pending: 'Не начата', running: 'В работе', paused: 'Пауза', rework: 'На доработке'}[t.status] || t.status"></span>
-                    </div>
-                </template>
             </div>
         </div>
         </template>
@@ -2094,6 +2065,9 @@
 const TASK_FACETS = [
     { key: 'name',             title: 'Задача',          type: 'text' },
     { key: 'client',           title: 'Компания',        type: 'client' },
+    // Исполнитель: колонка и воронка видны только при включённом тумблере «Задачи
+    // бухгалтеров». Пока в списке одни свои задачи, отбирать по исполнителю нечего.
+    { key: 'doer',             title: 'Исполнитель',     type: 'doer' },
     { key: 'periodicity',      title: 'Периодичность',   type: 'text' },
     { key: 'reporting_period', title: 'Отчётный период', type: 'text' },
     // Стадии перечисляем в рабочем порядке, а не по алфавиту: список читается
@@ -2119,6 +2093,9 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
     const PICKER_LIMIT = 50;
     // Кэш окна видимости вне реактивного state (чтобы геттер не пересобирал Set на каждую строку)
     let visibleCache = { key: null, list: [] };
+    // Кэш полного отфильтрованного списка (до среза прокрутки). Отдельно от visibleCache:
+    // при прокрутке меняется только срез, а отбор на паре тысяч строк пересчитывать незачем.
+    let filteredCache = { key: null, list: [] };
     // Кэш матрицы чеклиста: тяжёлый расчёт (проход по всем задачам) не должен повторяться
     // на каждое из тысяч обращений из ячеек. Инвалидируется по сигнатуре ниже.
     let checklistCache = { key: null, data: null };
@@ -2159,10 +2136,34 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         checklistFilter: { group: '', period: '' }, // совместный фильтр столбцов чеклиста (группа + период)
         ticker: null,
         now: Math.floor(Date.now() / 1000),
-        // Вкладка «Задачи бухгалтеров» (только главбух): текущие задачи его бухгалтеров
+        // Текущие задачи бухгалтеров по моим клиентам. Своей вкладки у них больше нет:
+        // они подмешиваются в основной список тумблером ниже. Массив остаётся исходником
+        // для teamRows, а teamMembers нужен подписям в воронке «Исполнитель».
         teamTasks: teamTasks || [],
         teamMembers: teamMembers || [],
-        teamFilter: 'all', // фильтр по бухгалтеру: 'all' | employee_id
+
+        // Тумблер «Задачи бухгалтеров» в основном списке. Выключен: человек видит свой
+        // список, как и раньше. Включён: в тот же список подмешиваются задачи его
+        // бухгалтеров, и становится видно, что осталось по компании целиком, а не только
+        // за собой. Компанию при этом выбирать не обязательно: это два независимых фильтра.
+        showTeam: false,
+
+        // Те же задачи бухгалтеров, но в форме строки основного списка. Держим отдельным
+        // массивом, а не подмешиваем в tasks: по tasks считаются свои счётчики (прогресс,
+        // «поручено мне», чеклист), и чужие строки исказили бы их все разом.
+        //
+        // Полей у них меньше: ни времени, ни документов, ни подпунктов: по чужой задаче
+        // мы показываем только стадию. Отсутствие полей строку не ломает, разметка их
+        // пропускает, а _seq продолжает нумерацию своих, чтобы сортировка была общей.
+        teamRows: (teamTasks || []).map((t, i) => ({
+            ...t,
+            is_team: true,
+            loading: false,
+            elapsed_seconds: null,
+            children: [],
+            documents: [],
+            _seq: (initialTasks || []).length + i,
+        })),
         // Вкладка «Я поручил»: задачи, заведённые другим сотрудникам
         // loading проставляем явно: строка приходит с сервера без него, а по нему
         // считается disabled у кнопок «Принять»/«Вернуть».
@@ -2221,13 +2222,46 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         // виды колонок и то, что считается отбором ДО них.
 
         /**
+         * Все строки основного списка: свои плюс, при включённом тумблере, чужие.
+         *
+         * Одно место, откуда берут данные и список, и счётчики, и воронки. Иначе
+         * тумблер пришлось бы вспоминать в каждом из них по отдельности.
+         */
+        get listSource() {
+            return this.showTeam ? this.tasks.concat(this.teamRows) : this.tasks;
+        },
+
+        /** Кто делает задачу: у своих это я, у чужих исполнитель из строки. */
+        doerId(task) {
+            return task.doer_id ?? this.currentEmployeeId;
+        },
+
+        /** Подпись стадии работы: «Не начата», «В работе» и так далее. */
+        stageLabel(status) {
+            return TASK_STATUS_LABELS[status] || status;
+        },
+
+        /**
+         * Подпись исполнителя в колонке и в воронке.
+         *
+         * Свои задачи подписываем «Мои», а не именем: имя владельца экрана в каждой строке
+         * это шум, читают-то как раз чужие строки. Первое лицо («Я») в деловом интерфейсе
+         * звучит по-домашнему, поэтому притяжательное.
+         */
+        doerLabel(task) {
+            if (String(this.doerId(task)) === String(this.currentEmployeeId)) return 'Мои';
+
+            return task.doer_name || 'Бухгалтер';
+        },
+
+        /**
          * По чему движок считает значения и счётчики воронок.
          *
          * Выполненные исключаем: в активном списке их нет, и в счётчике они обещали бы
          * строки, которых на экране не появится.
          */
         get facetSource() {
-            return this.tasks.filter(t => t.status !== 'completed');
+            return this.listSource.filter(t => t.status !== 'completed');
         },
 
         /** Значения задачи по колонке: ключ для сравнения плюс подпись для человека. */
@@ -2243,6 +2277,10 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 const status = task.status || 'pending';
 
                 return [{ value: status, label: TASK_STATUS_LABELS[status] || status }];
+            }
+
+            if (key === 'doer') {
+                return [{ value: String(this.doerId(task)), label: this.doerLabel(task) }];
             }
 
             const raw = (task[key] ?? '').toString().trim();
@@ -2266,6 +2304,18 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             }
 
             if (key === 'status') return TASK_STATUS_LABELS[value] || value;
+
+            if (key === 'doer') {
+                if (String(value) === String(this.currentEmployeeId)) return 'Мои';
+                const member = (this.teamMembers || []).find(m => String(m.id) === String(value));
+                if (member) return member.name;
+                // teamMembers собран по задачам «в работе у бухгалтера». Задача, дошедшая до
+                // проверки, лежит уже в моём списке, и её исполнителя там может не быть.
+                const task = this.listSource.find(t => String(this.doerId(t)) === String(value));
+
+                return task ? this.doerLabel(task) : value;
+            }
+
             if (value === '') return 'Не задано';
 
             const task = this.tasks.find(t => (t[key] ?? '').toString().trim().toLowerCase() === value);
@@ -2327,7 +2377,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
 
         get listFiltersActive() {
             return this.activeFilterCount > 0 || this.dueFilter !== 'all'
-                || this.listSearchInput !== '' || this.assignedOnly;
+                || this.listSearchInput !== '' || this.assignedOnly || this.showTeam;
         },
 
         resetListFilters() {
@@ -2336,6 +2386,20 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             this.listSearchInput = '';
             this.listSearch = '';
             this.assignedOnly = false;
+            this.showTeam = false;
+            this.afterFilterChange();
+        },
+
+        /**
+         * Тумблер «Задачи бухгалтеров».
+         *
+         * Выключая, снимаем отбор по исполнителю: колонка с воронкой уезжает вместе с
+         * чужими строками, и оставленный в ней фильтр молча прятал бы свои же задачи,
+         * а снять его было бы негде.
+         */
+        toggleTeam() {
+            this.showTeam = !this.showTeam;
+            if (!this.showTeam && this.filters.doer.length) this.filters.doer = [];
             this.afterFilterChange();
         },
 
@@ -2349,7 +2413,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         // кнопке зависела бы от неё самой и обнулялась после нажатия.
         get dueCounts() {
             const c = { all: 0, overdue: 0, today: 0, rest: 0 };
-            for (const t of this.tasks) {
+            for (const t of this.listSource) {
                 if (t.status === 'completed') continue;
                 if (!this.matchesFacets(t) || !this.matchesSearch(t) || !this.matchesAssigned(t)) continue;
                 c.all++;
@@ -2384,7 +2448,44 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         // Группировка списка: просрочка и «сегодня» выносятся наверх отдельными пачками,
         // остальное идёт следом одним куском. Считаем поверх уже отобранного среза
         // (visibleTasks), чтобы не потерять подгрузку по 20 строк.
+        /**
+         * Группы по компаниям: вид с включённым тумблером «Задачи бухгалтеров».
+         *
+         * Там список читают по компании («что осталось по Ромашке»), а не по срочности,
+         * поэтому заголовками идут компании. Итог в заголовке считаем по всему отобранному
+         * списку, а строки берём из видимого среза: прокрутка догружает их в ту же группу.
+         */
+        get groupedByClient() {
+            const clientKey = (task) => task.client_id == null ? '' : String(task.client_id);
+
+            const totals = new Map();
+            for (const row of this.filteredRows) {
+                const k = clientKey(row.task);
+                totals.set(k, (totals.get(k) || 0) + 1);
+            }
+
+            const groups = [], byKey = new Map();
+            for (const row of this.visibleTasks) {
+                const k = clientKey(row.task);
+                if (!byKey.has(k)) {
+                    const group = {
+                        key: 'client_' + k,
+                        label: row.task.client_name || 'Без компании',
+                        total: totals.get(k) || 0,
+                        headClass: 'bg-slate-50 text-slate-600',
+                        items: [],
+                    };
+                    byKey.set(k, group);
+                    groups.push(group);
+                }
+                byKey.get(k).items.push(row);
+            }
+            return groups;
+        },
+
         get groupedTasks() {
+            if (this.showTeam) return this.groupedByClient;
+
             const overdue = [], today = [], rest = [];
             for (const row of this.visibleTasks) {
                 const u = this.urgency(row.task);
@@ -2671,67 +2772,99 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             const bySeq = (a, b) => a._seq - b._seq;
             if (!this.sortDir || !this.sortBy) {
                 this.tasks = [...this.tasks].sort(bySeq);
+                this.teamRows = [...this.teamRows].sort(bySeq);
                 return;
             }
             const mult = this.sortDir === 'desc' ? -1 : 1;
             // Сортируем по сроку напрямую; отчётный период — тоже по сроку (метка периода
             // монотонна по due_date), так одинаковые периоды идут подряд и хронологично.
-            this.tasks = [...this.tasks].sort((a, b) => {
+            // Чужие строки сортируем тем же правилом: в общем списке они идут вперемешку
+            // со своими, и порядок должен быть один на всех.
+            const byField = (a, b) => {
                 const av = a.due_date, bv = b.due_date;
                 if (!av && !bv) return bySeq(a, b); // обе без срока — сохраняем порядок
                 if (!av) return 1;  // без срока — всегда в конец
                 if (!bv) return -1;
                 if (av === bv) return bySeq(a, b);
                 return (av < bv ? -1 : 1) * mult;
-            });
+            };
+            this.tasks = [...this.tasks].sort(byField);
+            this.teamRows = [...this.teamRows].sort(byField);
         },
         get visibleCount() {
             // Считаем только активные строки (без выполненных) — как их и рисует visibleTasks,
             // иначе сентинел бесконечной прокрутки не «догрузит» до реального конца списка.
-            return this.tasks.filter(t => t.status !== 'completed' && this.matchesFacets(t)
-                && this.matchesDue(t) && this.matchesSearch(t) && this.matchesAssigned(t)).length;
+            return this.filteredRows.length;
         },
 
-        // Окно бесконечной прокрутки: первые visibleLimit задач, прошедших фильтр,
-        // как пары { task, idx } (idx — глобальный индекс в this.tasks для обработчиков).
-        // Рендерим ТОЛЬКО этот срез (x-for по нему), а не все 300 строк — иначе Alpine
-        // поднимал бы реактивность на каждую задачу и лагал при загрузке/сортировке.
-        // Мемоизируем по сигнатуре зависимостей, чтобы срез не пересобирался на каждый доступ.
-        get visibleTasks() {
-            // _taskVer в ключе: при закрытии задачи (status → completed) она сразу пропадает
-            // из активного списка и уходит во вкладку «Выполненные» — кэш пересобирается.
-            const key = JSON.stringify(this.filters) + '|' + this.dueFilter + '|' + this.listSearch + '|' + this.assignedOnly + '|' + this.visibleLimit + '|' + this.sortBy + '|' + this.sortDir + '|' + this.tasks.length + '|' + this._taskVer;
-            if (visibleCache.key !== key) {
-                const idxs = [];
+        /**
+         * Весь отфильтрованный список в порядке показа: пары { task, idx }.
+         *
+         * idx это индекс задачи в this.tasks, по нему работают кнопки строки. У чужих строк
+         * он −1: действий по ним нет, и попытка что-то сделать не должна попасть в чужую
+         * задачу по случайному совпадению номера.
+         *
+         * Мемоизируем: отбор на паре тысяч строк стоит заметно, а геттер дёргается на
+         * каждую перерисовку. _taskVer в ключе — при закрытии задачи (status → completed)
+         * она сразу пропадает из активного списка, и кэш надо пересобрать.
+         */
+        get filteredRows() {
+            const key = JSON.stringify(this.filters) + '|' + this.dueFilter + '|' + this.listSearch
+                + '|' + this.assignedOnly + '|' + this.showTeam + '|' + this.sortBy + '|' + this.sortDir
+                + '|' + this.tasks.length + '|' + this.teamRows.length + '|' + this._taskVer;
+            if (filteredCache.key !== key) {
+                const rows = [];
+                const take = (task) => task.status !== 'completed' // выполненные — только во вкладке «Выполненные»
+                    && this.matchesFacets(task) && this.matchesDue(task)
+                    && this.matchesSearch(task) && this.matchesAssigned(task);
+
                 for (let i = 0; i < this.tasks.length; i++) {
-                    const task = this.tasks[i];
-                    if (task.status === 'completed') continue; // выполненные — только во вкладке «Выполненные»
-                    if (!this.matchesFacets(task) || !this.matchesDue(task) || !this.matchesSearch(task) || !this.matchesAssigned(task)) continue;
-                    idxs.push(i);
+                    if (take(this.tasks[i])) rows.push({ task: this.tasks[i], idx: i });
+                }
+                if (this.showTeam) {
+                    for (const task of this.teamRows) {
+                        if (take(task)) rows.push({ task, idx: -1 });
+                    }
                 }
 
                 // Порядок по умолчанию — горящее наверх. Без этого группы «Просрочено» и
                 // «Сегодня» собирали бы только то, что случайно попало в первые 20 строк:
                 // с сервера задачи приходят по компаниям, и просрочка может лежать в конце.
-                // Свою сортировку (клик по заголовку) не трогаем — this.tasks уже отсортирован.
+                // Свою сортировку (клик по заголовку) не трогаем — массивы уже отсортированы.
                 if (!this.sortBy) {
                     const rank = (t) => { const u = this.urgency(t); return u === 'overdue' ? 0 : u === 'today' ? 1 : 2; };
-                    idxs.sort((a, b) => {
-                        const ta = this.tasks[a], tb = this.tasks[b];
+                    rows.sort((a, b) => {
+                        const ta = a.task, tb = b.task;
+                        // С включённым тумблером список читают по компаниям, поэтому сначала
+                        // собираем строки компании вместе, а горящее поднимаем уже внутри неё.
+                        if (this.showTeam) {
+                            const ca = ta.client_name || '', cb = tb.client_name || '';
+                            if (ca !== cb) return ca.localeCompare(cb, 'ru');
+                        }
                         const diff = rank(ta) - rank(tb);
                         if (diff !== 0) return diff;
                         // Внутри горящего — по сроку; остальное остаётся в исходном порядке.
                         if (rank(ta) < 2 && ta.due_date !== tb.due_date) {
                             return (ta.due_date || '') < (tb.due_date || '') ? -1 : 1;
                         }
-                        return a - b;
+                        return ta._seq - tb._seq;
                     });
                 }
 
-                visibleCache = {
-                    key,
-                    list: idxs.slice(0, this.visibleLimit).map(i => ({ task: this.tasks[i], idx: i })),
-                };
+                filteredCache = { key, list: rows };
+            }
+            return filteredCache.list;
+        },
+
+        // Окно бесконечной прокрутки: первые visibleLimit строк отобранного списка.
+        // Рендерим ТОЛЬКО этот срез (x-for по нему), а не все 300 строк — иначе Alpine
+        // поднимал бы реактивность на каждую задачу и лагал при загрузке/сортировке.
+        // Срез тоже кэшируем: геттер возвращает один и тот же массив, пока ничего не менялось.
+        get visibleTasks() {
+            const rows = this.filteredRows;
+            const key = filteredCache.key + '|' + this.visibleLimit;
+            if (visibleCache.key !== key) {
+                visibleCache = { key, list: rows.slice(0, this.visibleLimit) };
             }
             return visibleCache.list;
         },
@@ -3010,17 +3143,6 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             return d.getDate() + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + d.getFullYear();
         },
 
-        // Вкладка «Задачи бухгалтеров»: фильтр по исполнителю + сортировка по сроку (без срока — в конец)
-        get filteredTeamTasks() {
-            const list = this.teamFilter === 'all'
-                ? this.teamTasks
-                : this.teamTasks.filter(t => String(t.doer_id) === this.teamFilter);
-            return [...list].sort((a, b) => (a.due_date || '9999') < (b.due_date || '9999') ? -1 : 1);
-        },
-        teamCountFor(id) {
-            return this.teamTasks.filter(t => t.doer_id === id).length;
-        },
-
         // За какой период сделана выполненная задача. Дата закрытия отвечает «когда»,
         // а этого мало: отчёт за июль могли сдать 3 августа. Помесячные/квартальные/годовые
         // получают метку словами («за июль»), еженедельные — дату срока, потому что словами
@@ -3055,7 +3177,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             });
 
             // Бесконечная прокрутка: при смене фильтра/сортировки начинаем показ заново с 20.
-            ['dueFilter', 'listSearch', 'assignedOnly', 'sortDir', 'sortBy']
+            ['dueFilter', 'listSearch', 'assignedOnly', 'showTeam', 'sortDir', 'sortBy']
                 .forEach(f => this.$watch(f, () => { this.visibleLimit = 20; }));
 
             // Ссылка с отбором сильнее памяти браузера: пришли по ней — показываем ровно
@@ -3069,7 +3191,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
 
             // Отбор кнопками над таблицей запоминается и попадает в адрес так же, как
             // выбранное в воронках (там этим занимается afterFilterChange).
-            ['dueFilter', 'assignedOnly'].forEach(f => this.$watch(f, () => {
+            ['dueFilter', 'assignedOnly', 'showTeam'].forEach(f => this.$watch(f, () => {
                 this._saveListFilters();
                 this._syncListFiltersToUrl();
             }));
@@ -3114,6 +3236,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                     filters: this.filters,
                     dueFilter: this.dueFilter,
                     assignedOnly: this.assignedOnly,
+                    showTeam: this.showTeam,
                 }));
             } catch (e) { /* приватный режим — просто не запоминаем */ }
         },
@@ -3124,6 +3247,10 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 saved = JSON.parse(localStorage.getItem(this._listFiltersKey()) || 'null');
             } catch (e) { return; }
             if (!saved) return;
+
+            // Тумблер восстанавливаем ПЕРВЫМ: от него зависит, какие строки сейчас в списке,
+            // а значит и какие значения воронок считаются живыми в проверке ниже.
+            this.showTeam = !!saved.showTeam && this.teamRows.length > 0;
 
             // Значения могли уйти из списка: задачи закрыли, компанию передали другому.
             // Восстанавливаем только те, что сегодня есть, иначе запомненный отбор
@@ -3149,12 +3276,13 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             // из уведомлений, со своими метками.
             const params = new URLSearchParams(location.search);
             this.facets.forEach(f => params.delete(f.key));
-            ['q', 'due', 'assigned'].forEach(k => params.delete(k));
+            ['q', 'due', 'assigned', 'team'].forEach(k => params.delete(k));
 
             this.facetsToParams(params);
             if (this.listSearch.trim()) params.set('q', this.listSearch.trim());
             if (this.dueFilter !== 'all') params.set('due', this.dueFilter);
             if (this.assignedOnly) params.set('assigned', '1');
+            if (this.showTeam) params.set('team', '1');
 
             const qs = params.toString();
             window.history.replaceState(null, '', qs ? location.pathname + '?' + qs : location.pathname);
@@ -3164,9 +3292,11 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         _readListFiltersFromUrl() {
             const params = new URLSearchParams(location.search);
             const hasOwn = this.facets.some(f => params.getAll(f.key).length > 0)
-                || ['q', 'due', 'assigned'].some(k => params.has(k));
+                || ['q', 'due', 'assigned', 'team'].some(k => params.has(k));
             if (!hasOwn) return false;
 
+            // Тумблер читаем до воронок: от него зависит состав списка (см. _restoreListFilters).
+            this.showTeam = params.get('team') === '1' && this.teamRows.length > 0;
             this.facetsFromParams(params);
             this.listSearch = params.get('q') || '';
             this.listSearchInput = this.listSearch;
