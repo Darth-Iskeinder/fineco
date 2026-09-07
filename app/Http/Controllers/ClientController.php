@@ -93,6 +93,64 @@ class ClientController extends Controller
         ];
     }
 
+    /**
+     * Удалённые клиенты своей фирмы.
+     *
+     * Удаление мягкое, и удалённый клиент продолжает держать свой ИНН: пока его
+     * не вернёшь, того же клиента не завести заново, а из интерфейса он не виден
+     * вовсе. Разбирать такое приходилось запросом в базу (07.09.2026: на бою
+     * четырнадцать таких клиентов, из-за одного не заводился ИП Керимов).
+     */
+    public function trashed()
+    {
+        $this->authorizeManage();
+
+        $clients = Client::onlyTrashed()
+            ->orderByDesc('deleted_at')
+            ->get(['id', 'name', 'inn', 'company_number', 'deleted_at']);
+
+        return response()->json($clients->map(fn (Client $client) => $this->trashedRow($client)));
+    }
+
+    /** Строка удалённого клиента: одна на список и на подсказку о занятом ИНН. */
+    private function trashedRow(Client $client): array
+    {
+        return [
+            'id' => $client->id,
+            'name' => $client->name,
+            'inn' => $client->inn,
+            'company_number' => $client->company_number,
+            'deleted_at' => $client->deleted_at?->format('d.m.Y'),
+            // Возвращать может тот же, кто заводит и удаляет: рядовому сотруднику
+            // удалённый клиент и на глаза попадать не должен.
+            'can_restore' => Client::canBeManagedBy(auth('employee')->user()),
+        ];
+    }
+
+    /** Вернуть удалённого клиента: карточка, смета и история остаются прежними. */
+    public function restore(Client $client)
+    {
+        $this->authorizeManage();
+
+        if ($client->trashed()) {
+            $client->restore();
+        }
+
+        if (request()->expectsJson()) {
+            return response()->json([
+                'success' => true,
+                'message' => 'Клиент ' . $client->name . ' возвращён',
+                'client' => $this->clientRow($client->fresh()->load([
+                    'taxSystem', 'tariff', 'responsibleEmployee', 'organizationForm', 'clientStatus',
+                ])->loadCount('estimateRootItems')),
+            ]);
+        }
+
+        return redirect()
+            ->route('clients.show', $client)
+            ->with('success', 'Клиент ' . $client->name . ' возвращён');
+    }
+
     public function search(Request $request)
     {
         // q — прежнее имя параметра поиска, оставлено для внешних ссылок
@@ -167,6 +225,15 @@ class ClientController extends Controller
             'company_number.min' => 'Номер компании должен быть больше нуля',
             'company_number.max' => 'Номер компании слишком длинный',
         ]);
+
+        // Удалённый клиент держит и ИНН, и номер компании. Проверку он проходит
+        // (правила смотрят только на живых), поэтому ловим здесь и предлагаем вернуть.
+        if ($conflict = $this->trashedConflictFor($request, [
+            'inn' => $validated['inn'],
+            'company_number' => self::companyNumber($validated),
+        ], 'createClient')) {
+            return $conflict;
+        }
 
         $client = Client::create([
             'name' => $validated['name'],
@@ -250,6 +317,13 @@ class ClientController extends Controller
             'company_number.min' => 'Номер компании должен быть больше нуля',
             'company_number.max' => 'Номер компании слишком длинный',
         ]);
+
+        if ($conflict = $this->trashedConflictFor($request, [
+            'inn' => $validated['inn'],
+            'company_number' => self::companyNumber($validated),
+        ], 'updateClient')) {
+            return $conflict;
+        }
 
         // `is_active` тут нет намеренно: обслуживанием распоряжается статус клиента
         // в карточке, и только он. Пока флаг был ещё и в этой форме, список и
@@ -430,6 +504,17 @@ class ClientController extends Controller
             'company_number.max' => 'Номер компании слишком длинный',
         ]);
 
+        if ($section === 'basic') {
+            $conflict = $this->trashedConflictFor($request, [
+                'inn' => $validated['inn'] ?? null,
+                'company_number' => self::companyNumber($validated),
+            ], 'default');
+
+            if ($conflict) {
+                return $conflict;
+            }
+        }
+
         // Обработка employees отдельно
         if (isset($validated['employees'])) {
             $client->employees()->sync($validated['employees']);
@@ -566,12 +651,81 @@ class ClientController extends Controller
         abort_unless(Client::canBeManagedBy(auth('employee')->user()), 403, 'Недостаточно прав');
     }
 
-    /** Правило «такой ИНН у нас ещё не занят» — только в своей фирме. */
+    /**
+     * Правило «такой ИНН у нас ещё не занят» — только в своей фирме и только среди
+     * живых клиентов. Удалённые тоже держат ИНН, но про них человеку нужно сказать
+     * другое: не «уже существует», а «удалён тогда-то, вот он, верните» —
+     * см. trashedHolder() и trashedConflict().
+     */
     private function innIsFreeInTenant(?int $exceptId = null): \Illuminate\Validation\Rules\Unique
     {
-        $rule = Rule::unique('clients', 'inn')->where('tenant_id', TenantContext::id());
+        $rule = Rule::unique('clients', 'inn')
+            ->where('tenant_id', TenantContext::id())
+            ->whereNull('deleted_at');
 
         return $exceptId ? $rule->ignore($exceptId) : $rule;
+    }
+
+    /**
+     * Кто из удалённых держит это значение.
+     *
+     * Уникальный индекс в базе удалённых считает, поэтому пропустить их через
+     * проверку и упасть на вставке нельзя: ловим до сохранения и объясняем.
+     */
+    private function trashedHolder(string $column, $value): ?Client
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return Client::onlyTrashed()->where($column, $value)->first();
+    }
+
+    /**
+     * Ответ «значение держит удалённый клиент».
+     *
+     * Фоновому запросу отдаём 422 с данными о клиенте: список и карточка рисуют
+     * плашку с кнопкой «Вернуть». Обычной отправке формы — редирект назад с той же
+     * ошибкой и клиентом во флеш-сессии, чтобы окно создания открылось с плашкой.
+     */
+    private function trashedConflict(Request $request, string $field, Client $held, string $errorBag)
+    {
+        $what = $field === 'inn' ? 'Клиент с таким ИНН' : 'Клиент с таким номером компании';
+        $message = $what . ' удалён ' . $held->deleted_at->format('d.m.Y') . ': ' . $held->name . '.';
+        $row = $this->trashedRow($held);
+
+        $message .= $row['can_restore']
+            ? ' Верните его, чтобы продолжить.'
+            : ' Обратитесь к руководителю, чтобы его вернуть.';
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'message' => $message,
+                'errors' => [$field => [$message]],
+                'trashed' => $row,
+            ], 422);
+        }
+
+        return back()
+            ->withInput()
+            ->withErrors([$field => $message], $errorBag)
+            ->with('trashedClient', $row);
+    }
+
+    /**
+     * Занято ли что-нибудь из введённого удалённым клиентом.
+     *
+     * @return \Illuminate\Http\JsonResponse|\Illuminate\Http\RedirectResponse|null
+     */
+    private function trashedConflictFor(Request $request, array $fields, string $errorBag)
+    {
+        foreach ($fields as $field => $value) {
+            if ($held = $this->trashedHolder($field, $value)) {
+                return $this->trashedConflict($request, $field, $held, $errorBag);
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -583,7 +737,9 @@ class ClientController extends Controller
      */
     private function companyNumberRules(?int $exceptId = null): array
     {
-        $unique = Rule::unique('clients', 'company_number')->where('tenant_id', TenantContext::id());
+        $unique = Rule::unique('clients', 'company_number')
+            ->where('tenant_id', TenantContext::id())
+            ->whereNull('deleted_at');
 
         return ['nullable', 'integer', 'min:1', 'max:999999999', $exceptId ? $unique->ignore($exceptId) : $unique];
     }

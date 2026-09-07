@@ -2235,6 +2235,15 @@
                         <li x-text="message"></li>
                     </template>
                 </ul>
+                <template x-if="saveError.trashed && saveError.trashed.can_restore">
+                    <button type="button" @click="restoreAndOpen(saveError.trashed)"
+                            class="mt-2 inline-flex items-center px-3 py-1.5 bg-white text-slate-700 text-sm font-medium rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors">
+                        <svg class="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        Вернуть клиента
+                    </button>
+                </template>
             </div>
             <button type="button" @click="clearSaveError()" class="p-1 text-rose-400 hover:text-rose-600 rounded-lg transition-colors" title="Закрыть">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -2595,7 +2604,7 @@ function clientShow() {
         // галочки «не показывать больше диалоги», и отказ сервера выглядел как
         // «нажал сохранить, ничего не произошло». Держим на странице, пока человек
         // не закроет или не сохранит заново.
-        saveError: { section: null, messages: [] },
+        saveError: { section: null, messages: [], trashed: null },
 
         sectionTitles: {
             basic: 'Основная информация',
@@ -2942,13 +2951,32 @@ function clientShow() {
 
         clearSaveError(section = null) {
             if (section === null || this.saveError.section === section) {
-                this.saveError = { section: null, messages: [] };
+                this.saveError = { section: null, messages: [], trashed: null };
             }
         },
 
         /** Показать отказ сервера так, чтобы его было видно на странице. */
-        showSaveError(section, messages) {
-            this.saveError = { section, messages: messages.filter(Boolean) };
+        showSaveError(section, messages, trashed = null) {
+            this.saveError = { section, messages: messages.filter(Boolean), trashed };
+        },
+
+        /** Вернуть удалённого клиента, который держит введённый ИНН или номер. */
+        async restoreAndOpen(client) {
+            try {
+                const response = await fetch('/clients/' + client.id + '/restore', {
+                    method: 'POST',
+                    headers: {
+                        'Accept': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]').content,
+                    },
+                });
+
+                if (!response.ok) throw new Error('restore failed');
+
+                window.location = '/clients/' + client.id;
+            } catch {
+                this.showSaveError(this.saveError.section, ['Не удалось вернуть клиента']);
+            }
         },
 
         cancelEdit(section) {
@@ -3057,7 +3085,7 @@ function clientShow() {
                 // общую фразу. «Этот номер компании уже занят» человек должен прочесть,
                 // а не гадать, почему кнопка ничего не сделала.
                 const errors = Object.values(data.errors ?? {}).flat();
-                this.showSaveError(section, errors.length ? errors : [data.message || 'Не удалось сохранить']);
+                this.showSaveError(section, errors.length ? errors : [data.message || 'Не удалось сохранить'], data.trashed ?? null);
             } catch (error) {
                 console.error('Error:', error);
                 this.showSaveError(section, ['Сеть недоступна. Изменения не сохранены.']);

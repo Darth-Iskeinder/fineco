@@ -11,6 +11,14 @@
     showImportModal: {{ $errors->has('file') ? 'true' : 'false' }},
     showEditModal: false,
     showDeleteModal: false,
+    // Удалённые клиенты. В списке их нет, но свой ИНН и номер компании они держат:
+    // пока не вернёшь, того же клиента заново не завести.
+    showTrashedModal: false,
+    trashedClients: [],
+    trashedLoading: false,
+    restoringId: null,
+    // Кого предлагаем вернуть прямо из окна правки: пришёл ответом на занятый ИНН.
+    editTrashed: null,
     deleteClient: null,
     // Не null: модалка редактирования всегда в DOM (x-show), а x-model на editClient.* не умеет
     // optional chaining — при null Alpine падал бы с TypeError ещё до открытия. Держим объект
@@ -206,6 +214,7 @@
         // «сменился или нет» надо с тем, что было до открытия окна.
         this.editResponsibleWas = String(client.responsible_employee_id ?? '');
         this.editErrors = [];
+        this.editTrashed = null;
         this.showEditModal = true;
     },
 
@@ -243,6 +252,7 @@
 
         this.savingClient = true;
         this.editErrors = [];
+        this.editTrashed = null;
 
         try {
             const response = await fetch(form.action, {
@@ -254,6 +264,8 @@
             if (response.status === 422) {
                 const data = await response.json();
                 this.editErrors = Object.values(data.errors ?? {}).flat();
+                // ИНН или номер держит удалённый клиент: показываем, кого вернуть
+                this.editTrashed = data.trashed ?? null;
                 // Список ошибок стоит первым блоком формы: если её прокрутили,
                 // сообщение осталось бы выше экрана, и отказ выглядел бы как
                 // «нажал сохранить, ничего не произошло».
@@ -298,6 +310,94 @@
         return map[color] || 'bg-slate-100 text-slate-600';
     },
 
+    async openTrashedModal() {
+        this.showTrashedModal = true;
+        this.trashedLoading = true;
+
+        try {
+            const response = await fetch('/clients/trashed', {
+                headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            });
+            this.trashedClients = await response.json();
+        } catch {
+            this.trashedClients = [];
+        }
+
+        this.trashedLoading = false;
+    },
+
+    /** Вернуть клиента из корзины: строка уходит из окна, клиент появляется в списке. */
+    async restoreClient(client) {
+        if (this.restoringId) return;
+
+        this.restoringId = client.id;
+
+        try {
+            const response = await fetch('/clients/' + client.id + '/restore', {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]').content,
+                },
+            });
+
+            if (!response.ok) throw new Error('restore failed');
+
+            const data = await response.json();
+            this.trashedClients = this.trashedClients.filter(c => c.id !== client.id);
+            // Наверх, как у только что созданного: список отсортирован «последние сверху»
+            this.clients = [data.client, ...this.clients.filter(c => c.id !== data.client.id)];
+            this.showToast(data.message);
+        } catch {
+            this.showToast('Не удалось вернуть клиента');
+        }
+
+        this.restoringId = null;
+    },
+
+    /** Подпись строки в корзине одной строкой: по кускам между тегами лезут пробелы. */
+    trashedNote(client) {
+        const parts = [client.inn];
+        if (client.company_number) parts.push('номер ' + client.company_number);
+        parts.push('удалён ' + client.deleted_at);
+
+        return parts.join(', ');
+    },
+
+    /**
+     * Вернуть клиента, чей ИНН или номер держал ввод, и сразу открыть его карточку.
+     *
+     * Именно этого человек и хотел: он заводил или правил клиента, а такой уже есть,
+     * просто удалён. Карточка со всей историей лучше, чем заново набитая пустая.
+     */
+    async restoreAndOpen(client) {
+        if (this.restoringId) return;
+
+        this.restoringId = client.id;
+
+        try {
+            const response = await fetch('/clients/' + client.id + '/restore', {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]').content,
+                },
+            });
+
+            if (!response.ok) throw new Error('restore failed');
+
+            window.location = '/clients/' + client.id;
+
+            return;
+        } catch {
+            this.showToast('Не удалось вернуть клиента');
+        }
+
+        this.restoringId = null;
+    },
+
     showToast(message) {
         this.toast = { show: true, message };
         setTimeout(() => { this.toast.show = false; }, 3000);
@@ -315,6 +415,14 @@
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
                 </svg>
                 Импорт
+            </button>
+            <button @click="openTrashedModal()" type="button"
+                    title="Клиенты, которых удалили: их ИНН остаётся занятым, пока клиента не вернуть"
+                    class="inline-flex items-center px-4 py-2.5 bg-white text-slate-600 text-sm font-medium rounded-xl border border-slate-200 hover:bg-slate-50 hover:text-slate-800 transition-all duration-200">
+                <svg class="-ml-0.5 mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                </svg>
+                Удалённые
             </button>
             @endif
             {{-- Выгружаем то, что человек сейчас видит: с поиском и фильтрами — найденное,
@@ -750,6 +858,18 @@
                                     <li>{{ $error }}</li>
                                 @endforeach
                             </ul>
+                            {{-- Такой клиент уже был и лежит в удалённых: вернуть его —
+                                 это ровно то, чего человек и хотел, только с историей. --}}
+                            @if(session('trashedClient') && session('trashedClient')['can_restore'])
+                                <button type="button" @click="restoreAndOpen(@js(session('trashedClient')))" :disabled="restoringId"
+                                        class="mt-3 inline-flex items-center px-4 py-2 bg-white text-slate-700 text-sm font-medium rounded-xl border border-slate-200 hover:bg-slate-50 transition-all duration-200"
+                                        :class="restoringId ? 'opacity-50' : ''">
+                                    <svg class="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                    </svg>
+                                    <span x-text="restoringId ? 'Возвращаем…' : 'Вернуть клиента'"></span>
+                                </button>
+                            @endif
                         </div>
                     @endif
                     <div class="px-6 py-6">
@@ -881,6 +1001,18 @@
                                     <li x-text="error"></li>
                                 </template>
                             </ul>
+                            {{-- Вложенной формы тут быть не может: блок стоит внутри формы
+                                 правки, поэтому возврат уходит фоновым запросом. --}}
+                            <template x-if="editTrashed && editTrashed.can_restore">
+                                <button type="button" @click="restoreAndOpen(editTrashed)" :disabled="restoringId"
+                                        class="mt-3 inline-flex items-center px-4 py-2 bg-white text-slate-700 text-sm font-medium rounded-xl border border-slate-200 hover:bg-slate-50 transition-all duration-200"
+                                        :class="restoringId ? 'opacity-50' : ''">
+                                    <svg class="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                    </svg>
+                                    <span x-text="restoringId ? 'Возвращаем…' : 'Вернуть клиента'"></span>
+                                </button>
+                            </template>
                         </div>
                     </template>
                     @if($errors->updateClient->isNotEmpty())
@@ -1003,7 +1135,9 @@
                 <div class="px-6 pb-6 text-center">
                     <h3 class="text-lg font-semibold text-slate-800 mb-2">Удалить клиента?</h3>
                     <p class="text-sm text-slate-500">
-                        Вы уверены, что хотите удалить клиента <span class="font-medium text-slate-700" x-text="deleteClient?.name"></span>? Это действие нельзя отменить.
+                        Вы уверены, что хотите удалить клиента <span class="font-medium text-slate-700" x-text="deleteClient?.name"></span>?
+                        Он пропадёт из списка, а его ИНН останется занятым: завести того же клиента заново не выйдет,
+                        пока не вернуть его кнопкой «Удалённые».
                     </p>
                 </div>
 
@@ -1021,6 +1155,79 @@
                             Удалить
                         </button>
                     </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {{-- Удалённые клиенты. Удаление мягкое: клиент пропадает из списка, но ИНН и номер
+         компании держит за собой. Без этого окна тупик «ИНН занят непонятно кем»
+         разбирался только запросом в базу. --}}
+    <div x-show="showTrashedModal"
+         x-transition:enter="transition ease-out duration-300"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="transition ease-in duration-200"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         class="fixed inset-0 z-50 overflow-y-auto"
+         style="display: none;">
+        <div class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm" @click="showTrashedModal = false"></div>
+
+        <div class="flex min-h-full items-center justify-center p-4">
+            <div x-show="showTrashedModal"
+                 x-transition:enter="transition ease-out duration-300"
+                 x-transition:enter-start="opacity-0 translate-y-4 scale-95"
+                 x-transition:enter-end="opacity-100 translate-y-0 scale-100"
+                 x-transition:leave="transition ease-in duration-200"
+                 x-transition:leave-start="opacity-100 translate-y-0 scale-100"
+                 x-transition:leave-end="opacity-0 translate-y-4 scale-95"
+                 @click.away="showTrashedModal = false"
+                 class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden">
+
+                <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+                    <div>
+                        <h3 class="text-lg font-semibold text-slate-800">Удалённые клиенты</h3>
+                        <p class="text-sm text-slate-500 mt-0.5">Их ИНН и номер компании остаются занятыми, пока клиент не вернётся</p>
+                    </div>
+                    <button @click="showTrashedModal = false" type="button" class="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-all duration-150">
+                        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="overflow-y-auto max-h-[calc(90vh-140px)]">
+                    <div x-show="trashedLoading" class="px-6 py-10 text-center text-sm text-slate-500">Загружаем…</div>
+
+                    <div x-show="!trashedLoading && trashedClients.length === 0" class="px-6 py-10 text-center">
+                        <p class="text-sm text-slate-500">Удалённых клиентов нет</p>
+                    </div>
+
+                    <ul x-show="!trashedLoading && trashedClients.length > 0" class="divide-y divide-slate-100">
+                        <template x-for="client in trashedClients" :key="client.id">
+                            <li class="flex items-center justify-between gap-4 px-6 py-4">
+                                <div class="min-w-0">
+                                    <div class="text-sm font-medium text-slate-800 truncate" x-text="client.name"></div>
+                                    <div class="text-xs text-slate-500 mt-0.5" x-text="trashedNote(client)"></div>
+                                </div>
+                                <button type="button" @click="restoreClient(client)" :disabled="restoringId === client.id"
+                                        class="inline-flex items-center px-4 py-2 bg-white text-slate-600 text-sm font-medium rounded-xl border border-slate-200 hover:bg-slate-50 hover:text-slate-800 transition-all duration-200 flex-shrink-0"
+                                        :class="restoringId === client.id ? 'opacity-50' : ''">
+                                    <svg class="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                    </svg>
+                                    <span x-text="restoringId === client.id ? 'Возвращаем…' : 'Вернуть'"></span>
+                                </button>
+                            </li>
+                        </template>
+                    </ul>
+                </div>
+
+                <div class="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+                    <button @click="showTrashedModal = false" type="button" class="inline-flex items-center px-5 py-2.5 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 bg-white hover:bg-slate-50 hover:border-slate-300 transition-all duration-200">
+                        Закрыть
+                    </button>
                 </div>
             </div>
         </div>

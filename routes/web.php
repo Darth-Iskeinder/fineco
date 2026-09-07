@@ -163,8 +163,15 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/import/{token}/apply', [ClientImportController::class, 'apply'])->name('import.apply');
         Route::get('/import/{token}/errors', [ClientImportController::class, 'errors'])->name('import.errors');
 
+        // Удалённые клиенты: в общем списке их нет, а свой ИНН они держат — пока
+        // не вернёшь, завести того же клиента заново нельзя. Объявлено до `/{client}`.
+        Route::get('/trashed', [ClientController::class, 'trashed'])->name('trashed');
+
         Route::post('/', [ClientController::class, 'store'])->name('store');
         Route::get('/{client}', [ClientController::class, 'show'])->name('show');
+        // withTrashed: возвращают именно удалённого, обычная привязка его не найдёт.
+        Route::post('/{client}/restore', [ClientController::class, 'restore'])
+            ->withTrashed()->name('restore');
         // Что переедет на нового ответственного — считаем до сохранения, для окна подтверждения.
         Route::get('/{client}/responsible-preview', [ClientController::class, 'responsiblePreview'])
             ->name('responsible-preview');

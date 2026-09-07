@@ -6,6 +6,8 @@ use App\Models\Client;
 use App\Models\Employee;
 use App\Models\Module;
 use App\Models\Role;
+use App\Models\Tenant;
+use App\Support\TenantContext;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -109,6 +111,43 @@ class ClientCompanyNumberTest extends TestCase
                 'company_number' => $number,
             ])
             ->assertSessionHasErrors('company_number', null, 'createClient');
+    }
+
+    /**
+     * У каждой бухфирмы своя нумерация: номер 7 у соседей не мешает завести свой.
+     *
+     * Проверяет и уникальный индекс в базе: будь он на всю таблицу, а не на пару
+     * «фирма + номер», запрос упал бы на вставке.
+     */
+    public function test_same_number_in_another_firm_does_not_block(): void
+    {
+        $number = random_int(100000, 999999);
+
+        $tenant = Tenant::create([
+            'name' => 'Чужая фирма ' . uniqid(),
+            'slug' => 'other-' . uniqid(),
+            'status' => Tenant::STATUS_ACTIVE,
+        ]);
+
+        $theirs = TenantContext::for($tenant, fn () => Client::create([
+            'name' => 'ОсОО Соседи ' . uniqid(),
+            'inn' => (string) random_int(100000000000, 999999999999),
+            'company_number' => $number,
+        ]));
+
+        $this->actingAs($this->admin, 'employee')
+            ->post('/clients', [
+                'name' => $name = 'ОсОО Наша ' . uniqid(),
+                'inn'  => (string) random_int(100000000000, 999999999999),
+                'company_number' => $number,
+            ])
+            ->assertRedirect()
+            ->assertSessionHasNoErrors();
+
+        $mine = Client::where('name', $name)->first();
+
+        $this->assertSame($number, $mine?->company_number);
+        $this->assertNotSame($theirs->tenant_id, $mine->tenant_id);
     }
 
     /** Свой номер при сохранении клиента занятым не считается. */
