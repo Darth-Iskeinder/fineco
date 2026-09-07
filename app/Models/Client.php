@@ -27,6 +27,8 @@ class Client extends Model
         'ownership_form',
         'organization_form_id',
         'inn',
+        // Свой номер клиента у бухфирмы: ведут его руками, к id он отношения не имеет.
+        'company_number',
         'director_inn',
         'activity_type',
         'activity_type_id',
@@ -163,6 +165,7 @@ class Client extends Model
     }
 
     protected $casts = [
+        'company_number' => 'integer',
         'is_active' => 'boolean',
         'its_enabled' => 'boolean',
         // Boolean флаги
@@ -595,6 +598,12 @@ class Client extends Model
                 if ($digits = preg_replace('/\D+/', '', $word)) {
                     $q->orWhereRaw(self::digitsColumn('inn') . ' like ?', ['%' . $digits . '%'])
                       ->orWhereRaw(self::digitsColumn('director_inn') . ' like ?', ['%' . $digits . '%']);
+
+                    // Номер компании — только точное совпадение. По кусочку искать
+                    // нечего: номер короткий, и «12» иначе притащило бы 12, 120 и 512.
+                    if ($number = self::searchNumber($digits)) {
+                        $q->orWhere('company_number', $number);
+                    }
                 }
             });
         }
@@ -624,14 +633,21 @@ class Client extends Model
         $bindings = [];
 
         if ($digits !== '') {
-            $cases[]    = 'when ' . self::digitsColumn('inn') . ' = ? then 0';
+            // Номер компании выше ИНН: его набирают целиком и именно чтобы попасть
+            // в одного клиента, а совпадение по ИНН чаще случайное, кусками цифр.
+            if ($number = self::searchNumber($digits)) {
+                $cases[]    = 'when company_number = ? then 0';
+                $bindings[] = $number;
+            }
+
+            $cases[]    = 'when ' . self::digitsColumn('inn') . ' = ? then 1';
             $bindings[] = $digits;
         }
 
-        $cases[]    = 'when ' . self::normalizedColumn('name', $driver) . ' like ? then 1';
+        $cases[]    = 'when ' . self::normalizedColumn('name', $driver) . ' like ? then 2';
         $bindings[] = $starts;
 
-        return $query->orderByRaw('case ' . implode(' ', $cases) . ' else 2 end', $bindings);
+        return $query->orderByRaw('case ' . implode(' ', $cases) . ' else 3 end', $bindings);
     }
 
     /**
@@ -669,6 +685,24 @@ class Client extends Model
             : $column;
 
         return "replace(lower(coalesce($text, '')), 'ё', 'е')";
+    }
+
+    /**
+     * Цифры запроса как номер компании, если они на него похожи.
+     *
+     * Null для нуля и для длинных строк вроде ИНН: колонка целочисленная, и
+     * четырнадцать цифр в неё не влезут — PostgreSQL на таком сравнении падает
+     * с ошибкой, а не возвращает пустой ответ.
+     */
+    private static function searchNumber(string $digits): ?int
+    {
+        $number = ltrim($digits, '0');
+
+        if ($number === '' || strlen($number) > 9) {
+            return null;
+        }
+
+        return (int) $number;
     }
 
     /** Колонка с ИНН без пробелов и дефисов: их ставят при копировании. */

@@ -33,6 +33,7 @@
                 ...base,
                 name: @json(old('name')),
                 inn: @json(old('inn')),
+                company_number: @json(old('company_number')),
                 tax_system_id: @json(old('tax_system_id')),
                 tariff_id: @json(old('tariff_id')),
                 responsible_employee_id: @json(old('responsible_employee_id')) ?? '',
@@ -122,16 +123,30 @@
         this.searchClients();
     },
 
-    // Сортировка: колонка ('name' | 'responsible') + направление ('asc' → А-Я, 'desc' → Я-А).
-    // Обе null → порядок с сервера (последний созданный клиент сверху). Сортировка одна на таблицу:
-    // клик по другой колонке перехватывает её на себя.
+    // Сортировка: колонка ('name' | 'responsible' | 'company_number') + направление
+    // ('asc' → А-Я и 1, 2, 3, 'desc' → наоборот). Обе null → порядок с сервера (последний
+    // созданный клиент сверху). Сортировка одна на таблицу: клик по другой колонке
+    // перехватывает её на себя.
     sortBy: null,
     sortDir: null,
 
-    // Пустые значения («—» у ответственного) всегда в конце, независимо от направления.
+    // Пустые значения («—» у ответственного, клиент без номера) всегда в конце,
+    // независимо от направления.
     get sortedClients() {
         if (!this.sortBy || !this.sortDir) return this.clients;
         const dir = this.sortDir === 'asc' ? 1 : -1;
+
+        // Номер компании сравниваем числами: строками «10» встало бы перед «9».
+        if (this.sortBy === 'company_number') {
+            return [...this.clients].sort((a, b) => {
+                const av = a.company_number, bv = b.company_number;
+                if (av == null && bv == null) return 0;
+                if (av == null) return 1;
+                if (bv == null) return -1;
+                return (av - bv) * dir;
+            });
+        }
+
         const val = this.sortBy === 'name'
             ? (c => c.name || '')
             : (c => (c.responsible_name && c.responsible_name !== '—') ? c.responsible_name : '');
@@ -239,6 +254,10 @@
             if (response.status === 422) {
                 const data = await response.json();
                 this.editErrors = Object.values(data.errors ?? {}).flat();
+                // Список ошибок стоит первым блоком формы: если её прокрутили,
+                // сообщение осталось бы выше экрана, и отказ выглядел бы как
+                // «нажал сохранить, ничего не произошло».
+                form.scrollTop = 0;
                 return;
             }
 
@@ -523,7 +542,18 @@
                             ИНН
                         </th>
                         <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                            ID
+                            <button type="button" @click="toggleSort('company_number')"
+                                    class="group inline-flex items-center gap-1 uppercase tracking-wider hover:text-slate-700 transition-colors select-none">
+                                Номер компании
+                                <span class="flex flex-col -space-y-1">
+                                    <svg class="w-2.5 h-2.5" :class="sortBy === 'company_number' && sortDir === 'asc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" fill="currentColor" viewBox="0 0 20 20">
+                                        <path d="M10 5l4 5H6l4-5z" />
+                                    </svg>
+                                    <svg class="w-2.5 h-2.5" :class="sortBy === 'company_number' && sortDir === 'desc' ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-400'" fill="currentColor" viewBox="0 0 20 20">
+                                        <path d="M10 15l-4-5h8l-4 5z" />
+                                    </svg>
+                                </span>
+                            </button>
                         </th>
                         <th scope="col" class="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                             СНО
@@ -592,7 +622,7 @@
                                 <div class="text-sm text-slate-600 font-mono" x-text="client.inn"></div>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
-                                <div class="text-sm text-slate-500 font-mono" x-text="client.id"></div>
+                                <div class="text-sm text-slate-600 font-mono tabular-nums" x-text="client.company_number ?? '—'"></div>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap">
                                 <div class="text-sm text-slate-600" x-text="client.tax_system_name"></div>
@@ -747,6 +777,12 @@
                             </div>
 
                             <div>
+                                <label for="create_company_number" class="block text-sm font-medium text-slate-700 mb-2">Номер компании</label>
+                                <input type="number" name="company_number" id="create_company_number" min="1" step="1" value="{{ old('company_number') }}" class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200 font-mono" placeholder="12">
+                                <p class="mt-1 text-xs text-slate-500">Ваш номер клиента, не повторяется</p>
+                            </div>
+
+                            <div>
                                 <label for="create_tax_system_id" class="block text-sm font-medium text-slate-700 mb-2">Система налогообложения</label>
                                 <select name="tax_system_id" id="create_tax_system_id" class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
                                     <option value="">Не указана</option>
@@ -877,6 +913,11 @@
                             <div>
                                 <label for="edit_inn" class="block text-sm font-medium text-slate-700 mb-2">ИНН <span class="text-red-500">*</span></label>
                                 <input type="text" name="inn" id="edit_inn" :value="editClient?.inn" required maxlength="14" class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200 font-mono">
+                            </div>
+
+                            <div>
+                                <label for="edit_company_number" class="block text-sm font-medium text-slate-700 mb-2">Номер компании</label>
+                                <input type="number" name="company_number" id="edit_company_number" :value="editClient?.company_number ?? ''" min="1" step="1" class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200 font-mono" placeholder="12">
                             </div>
 
                             <div>

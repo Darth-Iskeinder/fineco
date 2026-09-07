@@ -69,7 +69,7 @@
                 <div class="px-6 py-5">
                     <!-- Режим просмотра -->
                     <template x-if="!editing.basic">
-                        <dl class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-x-6 gap-y-4">
+                        <dl class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-x-6 gap-y-4">
                             <div>
                                 <dt class="text-sm font-medium text-slate-500">Форма организации</dt>
                                 <dd class="mt-1 text-sm text-slate-900" x-text="client.organization_form?.name || '—'"></dd>
@@ -77,6 +77,10 @@
                             <div>
                                 <dt class="text-sm font-medium text-slate-500">ИНН</dt>
                                 <dd class="mt-1 text-sm text-slate-900 font-mono" x-text="client.inn || '—'"></dd>
+                            </div>
+                            <div>
+                                <dt class="text-sm font-medium text-slate-500">Номер компании</dt>
+                                <dd class="mt-1 text-sm text-slate-900 font-mono" x-text="client.company_number ?? '—'"></dd>
                             </div>
                             <div>
                                 <dt class="text-sm font-medium text-slate-500">ИНН руководителя</dt>
@@ -94,7 +98,7 @@
                     </template>
                     <!-- Режим редактирования -->
                     <template x-if="editing.basic">
-                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-x-6 gap-y-4">
+                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-6 gap-y-4">
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-1">Название <span class="text-red-500">*</span></label>
                                 <input type="text" x-model="form.basic.name" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
@@ -111,6 +115,10 @@
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-1">ИНН <span class="text-red-500">*</span></label>
                                 <input type="text" x-model="form.basic.inn" maxlength="14" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-slate-700 mb-1">Номер компании</label>
+                                <input type="number" x-model="form.basic.company_number" min="1" step="1" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-slate-700 mb-1">ИНН руководителя</label>
@@ -2210,6 +2218,32 @@
     </div>
     @endif
 
+    {{-- Почему не сохранилось. Висит поверх страницы, пока не закроют или не сохранят
+         заново: карточка длинная, и сообщение внутри секции легко уехало бы за экран. --}}
+    <div x-show="saveError.messages.length" style="display: none"
+         class="fixed top-4 left-1/2 -translate-x-1/2 z-[70] w-[min(90vw,32rem)]">
+        <div class="flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 shadow-lg px-4 py-3">
+            <svg class="w-5 h-5 text-rose-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+            <div class="min-w-0 flex-1">
+                <p class="text-sm font-semibold text-rose-800">
+                    Не сохранено<span x-show="saveError.section" x-text="': ' + (sectionTitles[saveError.section] || saveError.section)"></span>
+                </p>
+                <ul class="mt-1 space-y-0.5 text-sm text-rose-700">
+                    <template x-for="(message, i) in saveError.messages" :key="i">
+                        <li x-text="message"></li>
+                    </template>
+                </ul>
+            </div>
+            <button type="button" @click="clearSaveError()" class="p-1 text-rose-400 hover:text-rose-600 rounded-lg transition-colors" title="Закрыть">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+        </div>
+    </div>
+
     {{-- Несохранённые правки: карточку правят по секциям, и уйти со страницы, забыв
          нажать «Сохранить», слишком легко. Показываем, что именно не сохранено. --}}
     <div x-show="unsaved.open" style="display: none" class="fixed inset-0 z-[60] flex items-center justify-center px-4"
@@ -2557,6 +2591,12 @@ function clientShow() {
         // (уйти по ссылке, открыть другую секцию); null — просто закрыть окно.
         unsaved: { open: false, sections: [], saving: false, error: '', next: null },
 
+        // Почему не сохранилось. Раньше это был alert(): браузер прячет его после
+        // галочки «не показывать больше диалоги», и отказ сервера выглядел как
+        // «нажал сохранить, ничего не произошло». Держим на странице, пока человек
+        // не закроет или не сохранит заново.
+        saveError: { section: null, messages: [] },
+
         sectionTitles: {
             basic: 'Основная информация',
             status: 'Статус и период обслуживания',
@@ -2726,6 +2766,9 @@ function clientShow() {
                     name: this.client.name,
                     organization_form_id: this.client.organization_form_id ? String(this.client.organization_form_id) : '',
                     inn: this.client.inn,
+                    // Пусто держим пустой строкой, а не null: иначе x-model на числовом
+                    // поле покажет «null».
+                    company_number: this.client.company_number ?? '',
                     director_inn: this.client.director_inn,
                     tax_office_code: this.client.tax_office_code,
                     activity_type_id: this.client.activity_type_id ? String(this.client.activity_type_id) : '',
@@ -2894,6 +2937,18 @@ function clientShow() {
             // в соседних открытых секциях — молча, без единого предупреждения.
             this.resetForm(section);
             this.editing[section] = true;
+            this.clearSaveError(section);
+        },
+
+        clearSaveError(section = null) {
+            if (section === null || this.saveError.section === section) {
+                this.saveError = { section: null, messages: [] };
+            }
+        },
+
+        /** Показать отказ сервера так, чтобы его было видно на странице. */
+        showSaveError(section, messages) {
+            this.saveError = { section, messages: messages.filter(Boolean) };
         },
 
         cancelEdit(section) {
@@ -2905,6 +2960,7 @@ function clientShow() {
 
             this.editing[section] = false;
             this.resetForm(section);
+            this.clearSaveError(section);
         },
 
         /** Секция «Статус» останавливает обслуживание — и это стоит подтвердить. */
@@ -2991,15 +3047,20 @@ function clientShow() {
                     this.editing[section] = false;
                     // Открытые секции не пересобираем: там могут быть свои несохранённые правки
                     this.resetForms(Object.keys(this.editing).filter(s => this.editing[s]));
+                    this.clearSaveError(section);
                     this.saving[section] = false;
 
                     return true;
                 }
 
-                alert(data.message || 'Ошибка сохранения');
+                // Проверка не прошла: показываем причину по каждому полю, а не одну
+                // общую фразу. «Этот номер компании уже занят» человек должен прочесть,
+                // а не гадать, почему кнопка ничего не сделала.
+                const errors = Object.values(data.errors ?? {}).flat();
+                this.showSaveError(section, errors.length ? errors : [data.message || 'Не удалось сохранить']);
             } catch (error) {
                 console.error('Error:', error);
-                alert('Ошибка сохранения');
+                this.showSaveError(section, ['Сеть недоступна. Изменения не сохранены.']);
             }
 
             this.saving[section] = false;

@@ -72,6 +72,7 @@ class ClientController extends Controller
             'id' => $client->id,
             'name' => $client->name,
             'inn' => $client->inn,
+            'company_number' => $client->company_number,
             'tax_system_id' => $client->tax_system_id,
             'tax_system_name' => $client->taxSystem?->name ?? '—',
             'organization_form_id' => $client->organization_form_id,
@@ -153,6 +154,7 @@ class ClientController extends Controller
             // ограничиваем вручную. Иначе фирма получала бы «ИНН занят» из-за
             // чужого клиента, которого не видит и найти не может.
             'inn' => ['required', 'string', 'max:14', $this->innIsFreeInTenant()],
+            'company_number' => $this->companyNumberRules(),
             'tax_system_id' => ['nullable', 'exists:tax_systems,id'],
             'tariff_id' => ['nullable', 'exists:tariffs,id'],
             'responsible_employee_id' => ['nullable', 'exists:employees,id'],
@@ -160,12 +162,17 @@ class ClientController extends Controller
         ], [
             'inn.required' => 'Введите ИНН',
             'inn.unique' => 'Клиент с таким ИНН уже существует',
+            'company_number.unique' => 'Этот номер компании уже занят другим клиентом',
+            'company_number.integer' => 'Номер компании — целое число',
+            'company_number.min' => 'Номер компании должен быть больше нуля',
+            'company_number.max' => 'Номер компании слишком длинный',
         ]);
 
         $client = Client::create([
             'name' => $validated['name'],
             'organization_form_id' => $validated['organization_form_id'] ?? null,
             'inn' => $validated['inn'],
+            'company_number' => self::companyNumber($validated),
             'tax_system_id' => $validated['tax_system_id'] ?? null,
             'tariff_id' => $validated['tariff_id'] ?? null,
             'responsible_employee_id' => $validated['responsible_employee_id'] ?? null,
@@ -230,6 +237,7 @@ class ClientController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'organization_form_id' => ['nullable', 'exists:organization_forms,id'],
             'inn' => ['required', 'string', 'max:14', $this->innIsFreeInTenant($client->id)],
+            'company_number' => $this->companyNumberRules($client->id),
             'tax_system_id' => ['nullable', 'exists:tax_systems,id'],
             'tariff_id' => ['nullable', 'exists:tariffs,id'],
             'responsible_employee_id' => ['nullable', 'exists:employees,id'],
@@ -237,6 +245,10 @@ class ClientController extends Controller
         ], [
             'inn.required' => 'Введите ИНН',
             'inn.unique' => 'Клиент с таким ИНН уже существует',
+            'company_number.unique' => 'Этот номер компании уже занят другим клиентом',
+            'company_number.integer' => 'Номер компании — целое число',
+            'company_number.min' => 'Номер компании должен быть больше нуля',
+            'company_number.max' => 'Номер компании слишком длинный',
         ]);
 
         // `is_active` тут нет намеренно: обслуживанием распоряжается статус клиента
@@ -247,6 +259,7 @@ class ClientController extends Controller
             'name' => $validated['name'],
             'organization_form_id' => $validated['organization_form_id'] ?? null,
             'inn' => $validated['inn'],
+            'company_number' => self::companyNumber($validated),
             'tax_system_id' => $validated['tax_system_id'] ?? null,
             'tariff_id' => $validated['tariff_id'] ?? null,
             'responsible_employee_id' => $validated['responsible_employee_id'] ?? null,
@@ -282,6 +295,7 @@ class ClientController extends Controller
                 'name' => ['required', 'string', 'max:255'],
                 'organization_form_id' => ['nullable', 'exists:organization_forms,id'],
                 'inn' => ['required', 'string', 'max:14', $this->innIsFreeInTenant($client->id)],
+                'company_number' => $this->companyNumberRules($client->id),
                 'director_inn' => ['nullable', 'string', 'max:14'],
                 'tax_office_code' => ['nullable', 'string', 'max:10'],
                 'activity_type_id' => ['nullable', 'exists:activity_types,id'],
@@ -406,7 +420,15 @@ class ClientController extends Controller
             return response()->json(['error' => 'Unknown section'], 400);
         }
 
-        $validated = $request->validate($rules);
+        // Сообщения по-русски для полей, где ошибиться проще всего: номер компании
+        // человек ставит руками, и «занят» он узнаёт только при сохранении.
+        $validated = $request->validate($rules, [
+            'inn.unique' => 'Клиент с таким ИНН уже существует',
+            'company_number.unique' => 'Этот номер компании уже занят другим клиентом',
+            'company_number.integer' => 'Номер компании — целое число',
+            'company_number.min' => 'Номер компании должен быть больше нуля',
+            'company_number.max' => 'Номер компании слишком длинный',
+        ]);
 
         // Обработка employees отдельно
         if (isset($validated['employees'])) {
@@ -550,5 +572,27 @@ class ClientController extends Controller
         $rule = Rule::unique('clients', 'inn')->where('tenant_id', TenantContext::id());
 
         return $exceptId ? $rule->ignore($exceptId) : $rule;
+    }
+
+    /**
+     * Проверка номера компании: целое число больше нуля, свободное в своей фирме.
+     *
+     * Номер фирма ведёт сама, и он должен указывать на одного клиента: два
+     * восьмых номера сделали бы бессмысленным сам способ звать клиентов по
+     * номерам. У чужих фирм нумерация своя, поэтому сверяем внутри своей.
+     */
+    private function companyNumberRules(?int $exceptId = null): array
+    {
+        $unique = Rule::unique('clients', 'company_number')->where('tenant_id', TenantContext::id());
+
+        return ['nullable', 'integer', 'min:1', 'max:999999999', $exceptId ? $unique->ignore($exceptId) : $unique];
+    }
+
+    /** Пустое поле формы — это «номера нет», а не ноль. */
+    private static function companyNumber(array $validated): ?int
+    {
+        $value = $validated['company_number'] ?? null;
+
+        return $value === null || $value === '' ? null : (int) $value;
     }
 }
