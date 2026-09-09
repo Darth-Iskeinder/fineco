@@ -54,6 +54,16 @@ class BuhTasksController extends Controller
         'htaccess', 'hta', 'js', 'mjs', 'html', 'htm', 'shtml', 'xhtml', 'svg',
     ];
 
+    /**
+     * Что можно приложить к задаче эталонного БП.
+     *
+     * У остальных БП ограничений нет: там документ читает человек, и запрещать ему
+     * скриншот или фотографию не за что. А здесь документ идёт в автопроверку, и всё,
+     * кроме этих трёх форматов, она прочитать не сможет — честнее сказать об этом сразу,
+     * чем оставить задачу закрытой документом, который никто не разберёт.
+     */
+    private const AUTOAUDIT_EXTENSIONS = ['pdf', 'xls', 'xlsx'];
+
     /** Правило валидации загружаемого документа (общее для всех точек загрузки). */
     /**
      * Отчётный период выполненной задачи: «за июль», «за 2 квартал», «за 2025 год».
@@ -75,9 +85,9 @@ class BuhTasksController extends Controller
         );
     }
 
-    private function documentFileRules(bool $required = true): array
+    private function documentFileRules(bool $required = true, ?Service $service = null): array
     {
-        return [
+        $rules = [
             $required ? 'required' : 'nullable',
             'file',
             'max:40960',
@@ -88,6 +98,19 @@ class BuhTasksController extends Controller
                 }
             },
         ];
+
+        if ($service?->reference_id) {
+            $rules[] = function ($attribute, $value, $fail) {
+                $ext = strtolower($value->getClientOriginalExtension());
+
+                if (!in_array($ext, self::AUTOAUDIT_EXTENSIONS, true)) {
+                    $fail('Этот бизнес-процесс участвует в автопроверке. '
+                        . 'Приложите отчёт в PDF или выгрузку в Excel (xls, xlsx).');
+                }
+            };
+        }
+
+        return $rules;
     }
 
     /**
@@ -432,6 +455,9 @@ class BuhTasksController extends Controller
                         'allows_quantity'  => (bool) ($service?->allows_quantity),
                         'actual_quantity'  => $log?->actual_quantity,
                         'requires_document' => (bool) ($service?->requires_document),
+                        // Эталонный БП: к его задачам принимаем только машиночитаемые форматы,
+                        // и выбор файла сразу сужаем — иначе человек узнает об отказе после загрузки.
+                        'autoaudit' => (bool) ($service?->reference_id),
                         'documents'        => $log ? $this->docs($log) : [],
                         'force_closed'        => (bool) ($log?->force_closed),
                         'force_close_comment' => $log?->force_close_comment,
@@ -603,6 +629,9 @@ class BuhTasksController extends Controller
                     'allows_quantity' => (bool) ($service?->allows_quantity),
                     'actual_quantity' => $log->actual_quantity,
                     'requires_document' => (bool) ($service?->requires_document),
+                    // Эталонный БП: к его задачам принимаем только машиночитаемые форматы,
+                    // и выбор файла сразу сужаем — иначе человек узнает об отказе после загрузки.
+                    'autoaudit' => (bool) ($service?->reference_id),
                     'documents'       => $this->docs($log),
                     'force_closed'        => (bool) $log->force_closed,
                     'force_close_comment' => $log->force_close_comment,
@@ -700,6 +729,9 @@ class BuhTasksController extends Controller
                     'quantity'         => (int) ($item?->quantity ?? 0),
                     'actual_quantity'  => $l->actual_quantity,
                     'requires_document' => (bool) ($service?->requires_document),
+                    // Эталонный БП: к его задачам принимаем только машиночитаемые форматы,
+                    // и выбор файла сразу сужаем — иначе человек узнает об отказе после загрузки.
+                    'autoaudit' => (bool) ($service?->reference_id),
                     'documents'        => $this->docs($l),
                     'force_closed'        => (bool) $l->force_closed,
                     'force_close_comment' => $l->force_close_comment,
@@ -791,6 +823,9 @@ class BuhTasksController extends Controller
                         'quantity'         => (int) ($item?->quantity ?? 0),
                         'actual_quantity'  => $l->actual_quantity,
                         'requires_document' => (bool) ($service?->requires_document),
+                        // Эталонный БП: к его задачам принимаем только машиночитаемые форматы,
+                        // и выбор файла сразу сужаем — иначе человек узнает об отказе после загрузки.
+                        'autoaudit' => (bool) ($service?->reference_id),
                         'documents'        => $this->docs($l),
                         'force_closed'        => (bool) $l->force_closed,
                         'force_close_comment' => $l->force_close_comment,
@@ -1215,7 +1250,7 @@ class BuhTasksController extends Controller
         $this->authorizeLog($log);
 
         $request->validate([
-            'file' => $this->documentFileRules(),
+            'file' => $this->documentFileRules(service: $log->estimateItem?->service),
         ], [
             'file.required' => 'Выберите файл',
             'file.file'     => 'Не удалось прочитать файл — возможно, он превышает лимит сервера',

@@ -1678,9 +1678,16 @@
                             <label class="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-600 text-xs font-medium rounded-lg hover:bg-slate-200 cursor-pointer transition-colors"
                                    :class="tasks[taskModalIdx].doc_uploading ? 'opacity-50 pointer-events-none' : ''">
                                 <span x-text="(tasks[taskModalIdx].documents || []).length ? 'Прикрепить ещё' : 'Выбрать файлы'"></span>
-                                <input type="file" multiple class="hidden" @change="selectRootDocument(taskModalIdx, $event)">
+                                {{-- БП в автопроверке: сужаем выбор в проводнике, чтобы человек не узнавал
+                                     об отказе уже после загрузки. Сервер проверяет то же самое. --}}
+                                <input type="file" multiple class="hidden"
+                                       :accept="tasks[taskModalIdx].autoaudit ? '.pdf,.xls,.xlsx' : null"
+                                       @change="selectRootDocument(taskModalIdx, $event)">
                             </label>
                         </div>
+                        <p x-show="tasks[taskModalIdx].autoaudit" class="mt-1 text-xs text-slate-400">
+                            Этот бизнес-процесс участвует в автопроверке: отчёт в PDF или выгрузка в Excel.
+                        </p>
                     </div>
                 </template>
 

@@ -78,12 +78,13 @@ class TaskMultiDocumentTest extends TestCase
         ]);
     }
 
-    private function makeLog(bool $requiresDocument = true, string $status = 'pending'): BuhTaskLog
+    private function makeLog(bool $requiresDocument = true, string $status = 'pending', ?int $referenceId = null): BuhTaskLog
     {
         $service = Service::create([
             'name' => 'Тест услуга ' . uniqid(), 'periodicity' => 'Ежемесячно',
             'start_day' => [5], 'is_active' => true,
             'requires_document' => $requiresDocument,
+            'reference_id' => $referenceId,
         ]);
         $estimate = Estimate::firstOrCreate(['client_id' => $this->client->id], ['total' => 0]);
         $item = $estimate->items()->create([
@@ -287,5 +288,38 @@ class TaskMultiDocumentTest extends TestCase
             ->postJson(route('buhtasks.adhoc.document-delete', [$task, $docId]))
             ->assertOk()
             ->assertJsonPath('log.documents', []);
+    }
+
+    /**
+     * К задаче эталонного БП принимаем только машиночитаемые форматы.
+     *
+     * Фотография или снимок экрана закрыли бы задачу документом, который автопроверка
+     * прочитать не сможет: она молча ответит «не разобрали», и никто об этом не узнает.
+     * Лучше отказать сразу и объяснить.
+     */
+    public function test_autoaudit_service_accepts_only_pdf_and_excel(): void
+    {
+        $log = $this->makeLog(referenceId: 901);
+
+        foreach (['отчёт.pdf', 'осв.xls', 'осв.xlsx'] as $good) {
+            $this->upload($log, $good)->assertOk();
+        }
+
+        foreach (['фото.jpg', 'скан.png', 'акт.docx', 'заметки.txt'] as $bad) {
+            $this->upload($log, $bad)
+                ->assertStatus(422)
+                ->assertJsonValidationErrors('file');
+        }
+
+        $this->assertSame(3, $log->documents()->count());
+    }
+
+    /** У обычного БП ограничений нет: там документ читает человек. */
+    public function test_plain_service_still_accepts_photos(): void
+    {
+        $log = $this->makeLog();
+
+        $this->upload($log, 'фото.jpg')->assertOk();
+        $this->assertSame(1, $log->documents()->count());
     }
 }

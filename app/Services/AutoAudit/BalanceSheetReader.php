@@ -13,6 +13,12 @@ use Throwable;
  * одному файлу всегда дают одно и то же число. Отдавать таблицу модели незачем — она
  * уже разложена по строкам и колонкам.
  *
+ * Форматов два. Половина бухгалтеров прикладывает выгрузку в Excel, половина — печать
+ * в PDF, и запрещать второе значило бы менять людям привычки ради удобства проверки.
+ * Разбор при этом общий: PDF сводится к той же таблице, потому что 1С печатает шапку
+ * текстом, а положение слов «Дебет» и «Кредит» в ней и задаёт границы колонок. Дальше
+ * работает одна и та же логика, и ловушки ниже одинаково важны для обоих форматов.
+ *
  * Три вещи, на которых легко ошибиться, и как они здесь решены:
  *
  * 1. Под каждым счётом идут подстроки по валютам (RUB, USD, сом), а под ними — строка
@@ -35,8 +41,16 @@ use Throwable;
  */
 class BalanceSheetReader
 {
+    public function __construct(private readonly PdfTextLayer $pdf) {}
+
     /** Сколько первых строк просматриваем в поисках заголовка и шапки. */
     private const HEADER_SCAN_ROWS = 12;
+
+    /** Разброс высоты, внутри которого слова PDF считаются одной строкой. */
+    private const LINE_TOLERANCE = 3.0;
+
+    /** На сколько строк ниже верхнего уровня шапки может стоять нижний. */
+    private const HEADER_LEVEL_GAP = 4;
 
     /**
      * Корни названий месяцев для поиска в заголовке ведомости.
@@ -60,11 +74,11 @@ class BalanceSheetReader
     public function turnover(string $path, string $account, string $side = 'credit'): DocumentValue
     {
         try {
-            $reader = IOFactory::createReaderForFile($path);
-            $reader->setReadDataOnly(false);
-            $rows = $reader->load($path)->getActiveSheet()->toArray(null, true, false, false);
+            $rows = strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'pdf'
+                ? $this->rowsFromPdf($path)
+                : $this->rowsFromSpreadsheet($path);
         } catch (Throwable $e) {
-            return DocumentValue::unreadable('Файл не открылся как таблица: ' . $e->getMessage());
+            return DocumentValue::unreadable('Файл не открылся как ведомость: ' . $e->getMessage());
         }
 
         $head = $this->header($rows);
@@ -103,6 +117,125 @@ class BalanceSheetReader
             'ячейка'  => $this->columnLetter($column) . ($row + 1),
             'сырое'   => (string) $raw,
         ], $period);
+    }
+
+    /** Лист Excel как есть: строки и колонки уже разложены за нас. */
+    private function rowsFromSpreadsheet(string $path): array
+    {
+        $reader = IOFactory::createReaderForFile($path);
+        $reader->setReadDataOnly(false);
+
+        return $reader->load($path)->getActiveSheet()->toArray(null, true, false, false);
+    }
+
+    /**
+     * Печать ведомости в PDF, сведённая к такой же таблице, как из Excel.
+     *
+     * Колонки не выдумываем: их границы задаёт нижний уровень шапки. Строка с «БУ»,
+     * «Дебет» и «Кредит» стоит ровно над своими колонками, и её слова дают начало каждой.
+     * Всё, что левее «БУ», — это первая колонка с номером счёта.
+     *
+     * Числа в ведомости прижаты вправо, поэтому начало числа всегда правее начала своей
+     * колонки, и попадание однозначно. Дальше таблица уходит в общую логику, и разбираться,
+     * из какого формата она пришла, никому не нужно.
+     */
+    private function rowsFromPdf(string $path): array
+    {
+        $lines = $this->groupByLine($this->pdf->words($path));
+        $starts = $this->columnStarts($lines);
+
+        if (!$starts) {
+            // Пустой список — дальше проверка формы скажет «это не ведомость», и это честно:
+            // без шапки мы не знаем, где чьи колонки, а гадать тут нельзя.
+            return [];
+        }
+
+        $table = [];
+
+        foreach ($lines as $cells) {
+            $row = array_fill(0, count($starts) + 1, null);
+
+            foreach ($cells as [$left, $text]) {
+                $row[$this->columnAt($left, $starts)] = $text;
+            }
+
+            $table[] = $row;
+        }
+
+        return $table;
+    }
+
+    /**
+     * Начала колонок 1..N по нижнему уровню шапки.
+     *
+     * Опознаём её по «Дебету» и «Кредиту»: в ведомости они встречаются трижды, парами под
+     * сальдо на начало, оборотами и сальдо на конец. Меньше четырёх — значит перед нами
+     * не шапка ведомости.
+     *
+     * @return float[] пусто, если шапку не нашли
+     */
+    private function columnStarts(array $lines): array
+    {
+        foreach ($lines as $cells) {
+            $sides = array_filter(
+                $cells,
+                fn ($c) => in_array(mb_strtolower(trim($c[1])), ['дебет', 'кредит'], true),
+            );
+
+            if (count($sides) >= 4) {
+                return array_column($cells, 0);
+            }
+        }
+
+        return [];
+    }
+
+    /** В какую колонку попадает слово: 0 — всё, что левее первой; дальше по её началу. */
+    private function columnAt(float $left, array $starts): int
+    {
+        $index = 0;
+
+        foreach ($starts as $i => $start) {
+            // Полторы точки допуска: у «БУ» подстроки строка сдвинута на волосок.
+            if ($left >= $start - 1.5) {
+                $index = $i + 1;
+            }
+        }
+
+        return $index;
+    }
+
+    /**
+     * Слова, собранные в строки по высоте.
+     *
+     * @param PdfWord[] $words
+     * @return array<int, array<int, array{0: float, 1: string}>>
+     */
+    private function groupByLine(array $words): array
+    {
+        $lines = [];
+
+        foreach ($words as $word) {
+            $key = null;
+
+            foreach (array_keys($lines) as $existing) {
+                if (abs($existing - $word->top) <= self::LINE_TOLERANCE) {
+                    $key = $existing;
+
+                    break;
+                }
+            }
+
+            $lines[$key ?? (string) $word->top][] = [$word->left, $word->text];
+        }
+
+        uksort($lines, fn ($a, $b) => (float) $a <=> (float) $b);
+
+        foreach ($lines as &$cells) {
+            usort($cells, fn ($a, $b) => $a[0] <=> $b[0]);
+        }
+
+        return array_values($lines);
     }
 
     /** Верхние строки листа одной строкой: там лежат название фирмы, форма и период. */
@@ -169,11 +302,13 @@ class BalanceSheetReader
                     continue;
                 }
 
-                // Нижний уровень шапки — следующая строка под тем же столбцом.
-                $below = mb_strtolower(trim((string) ($rows[$r + 1][$c] ?? '')));
-
-                if ($below === $needle) {
-                    return $c;
+                // Нижний уровень шапки ищем на нескольких строках ниже, а не строго на
+                // следующей: при печати в PDF слово «Показатели» переносится, и между
+                // уровнями шапки оказываются строки-обрывки вроде «-» и «тели».
+                for ($below = $r + 1; $below <= $r + self::HEADER_LEVEL_GAP; $below++) {
+                    if (mb_strtolower(trim((string) ($rows[$below][$c] ?? ''))) === $needle) {
+                        return $c;
+                    }
                 }
             }
         }
