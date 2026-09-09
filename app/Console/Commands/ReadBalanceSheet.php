@@ -82,8 +82,6 @@ class ReadBalanceSheet extends Command
                 Storage::disk('local')->path($document->path),
                 (string) $this->option('account'),
                 (string) $this->option('side'),
-                $year,
-                $month,
             );
 
             $this->report($result);

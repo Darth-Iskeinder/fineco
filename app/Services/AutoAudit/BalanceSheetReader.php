@@ -2,6 +2,7 @@
 
 namespace App\Services\AutoAudit;
 
+use Carbon\CarbonImmutable;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use Throwable;
 
@@ -27,8 +28,10 @@ use Throwable;
  *    ячейке диапазона, остальные пустые. Поэтому верхний заголовок «растягиваем»
  *    вправо до следующего непустого.
  *
- * Прежде чем что-то считать, убеждаемся, что это вообще ОСВ и за нужный месяц: заголовок
- * файла несёт и то, и другое. Не сошлось — отвечаем «документ не тот», а не числом.
+ * Прежде чем что-то считать, убеждаемся, что это вообще ОСВ, и вытаскиваем из заголовка
+ * период. Период именно читаем, а не сверяем с месяцем задачи: месяц задачи — это когда
+ * работу делали, а не за какой период отчитались. Сверять периоды двух документов между
+ * собой будет уже сама проверка.
  */
 class BalanceSheetReader
 {
@@ -36,36 +39,25 @@ class BalanceSheetReader
     private const HEADER_SCAN_ROWS = 12;
 
     /**
-     * Месяцы: корень для поиска в заголовке и полное имя для сообщения человеку.
+     * Корни названий месяцев для поиска в заголовке ведомости.
      *
-     * Ищем по корню, потому что 1С пишет то «за Июль 2026 г.», то «Июля». Май — «ма»,
-     * общий кусок «Май» и «Мая», а больше в списке ни одного месяца на «ма» нет.
+     * Корни, а не полные слова, потому что 1С пишет то «за Июль 2026 г.», то «за Июля».
+     * Май задан как «ма[йя]»: голое «ма» поймало бы и март.
      */
     private const MONTHS = [
-        1  => ['январ',   'январь'],
-        2  => ['феврал',  'февраль'],
-        3  => ['март',    'март'],
-        4  => ['апрел',   'апрель'],
-        5  => ['ма',      'май'],
-        6  => ['июн',     'июнь'],
-        7  => ['июл',     'июль'],
-        8  => ['август',  'август'],
-        9  => ['сентябр', 'сентябрь'],
-        10 => ['октябр',  'октябрь'],
-        11 => ['ноябр',   'ноябрь'],
-        12 => ['декабр',  'декабрь'],
+        1 => 'январ',  2 => 'феврал', 3  => 'март',    4  => 'апрел',
+        5 => 'ма[йя]', 6 => 'июн',    7  => 'июл',     8  => 'август',
+        9 => 'сентябр', 10 => 'октябр', 11 => 'ноябр', 12 => 'декабр',
     ];
 
     /**
-     * Оборот по счёту за период.
+     * Оборот по счёту за период ведомости.
      *
      * @param string $path    путь к файлу на диске
      * @param string $account номер счёта, например «3210»
      * @param string $side    'credit' или 'debit'
-     * @param int    $year    год периода задачи
-     * @param int    $month   месяц периода задачи
      */
-    public function turnover(string $path, string $account, string $side, int $year, int $month): DocumentValue
+    public function turnover(string $path, string $account, string $side = 'credit'): DocumentValue
     {
         try {
             $reader = IOFactory::createReaderForFile($path);
@@ -75,8 +67,16 @@ class BalanceSheetReader
             return DocumentValue::unreadable('Файл не открылся как таблица: ' . $e->getMessage());
         }
 
-        if ($wrong = $this->rejectIfNotBalanceSheet($rows, $year, $month)) {
-            return $wrong;
+        $head = $this->header($rows);
+
+        if (!str_contains($head, 'оборотно-сальдовая ведомость')) {
+            return DocumentValue::wrongDocument('Это не оборотно-сальдовая ведомость');
+        }
+
+        $period = $this->period($head);
+
+        if (!$period) {
+            return DocumentValue::wrongDocument('В заголовке ведомости не разобрали период');
         }
 
         $column = $this->findTurnoverColumn($rows, $side);
@@ -96,41 +96,50 @@ class BalanceSheetReader
         $raw = $rows[$row][$column] ?? null;
 
         return DocumentValue::found($this->toNumber($raw), [
+            'период'  => $period->label(),
             'счёт'    => $account,
             'колонка' => 'Обороты за период / ' . $this->sideLabel($side),
             'строка'  => $row + 1,
             'ячейка'  => $this->columnLetter($column) . ($row + 1),
             'сырое'   => (string) $raw,
-        ]);
+        ], $period);
     }
 
-    /**
-     * Это точно ОСВ и точно за нужный месяц?
-     *
-     * Главная защита от подмены. Прикрепили не тот файл или файл за соседний месяц —
-     * узнаём здесь, а не выдаём уверенное число по чужому документу.
-     */
-    private function rejectIfNotBalanceSheet(array $rows, int $year, int $month): ?DocumentValue
+    /** Верхние строки листа одной строкой: там лежат название фирмы, форма и период. */
+    private function header(array $rows): string
     {
         $head = '';
+
         foreach (array_slice($rows, 0, self::HEADER_SCAN_ROWS) as $row) {
             $head .= ' ' . implode(' ', array_map(fn ($c) => (string) $c, $row));
         }
-        $head = mb_strtolower($head);
 
-        if (!str_contains($head, 'оборотно-сальдовая ведомость')) {
-            return DocumentValue::wrongDocument('Это не оборотно-сальдовая ведомость');
+        return mb_strtolower($head);
+    }
+
+    /**
+     * Период ведомости из её заголовка.
+     *
+     * 1С пишет его двумя способами: словами («за Июль 2026 г.») и датами
+     * («за 01.07.2026 - 31.07.2026»). Понимаем оба, и не понимаем — так и говорим:
+     * догадка о периоде хуже отказа, потому что дальше по нему подбирают пару.
+     */
+    private function period(string $head): ?DocumentPeriod
+    {
+        foreach (self::MONTHS as $number => $stem) {
+            // «за Июль 2026», «за Июля 2026 г.» — год обязателен, иначе это не период.
+            if (preg_match('/за\s+' . $stem . '[а-яё]*\s+(\d{4})/u', $head, $m)) {
+                return DocumentPeriod::of((int) $m[1], $number);
+            }
         }
 
-        // Год ищем как отдельное число: «2026» внутри «12026» — не год.
-        if (!preg_match('/(?<!\d)' . $year . '(?!\d)/u', $head)) {
-            return DocumentValue::wrongDocument("В заголовке ведомости нет {$year} года");
-        }
+        if (preg_match('/(\d{2})\.(\d{2})\.(\d{4})\s*[-–—]\s*(\d{2})\.(\d{2})\.(\d{4})/u', $head, $m)) {
+            $from = CarbonImmutable::createFromFormat('!d.m.Y', "{$m[1]}.{$m[2]}.{$m[3]}");
+            $to   = CarbonImmutable::createFromFormat('!d.m.Y', "{$m[4]}.{$m[5]}.{$m[6]}");
 
-        [$stem, $name] = self::MONTHS[$month];
-
-        if (!str_contains($head, $stem)) {
-            return DocumentValue::wrongDocument("Ведомость не за {$name} {$year}");
+            if ($from && $to && $from->lessThanOrEqualTo($to)) {
+                return new DocumentPeriod($from, $to);
+            }
         }
 
         return null;

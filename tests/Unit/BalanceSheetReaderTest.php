@@ -108,7 +108,7 @@ class BalanceSheetReaderTest extends TestCase
 
     public function test_reads_credit_turnover_of_the_account(): void
     {
-        $result = $this->reader()->turnover($this->file, '3210', 'credit', 2026, 7);
+        $result = $this->reader()->turnover($this->file, '3210', 'credit');
 
         $this->assertTrue($result->isFound(), $result->reason ?? '');
         $this->assertSame(87513.60, $result->value);
@@ -117,7 +117,7 @@ class BalanceSheetReaderTest extends TestCase
     /** Дебет и кредит стоят рядом: перепутать их — получить правдоподобное, но чужое число. */
     public function test_reads_debit_turnover_of_the_account(): void
     {
-        $result = $this->reader()->turnover($this->file, '3210', 'debit', 2026, 7);
+        $result = $this->reader()->turnover($this->file, '3210', 'debit');
 
         $this->assertSame(419652.47, $result->value);
     }
@@ -130,7 +130,7 @@ class BalanceSheetReaderTest extends TestCase
      */
     public function test_does_not_take_opening_or_closing_balance(): void
     {
-        $value = $this->reader()->turnover($this->file, '3210', 'credit', 2026, 7)->value;
+        $value = $this->reader()->turnover($this->file, '3210', 'credit')->value;
 
         $this->assertNotSame(1676987.22, $value, 'взяли сальдо на начало');
         $this->assertNotSame(1344848.35, $value, 'взяли сальдо на конец');
@@ -139,7 +139,7 @@ class BalanceSheetReaderTest extends TestCase
     /** Вторая ловушка: под счётом идут его валютные подстроки, суммы там другие. */
     public function test_does_not_take_currency_sub_rows(): void
     {
-        $value = $this->reader()->turnover($this->file, '3210', 'credit', 2026, 7)->value;
+        $value = $this->reader()->turnover($this->file, '3210', 'credit')->value;
 
         $this->assertNotSame(55555.55, $value, 'взяли подстроку RUB');
         $this->assertNotSame(76800.0, $value, 'взяли строку «Вал.» — это сумма в валюте, а не в сомах');
@@ -148,7 +148,7 @@ class BalanceSheetReaderTest extends TestCase
     /** Пустая ячейка в ОСВ означает ноль: нулевые обороты 1С не печатает. */
     public function test_empty_cell_is_zero(): void
     {
-        $result = $this->reader()->turnover($this->file, '3420', 'credit', 2026, 7);
+        $result = $this->reader()->turnover($this->file, '3420', 'credit');
 
         $this->assertTrue($result->isFound());
         $this->assertSame(0.0, $result->value);
@@ -157,25 +157,74 @@ class BalanceSheetReaderTest extends TestCase
     /** Счёта нет — это не ошибка сверки: у клиента может просто не быть таких операций. */
     public function test_missing_account_is_not_found(): void
     {
-        $result = $this->reader()->turnover($this->file, '9999', 'credit', 2026, 7);
+        $result = $this->reader()->turnover($this->file, '9999', 'credit');
 
         $this->assertSame(DocumentValue::NOT_FOUND, $result->status);
     }
 
-    /** Прикрепили файл за соседний месяц — считать по нему нельзя. */
-    public function test_wrong_period_is_rejected(): void
+    /**
+     * Период читаем из самой ведомости, а не сверяем с месяцем задачи.
+     *
+     * Месяц задачи — это когда работу делали, а не за какой период отчитались: на боевом
+     * сервере июльская ведомость висит на августовской задаче. Сверять периоды двух
+     * документов между собой будет сама проверка.
+     */
+    public function test_reads_period_from_the_header(): void
     {
-        $result = $this->reader()->turnover($this->file, '3210', 'credit', 2026, 6);
+        $result = $this->reader()->turnover($this->file, '3210', 'credit');
 
-        $this->assertSame(DocumentValue::WRONG_DOC, $result->status);
-        $this->assertStringContainsString('июнь', $result->reason);
+        $this->assertSame('01.07.2026 – 31.07.2026', $result->period->label());
     }
 
-    public function test_wrong_year_is_rejected(): void
+    /** 1С пишет месяц то в именительном, то в родительном падеже. */
+    public function test_reads_period_written_in_genitive(): void
     {
-        $result = $this->reader()->turnover($this->file, '3210', 'credit', 2025, 7);
+        $other = $this->writeBalanceSheet('Оборотно-сальдовая ведомость за Июля 2026 г.');
 
+        $result = $this->reader()->turnover($other, '3210', 'credit');
+
+        @unlink($other);
+        $this->assertSame('01.07.2026 – 31.07.2026', $result->period->label());
+    }
+
+    /** Второй вид заголовка: период не словами, а датами. */
+    public function test_reads_period_written_as_dates(): void
+    {
+        $other = $this->writeBalanceSheet('Оборотно-сальдовая ведомость за 01.04.2026 - 30.06.2026');
+
+        $result = $this->reader()->turnover($other, '3210', 'credit');
+
+        @unlink($other);
+        $this->assertSame('01.04.2026 – 30.06.2026', $result->period->label());
+        $this->assertCount(3, $result->period->months());
+    }
+
+    /** Май не должен путаться с мартом: у них общее начало. */
+    public function test_may_is_not_confused_with_march(): void
+    {
+        $other = $this->writeBalanceSheet('Оборотно-сальдовая ведомость за Май 2026 г.');
+
+        $result = $this->reader()->turnover($other, '3210', 'credit');
+
+        @unlink($other);
+        $this->assertSame('01.05.2026 – 31.05.2026', $result->period->label());
+    }
+
+    /**
+     * Период не разобрали — отказываемся.
+     *
+     * Догадка тут хуже отказа: по периоду дальше подбирают вторую половину пары, и
+     * ошибка увела бы сверку на документы за другой месяц.
+     */
+    public function test_rejects_balance_sheet_without_a_period(): void
+    {
+        $other = $this->writeBalanceSheet('Оборотно-сальдовая ведомость');
+
+        $result = $this->reader()->turnover($other, '3210', 'credit');
+
+        @unlink($other);
         $this->assertSame(DocumentValue::WRONG_DOC, $result->status);
+        $this->assertStringContainsString('период', $result->reason);
     }
 
     /**
@@ -188,7 +237,7 @@ class BalanceSheetReaderTest extends TestCase
     {
         $other = $this->writeBalanceSheet('Реестр электронных счетов-фактур за Июль 2026 г.');
 
-        $result = $this->reader()->turnover($other, '3210', 'credit', 2026, 7);
+        $result = $this->reader()->turnover($other, '3210', 'credit');
 
         @unlink($other);
         $this->assertSame(DocumentValue::WRONG_DOC, $result->status);
@@ -206,7 +255,7 @@ class BalanceSheetReaderTest extends TestCase
         $path = tempnam(sys_get_temp_dir(), 'notxls');
         file_put_contents($path, "просто текст\nвторая строка");
 
-        $result = $this->reader()->turnover($path, '3210', 'credit', 2026, 7);
+        $result = $this->reader()->turnover($path, '3210', 'credit');
 
         @unlink($path);
         $this->assertSame(DocumentValue::WRONG_DOC, $result->status);
@@ -218,7 +267,7 @@ class BalanceSheetReaderTest extends TestCase
         $path = tempnam(sys_get_temp_dir(), 'notxls') . '.pdf';
         file_put_contents($path, "%PDF-1.7\n%\xE2\xE3\xCF\xD3\nбинарь");
 
-        $result = $this->reader()->turnover($path, '3210', 'credit', 2026, 7);
+        $result = $this->reader()->turnover($path, '3210', 'credit');
 
         @unlink($path);
         $this->assertSame(DocumentValue::UNREADABLE, $result->status);
@@ -227,7 +276,7 @@ class BalanceSheetReaderTest extends TestCase
     /** След нужен, чтобы человек открыл файл и увидел ту же ячейку. */
     public function test_trace_points_at_the_cell(): void
     {
-        $result = $this->reader()->turnover($this->file, '3210', 'credit', 2026, 7);
+        $result = $this->reader()->turnover($this->file, '3210', 'credit');
 
         $this->assertSame('F7', $result->trace['ячейка']);
         $this->assertSame('Обороты за период / Кредит', $result->trace['колонка']);
