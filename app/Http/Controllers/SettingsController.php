@@ -17,6 +17,7 @@ use App\Models\TaxAuthority;
 use App\Models\Service;
 use App\Models\Tariff;
 use App\Models\TaxSystem;
+use App\Support\Impersonation;
 use App\Support\TenantContext;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -134,6 +135,10 @@ class SettingsController extends Controller
             'groups' => ServiceGroup::orderBy('name')->pluck('name')->values(),
             'billings' => Billing::orderBy('id')->get(['name', 'code']),
             'rates' => Rate::orderBy('name')->get(['id', 'name', 'unit', 'price']),
+            // Эталонный номер БП проставляет только вендор, зайдя в фирму. Своему
+            // администратору поле не показываем: правила авто-аудита ссылаются на
+            // номер, и правка его изнутри фирмы сломала бы сверку молча.
+            'canEditReference' => Impersonation::isActive(),
         ]);
     }
 
@@ -491,6 +496,7 @@ class SettingsController extends Controller
             'closing_rule'                  => 'nullable|string|max:255',
             'requires_document'             => 'boolean',
             'check_type'                    => 'nullable|string|max:255',
+            'reference_id'                  => $this->referenceIdRules(),
             'requires_review'               => 'boolean',
             'billing'                       => 'nullable|string|max:255',
             'rate_id'                       => 'nullable|exists:rates,id',
@@ -534,7 +540,7 @@ class SettingsController extends Controller
             'allows_quantity'    => $request->boolean('allows_quantity', false),
             'splits_by_branch'   => $request->boolean('splits_by_branch', false),
             'sort_order'         => $request->input('sort_order', $minSortOrder - 1),
-        ], $this->serviceFlagValues($request)));
+        ], $this->serviceFlagValues($request), $this->referenceIdValue($request)));
 
         $service->taxSystems()->sync($request->input('tax_systems', []));
 
@@ -555,6 +561,10 @@ class SettingsController extends Controller
 
     public function updateService(Request $request, Service $service)
     {
+        if ($locked = $this->referenceLock($service)) {
+            return $locked;
+        }
+
         $request->validate([
             'name'                          => 'required|string|max:255',
             'tax_systems'                   => 'nullable|array',
@@ -576,6 +586,7 @@ class SettingsController extends Controller
             'closing_rule'                  => 'nullable|string|max:255',
             'requires_document'             => 'boolean',
             'check_type'                    => 'nullable|string|max:255',
+            'reference_id'                  => $this->referenceIdRules($service),
             'requires_review'               => 'boolean',
             'billing'                       => 'nullable|string|max:255',
             'rate_id'                       => 'nullable|exists:rates,id',
@@ -622,7 +633,7 @@ class SettingsController extends Controller
             'allows_quantity'    => $allowsQty,
             'splits_by_branch'   => $request->boolean('splits_by_branch', false),
             'sort_order'         => $request->input('sort_order', $service->sort_order),
-        ], $this->serviceFlagValues($request),
+        ], $this->serviceFlagValues($request), $this->referenceIdValue($request),
             // Подпункт своей карточки не имеет, но запрос по нему прийти может: тогда
             // всё, кроме названия и стоимости, всё равно берём по правилам подпункта.
             $parent ? $this->childAttributes($parent, [
@@ -670,6 +681,10 @@ class SettingsController extends Controller
      */
     public function destroyService(Service $service)
     {
+        if ($locked = $this->referenceLock($service)) {
+            return $locked;
+        }
+
         if ($this->serviceIsInUse($service)) {
             return response()->json([
                 'success' => false,
@@ -716,6 +731,10 @@ class SettingsController extends Controller
      */
     public function archiveService(Service $service)
     {
+        if ($locked = $this->referenceLock($service)) {
+            return $locked;
+        }
+
         $service->update([
             'is_active'   => false,
             'archived_at' => now()->endOfMonth()->toDateString(),
@@ -740,6 +759,10 @@ class SettingsController extends Controller
      */
     public function restoreService(Service $service)
     {
+        if ($locked = $this->referenceLock($service)) {
+            return $locked;
+        }
+
         $service->update([
             'is_active'   => true,
             'archived_at' => null,
@@ -770,6 +793,65 @@ class SettingsController extends Controller
      * не «удалить», а «заархивировать» — иначе человек жмёт удаление, получает
      * отказ и видит окно, которое будто не сработало.
      */
+    /**
+     * Правила для эталонного номера БП.
+     *
+     * Номер уникален внутри фирмы: два БП с одним номером сделали бы выбор
+     * документа для сверки неоднозначным. Проверяем явно по tenant_id — Rule::unique
+     * ходит в базу мимо Eloquent, и глобальный фильтр по фирме до него не доходит.
+     */
+    private function referenceIdRules(?Service $service = null): array
+    {
+        if (!Impersonation::isActive()) {
+            return ['nullable'];
+        }
+
+        $unique = Rule::unique('services', 'reference_id')
+            ->where('tenant_id', TenantContext::id());
+
+        if ($service) {
+            $unique->ignore($service->id);
+        }
+
+        return ['nullable', 'integer', 'min:1', 'max:999', $unique];
+    }
+
+    /**
+     * Значение эталонного номера для записи — пустой массив, если правит не вендор.
+     *
+     * Пустой массив, а не null: администратор фирмы поля не видит, и запрос без него
+     * не должен снимать уже проставленный номер.
+     */
+    private function referenceIdValue(Request $request): array
+    {
+        if (!Impersonation::isActive()) {
+            return [];
+        }
+
+        return ['reference_id' => $request->filled('reference_id') ? (int) $request->input('reference_id') : null];
+    }
+
+    /**
+     * Отказ, если БП участвует в автоаудите, а правит его фирма.
+     *
+     * Промежуточный вариант: помеченный БП фирма не трогает вовсе. Правила сверки
+     * ссылаются на него номером, и любая правка изнутри фирмы может тихо развернуть
+     * проверку на другой документ. Со временем замок ослабим, когда сверка научится
+     * узнавать документ по его собственному содержимому.
+     */
+    private function referenceLock(Service $service): ?\Illuminate\Http\JsonResponse
+    {
+        if (!$service->reference_id || Impersonation::isActive()) {
+            return null;
+        }
+
+        return response()->json([
+            'success' => false,
+            'message' => 'Бизнес-процесс участвует в автоаудите, менять его нельзя. '
+                . 'Если изменения всё же нужны, обратитесь в техподдержку.',
+        ], 422);
+    }
+
     public function serviceUsage(Service $service)
     {
         $ids = $service->children()->pluck('id')->push($service->id);
@@ -858,6 +940,7 @@ class SettingsController extends Controller
             'closing_rule'      => $service->closing_rule,
             'requires_document' => $service->requires_document,
             'check_type'        => $service->check_type,
+            'reference_id'      => $service->reference_id,
             'requires_review'   => $service->requires_review,
             'billing'           => $service->billing,
             'comment'           => $service->comment,

@@ -32,6 +32,7 @@ $servicesJson = $services->map(fn($s) => array_merge([
     'closing_rule'      => $s->closing_rule,
     'requires_document' => $s->requires_document,
     'check_type'        => $s->check_type,
+    'reference_id'      => $s->reference_id,
     'requires_review'   => $s->requires_review,
     'billing'           => $s->billing,
     'comment'           => $s->comment,
@@ -152,7 +153,7 @@ $servicesJson = $services->map(fn($s) => array_merge([
 
                         <tr x-show="row.type === 'service'"
                             @click="selectedRowId = (selectedRowId === 's' + row.svc.id ? null : 's' + row.svc.id)"
-                            @dblclick="openServiceModal(row.svc)"
+                            @dblclick="(!row.svc.reference_id || canEditReference) && openServiceModal(row.svc)"
                             :class="selectedRowId === 's' + row.svc.id ? 'bg-indigo-50/70 ring-1 ring-inset ring-indigo-200' : 'hover:bg-slate-50'"
                             class="group cursor-pointer select-none">
                             {{-- Закреплённая колонка: фон обязателен и должен быть непрозрачным,
@@ -186,6 +187,13 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                     <div class="flex flex-wrap items-center gap-1 mt-1 pl-4 font-normal" x-show="hasBadges(row.svc)">
                                         {{-- Архивный БП остаётся в списке: он часть истории, по нему
                                              доделывают незакрытое. Отличаем пометкой, а не пряча. --}}
+                                        {{-- Эталонный БП: на него ссылаются правила авто-аудита. Метка нужна,
+                                             чтобы никто не переделывал такой БП, не зная, что на нём завязана сверка. --}}
+                                        <span x-show="row.svc.reference_id" class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-teal-100 text-teal-700"
+                                              title="Бизнес-процесс участвует в автоматической проверке, поэтому правится только поставщиком системы.">
+                                            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                                            <span x-text="canEditReference ? 'Автоаудит № ' + row.svc.reference_id : 'Автоаудит'"></span>
+                                        </span>
                                         <span x-show="row.svc.archived_at" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-slate-200 text-slate-600">архивный</span>
                                         <span x-show="row.svc.active_from" class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700"
                                               :title="'Задачи по нему пойдут с ' + formatDate(row.svc.active_from)"
@@ -251,6 +259,11 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                 <div class="flex items-center justify-end gap-1">
                                     {{-- Архивный не редактируем: расписание читается живьём, и правка
                                          задним числом сдвинула бы уже посчитанные задачи. --}}
+                                    {{-- БП в автоаудите фирма не правит: сверка ссылается на него, и правка
+                                         изнутри фирмы тихо развернула бы проверку на другой документ.
+                                         Поставщику, зашедшему в аккаунт, кнопки видны. --}}
+                                    <template x-if="!row.svc.reference_id || canEditReference">
+                                    <div class="flex items-center gap-1">
                                     <button x-show="!row.svc.archived_at" @click="openServiceModal(row.svc)" class="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Редактировать">
                                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                                     </button>
@@ -263,6 +276,11 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                     <button @click="openDeleteModal(row.svc)" class="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Удалить">
                                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                                     </button>
+                                    </div>
+                                    </template>
+                                    <span x-show="row.svc.reference_id && !canEditReference" class="p-1.5 text-slate-300" title="Правится только поставщиком системы">
+                                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                                    </span>
                                 </div>
                             </td>
                         </tr>
@@ -414,6 +432,19 @@ $servicesJson = $services->map(fn($s) => array_merge([
                                     </div>
                                     <p class="mt-1 text-xs text-slate-400" x-text="serviceForm.requires_document ? 'Для закрытия нужно прикрепить документ' : 'Можно закрыть без документа'"></p>
                                 </div>
+@if($canEditReference)
+                                {{-- Видно только поставщику системы, зашедшему в фирму: правила авто-аудита
+                                     ссылаются на этот номер, и правка его изнутри фирмы сломала бы сверку молча. --}}
+                                <div>
+                                    <label class="block text-sm font-medium text-slate-700 mb-1">
+                                        Эталонный номер
+                                        <span class="ml-1 text-xs font-normal text-teal-600">только поставщик</span>
+                                    </label>
+                                    <input type="number" x-model="serviceForm.reference_id" min="1" max="999" placeholder="не эталонный"
+                                           class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500">
+                                    <p class="mt-1 text-xs text-slate-400">Номер из справочника сопоставлений. Пусто — БП в автопроверке не участвует.</p>
+                                </div>
+@endif
                                 <div>
                                     <label class="block text-sm font-medium text-slate-700 mb-1">Проверка</label>
                                     <div class="flex items-center gap-2">
@@ -928,6 +959,7 @@ function servicesPage() {
             this.$watch('filterSearch', () => this.refreshMenuOptions());
         },
 
+        canEditReference: @json($canEditReference),
         services: @json($servicesJson),
         taxSystems: @json($taxSystems),
         specialFlags: @json($specialFlags),
@@ -1208,7 +1240,7 @@ function servicesPage() {
          */
         hasBadges(svc) {
             return Boolean(
-                svc.archived_at || svc.active_from || svc.service_type
+                svc.reference_id || svc.archived_at || svc.active_from || svc.service_type
                 || svc.allows_quantity || svc.splits_by_branch
                 || this.specialFlags.some(f => svc[f.key])
             );
@@ -1260,6 +1292,7 @@ function servicesPage() {
             periodicity: '', due_day: null, start_month: [], start_day: [], deadline_days: null, execution_minutes: null,
             triggers_on_event: false, event_child_service_id: null,
             closing_rule: '', requires_document: false, check_type: '', requires_review: false, billing: '', comment: '',
+            reference_id: '',
             allows_quantity: false, splits_by_branch: false, flags: {}, children: [],
         },
 
@@ -1298,6 +1331,12 @@ function servicesPage() {
                 return;
             }
 
+            // БП в автоаудите фирма не правит: сервер такую правку всё равно отобьёт,
+            // но открытая карточка обещала бы то, чего не будет.
+            if (svc?.reference_id && !this.canEditReference) {
+                return;
+            }
+
             // Архивный открывается только на чтение — правка расписания сдвинула бы
             // уже посчитанные задачи. Двойной клик по строке сюда тоже приходит.
             if (svc?.archived_at) {
@@ -1322,6 +1361,7 @@ function servicesPage() {
                     triggers_on_event: !!svc.triggers_on_event, event_child_service_id: svc.event_child_service_id ?? null,
                     closing_rule: svc.closing_rule || '', requires_document: !!svc.requires_document, check_type: svc.check_type || '', requires_review: !!svc.requires_review,
                     billing: svc.billing || '', comment: svc.comment || '',
+                    reference_id: svc.reference_id ?? '',
                     allows_quantity: svc.allows_quantity || false,
                     splits_by_branch: svc.splits_by_branch || false,
                     flags: this.flagsFromSvc(svc),
@@ -1335,6 +1375,7 @@ function servicesPage() {
                     periodicity: '', due_day: null, start_month: [], start_day: [], deadline_days: null, execution_minutes: null,
                     triggers_on_event: false, event_child_service_id: null,
                     closing_rule: '', requires_document: false, check_type: '', requires_review: false, billing: '', comment: '',
+                    reference_id: '',
                     allows_quantity: false, splits_by_branch: false, flags: this.blankFlags(), children: [],
                 };
             }
