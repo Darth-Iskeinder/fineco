@@ -1,0 +1,235 @@
+<?php
+
+namespace Tests\Unit;
+
+use App\Services\AutoAudit\BalanceSheetReader;
+use App\Services\AutoAudit\DocumentValue;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use PHPUnit\Framework\TestCase;
+
+/**
+ * Разбор оборотно-сальдовой ведомости.
+ *
+ * Ведомость собираем синтетическую, а не кладём боевую в репозиторий: в настоящей
+ * лежат обороты живого клиента. Зато повторяем в ней ровно те особенности выгрузки 1С,
+ * на которых разбор и спотыкается:
+ *
+ *   - двухуровневая шапка, где «Кредит» встречается трижды (сальдо на начало,
+ *     обороты, сальдо на конец);
+ *   - верхний уровень шапки в объединённых ячейках, то есть пустой во всех, кроме первой;
+ *   - под счётом идут валютные подстроки, а под ними строка «Вал.» с суммой в валюте.
+ *
+ * Числа взяты такими, чтобы промах было видно: у строки счёта, у подстроки RUB и у
+ * строки «Вал.» они разные.
+ */
+class BalanceSheetReaderTest extends TestCase
+{
+    private string $file;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->file = $this->writeBalanceSheet();
+    }
+
+    protected function tearDown(): void
+    {
+        @unlink($this->file);
+        parent::tearDown();
+    }
+
+    private function reader(): BalanceSheetReader
+    {
+        return new BalanceSheetReader();
+    }
+
+    /**
+     * Ведомость в том же виде, в каком её отдаёт 1С.
+     *
+     * @param string $title заголовок во второй строке — им подменяем форму и период
+     */
+    private function writeBalanceSheet(string $title = 'Оборотно-сальдовая ведомость за Июль 2026 г.'): string
+    {
+        $book  = new Spreadsheet();
+        $sheet = $book->getActiveSheet();
+
+        $sheet->setCellValue('A1', 'Общество с ограниченной ответственностью "Тест"');
+        $sheet->setCellValue('A2', $title);
+
+        // Шапка: верхний уровень объединён, нижний — по одной ячейке.
+        $sheet->setCellValue('A4', 'Счет, Наименование счета');
+        $sheet->setCellValue('B4', 'Показатели');
+        $sheet->setCellValue('C4', 'Сальдо на начало периода');
+        $sheet->setCellValue('E4', 'Обороты за период');
+        $sheet->setCellValue('H4', 'Сальдо на конец периода');
+        $sheet->mergeCells('C4:D4');
+        $sheet->mergeCells('E4:G4');
+        $sheet->mergeCells('H4:I4');
+
+        $sheet->setCellValue('B5', 'БУ');
+        $sheet->setCellValue('C5', 'Дебет');
+        $sheet->setCellValue('D5', 'Кредит');
+        $sheet->setCellValue('E5', 'Дебет');
+        $sheet->setCellValue('F5', 'Кредит');
+        $sheet->setCellValue('H5', 'Дебет');
+        $sheet->setCellValue('I5', 'Кредит');
+
+        // Соседний счёт — чтобы поиск не хватал первую попавшуюся строку.
+        $sheet->setCellValue('A6', '3110, Счета к оплате за товары и услуги');
+        $sheet->setCellValue('B6', 'БУ');
+        $sheet->setCellValue('F6', 111.11);
+
+        // Искомый счёт: его собственная строка.
+        $sheet->setCellValue('A7', '3210, Авансы покупателей и заказчиков');
+        $sheet->setCellValue('B7', 'БУ');
+        $sheet->setCellValue('D7', 1676987.22);   // сальдо на начало по кредиту — не оно
+        $sheet->setCellValue('E7', 419652.47);    // оборот по дебету
+        $sheet->setCellValue('F7', 87513.60);     // оборот по кредиту — вот он
+        $sheet->setCellValue('I7', 1344848.35);   // сальдо на конец по кредиту — не оно
+
+        // Валютная подстрока и «Вал.» под ней: обе не должны попасться.
+        $sheet->setCellValue('A8', 'RUB');
+        $sheet->setCellValue('B8', 'БУ');
+        $sheet->setCellValue('F8', 55555.55);
+        $sheet->setCellValue('B9', 'Вал.');
+        $sheet->setCellValue('F9', 76800);
+
+        // Счёт с нулевым оборотом: 1С печатает пустую ячейку, а не ноль.
+        $sheet->setCellValue('A10', '3420, Подоходный налог на доходы сотрудников');
+        $sheet->setCellValue('B10', 'БУ');
+
+        $path = tempnam(sys_get_temp_dir(), 'osv') . '.xlsx';
+        (new Xlsx($book))->save($path);
+        $book->disconnectWorksheets();
+
+        return $path;
+    }
+
+    public function test_reads_credit_turnover_of_the_account(): void
+    {
+        $result = $this->reader()->turnover($this->file, '3210', 'credit', 2026, 7);
+
+        $this->assertTrue($result->isFound(), $result->reason ?? '');
+        $this->assertSame(87513.60, $result->value);
+    }
+
+    /** Дебет и кредит стоят рядом: перепутать их — получить правдоподобное, но чужое число. */
+    public function test_reads_debit_turnover_of_the_account(): void
+    {
+        $result = $this->reader()->turnover($this->file, '3210', 'debit', 2026, 7);
+
+        $this->assertSame(419652.47, $result->value);
+    }
+
+    /**
+     * Ключевая ловушка: «Кредит» в шапке трижды.
+     *
+     * Если зацепиться за слово, а не за пару «Обороты за период + Кредит», ответом
+     * станет сальдо — число того же порядка, и подмену никто не заметит.
+     */
+    public function test_does_not_take_opening_or_closing_balance(): void
+    {
+        $value = $this->reader()->turnover($this->file, '3210', 'credit', 2026, 7)->value;
+
+        $this->assertNotSame(1676987.22, $value, 'взяли сальдо на начало');
+        $this->assertNotSame(1344848.35, $value, 'взяли сальдо на конец');
+    }
+
+    /** Вторая ловушка: под счётом идут его валютные подстроки, суммы там другие. */
+    public function test_does_not_take_currency_sub_rows(): void
+    {
+        $value = $this->reader()->turnover($this->file, '3210', 'credit', 2026, 7)->value;
+
+        $this->assertNotSame(55555.55, $value, 'взяли подстроку RUB');
+        $this->assertNotSame(76800.0, $value, 'взяли строку «Вал.» — это сумма в валюте, а не в сомах');
+    }
+
+    /** Пустая ячейка в ОСВ означает ноль: нулевые обороты 1С не печатает. */
+    public function test_empty_cell_is_zero(): void
+    {
+        $result = $this->reader()->turnover($this->file, '3420', 'credit', 2026, 7);
+
+        $this->assertTrue($result->isFound());
+        $this->assertSame(0.0, $result->value);
+    }
+
+    /** Счёта нет — это не ошибка сверки: у клиента может просто не быть таких операций. */
+    public function test_missing_account_is_not_found(): void
+    {
+        $result = $this->reader()->turnover($this->file, '9999', 'credit', 2026, 7);
+
+        $this->assertSame(DocumentValue::NOT_FOUND, $result->status);
+    }
+
+    /** Прикрепили файл за соседний месяц — считать по нему нельзя. */
+    public function test_wrong_period_is_rejected(): void
+    {
+        $result = $this->reader()->turnover($this->file, '3210', 'credit', 2026, 6);
+
+        $this->assertSame(DocumentValue::WRONG_DOC, $result->status);
+        $this->assertStringContainsString('июнь', $result->reason);
+    }
+
+    public function test_wrong_year_is_rejected(): void
+    {
+        $result = $this->reader()->turnover($this->file, '3210', 'credit', 2025, 7);
+
+        $this->assertSame(DocumentValue::WRONG_DOC, $result->status);
+    }
+
+    /**
+     * Таблица читается, но это не ведомость.
+     *
+     * Главная защита от подмены: без неё разбор пошёл бы искать счёт в чужом документе
+     * и с какой-то вероятностью что-нибудь да нашёл.
+     */
+    public function test_other_spreadsheet_is_rejected(): void
+    {
+        $other = $this->writeBalanceSheet('Реестр электронных счетов-фактур за Июль 2026 г.');
+
+        $result = $this->reader()->turnover($other, '3210', 'credit', 2026, 7);
+
+        @unlink($other);
+        $this->assertSame(DocumentValue::WRONG_DOC, $result->status);
+        $this->assertStringContainsString('не оборотно-сальдовая', $result->reason);
+    }
+
+    /**
+     * Текстовый файл PhpSpreadsheet открывает как csv, и он проходит дальше.
+     *
+     * Отбивает его уже проверка формы — и это ровно то, что нужно: важно не то, на каком
+     * шаге мы отказались, а то, что числа из чужого файла наружу не ушли.
+     */
+    public function test_text_file_is_rejected_as_not_a_balance_sheet(): void
+    {
+        $path = tempnam(sys_get_temp_dir(), 'notxls');
+        file_put_contents($path, "просто текст\nвторая строка");
+
+        $result = $this->reader()->turnover($path, '3210', 'credit', 2026, 7);
+
+        @unlink($path);
+        $this->assertSame(DocumentValue::WRONG_DOC, $result->status);
+    }
+
+    /** Файл, который не открывается ни одним разборщиком (к задаче приложили pdf). */
+    public function test_unreadable_file(): void
+    {
+        $path = tempnam(sys_get_temp_dir(), 'notxls') . '.pdf';
+        file_put_contents($path, "%PDF-1.7\n%\xE2\xE3\xCF\xD3\nбинарь");
+
+        $result = $this->reader()->turnover($path, '3210', 'credit', 2026, 7);
+
+        @unlink($path);
+        $this->assertSame(DocumentValue::UNREADABLE, $result->status);
+    }
+
+    /** След нужен, чтобы человек открыл файл и увидел ту же ячейку. */
+    public function test_trace_points_at_the_cell(): void
+    {
+        $result = $this->reader()->turnover($this->file, '3210', 'credit', 2026, 7);
+
+        $this->assertSame('F7', $result->trace['ячейка']);
+        $this->assertSame('Обороты за период / Кредит', $result->trace['колонка']);
+    }
+}

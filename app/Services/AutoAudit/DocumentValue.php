@@ -1,0 +1,51 @@
+<?php
+
+namespace App\Services\AutoAudit;
+
+/**
+ * Результат чтения одного показателя из документа.
+ *
+ * Три исхода, а не два. «Не нашли» и «документ не тот» — разные вещи: первое значит,
+ * что форма опознана, но нужной строки в ней нет (у клиента просто нет такого счёта);
+ * второе — что перед нами вообще другой документ или другой период, и считать по нему
+ * нельзя ничего. Смешать их значило бы выдавать вердикт по чужому файлу.
+ */
+class DocumentValue
+{
+    private function __construct(
+        public readonly ?float $value,
+        public readonly string $status,
+        public readonly ?string $reason = null,
+        public readonly array $trace = [],
+    ) {}
+
+    public const FOUND        = 'found';         // показатель прочитан
+    public const NOT_FOUND    = 'not_found';     // форма та, показателя в ней нет
+    public const WRONG_DOC    = 'wrong_doc';     // не та форма или не тот период
+    public const UNREADABLE   = 'unreadable';    // файл не открылся
+
+    public static function found(float $value, array $trace = []): self
+    {
+        return new self($value, self::FOUND, null, $trace);
+    }
+
+    public static function notFound(string $reason, array $trace = []): self
+    {
+        return new self(null, self::NOT_FOUND, $reason, $trace);
+    }
+
+    public static function wrongDocument(string $reason, array $trace = []): self
+    {
+        return new self(null, self::WRONG_DOC, $reason, $trace);
+    }
+
+    public static function unreadable(string $reason): self
+    {
+        return new self(null, self::UNREADABLE, $reason);
+    }
+
+    public function isFound(): bool
+    {
+        return $this->status === self::FOUND;
+    }
+}
