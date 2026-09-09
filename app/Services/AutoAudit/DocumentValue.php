@@ -17,6 +17,8 @@ class DocumentValue
         public readonly string $status,
         public readonly ?string $reason = null,
         public readonly array $trace = [],
+        /** Период, за который составлен документ. Читается из него самого, см. DocumentPeriod. */
+        public readonly ?DocumentPeriod $period = null,
     ) {}
 
     public const FOUND        = 'found';         // показатель прочитан
@@ -24,9 +26,9 @@ class DocumentValue
     public const WRONG_DOC    = 'wrong_doc';     // не та форма или не тот период
     public const UNREADABLE   = 'unreadable';    // файл не открылся
 
-    public static function found(float $value, array $trace = []): self
+    public static function found(float $value, array $trace = [], ?DocumentPeriod $period = null): self
     {
-        return new self($value, self::FOUND, null, $trace);
+        return new self($value, self::FOUND, null, $trace, $period);
     }
 
     public static function notFound(string $reason, array $trace = []): self
