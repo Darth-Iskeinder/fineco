@@ -79,18 +79,19 @@ class SingleTaxReportReader
         // фиксированной высоты: так разбор переживёт сдвиг шапки.
         $body = array_filter($rows, fn ($y) => $y > $periodRow, ARRAY_FILTER_USE_KEY);
 
-        $lines  = $this->dataLines($body);
-        $totals = $this->totalsLine($body);
+        $lines    = $this->dataLines($body);
+        $rateless = $this->ratelessLines($body);
+        $totals   = array_pop($rateless);   // последняя строка без ставки — она и есть итог
 
         if (!$totals) {
             return DocumentValue::wrongDocument('Не нашли итоговую строку (поля 186 и 187)');
         }
 
-        if (!$lines) {
-            return DocumentValue::wrongDocument('Не нашли ни одной строки со ставкой налога');
+        if (!$lines && !$rateless) {
+            return DocumentValue::wrongDocument('Не нашли ни одной заполненной строки бланка');
         }
 
-        if ($mismatch = $this->checkArithmetic($lines, $totals)) {
+        if ($mismatch = $this->checkArithmetic(array_merge($lines, $rateless), $totals)) {
             return $mismatch;
         }
 
@@ -98,7 +99,7 @@ class SingleTaxReportReader
             'период'      => $period->label(),
             'база'        => number_format($totals['base'], 2, ',', ' '),
             'налог'       => number_format($totals['tax'], 2, ',', ' '),
-            'строк'       => count($lines),
+            'строк'       => count($lines) + count($rateless),
             'сходимость'  => 'итог = сумма строк, база × ставка = налог',
         ], $period);
     }
@@ -131,6 +132,11 @@ class SingleTaxReportReader
         }
 
         foreach ($lines as $line) {
+            // У авансовых строк ставки в бланке нет — проверять нечего.
+            if ($line['rate'] === null) {
+                continue;
+            }
+
             $expected = $line['base'] * $line['rate'] / 100;
 
             if (abs($expected - $line['tax']) > self::TOLERANCE) {
@@ -221,26 +227,36 @@ class SingleTaxReportReader
     }
 
     /**
-     * Итоговая строка (поля 186 и 187): есть база и налог, но нет ставки.
+     * Строки с базой, но без ставки, сверху вниз. Последняя из них — итог (поля 186 и 187).
      *
-     * Берём последнюю такую: выше по бланку встречаются подытоги по разделам, но у них
-     * заполнена только колонка налога.
+     * Перед итогом идут авансовые платежи: поле 182 — авансы текущего периода, поле 184 —
+     * те, что уже вошли в базу прошлых периодов. Ставки у них в бланке нет, а второе
+     * напечатано отрицательным, поэтому в сумму они входят как есть, простым сложением.
+     *
+     * Без них итог не сходится: у ФинЭко за июнь строки деятельности дают 1 494 185,00,
+     * авансы 89 350,00 и −97 475,00, а в поле 186 стоит 1 486 060,00.
+     *
+     * Подытоги по разделам сюда не попадают: у них заполнена только колонка налога.
      */
-    private function totalsLine(array $body): ?array
+    private function ratelessLines(array $body): array
     {
-        $found = null;
+        $lines = [];
 
         foreach ($body as $cells) {
             $base = $this->column($cells, self::COLUMN_BASE);
-            $tax  = $this->column($cells, self::COLUMN_TAX);
-            $rate = $this->column($cells, self::COLUMN_RATE);
 
-            if ($base !== null && $tax !== null && $rate === null) {
-                $found = ['base' => $base, 'tax' => $tax];
+            if ($base === null || $this->column($cells, self::COLUMN_RATE) !== null) {
+                continue;
             }
+
+            $lines[] = [
+                'base' => $base,
+                'rate' => null,
+                'tax'  => $this->column($cells, self::COLUMN_TAX) ?? 0.0,
+            ];
         }
 
-        return $found;
+        return $lines;
     }
 
     /**
@@ -260,7 +276,8 @@ class SingleTaxReportReader
 
             $text = str_replace(["\u{00A0}", ' '], '', trim($cell['text']));
 
-            if (preg_match('/^\d+(,\d+)?$/', $text)) {
+            // Минус бывает: авансы прошлых периодов бланк печатает отрицательными.
+            if (preg_match('/^-?\d+(,\d+)?$/', $text)) {
                 return (float) str_replace(',', '.', $text);
             }
         }

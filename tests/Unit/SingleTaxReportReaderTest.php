@@ -75,7 +75,13 @@ class SingleTaxReportReaderTest extends TestCase
         );
     }
 
-    /** Итоговая строка: база и налог есть, ставки нет — этим она и отличается. */
+    /** Авансовая строка (поля 182 и 184): база и налог без ставки. */
+    private function advance(float $top, string $base, string $tax): array
+    {
+        return $this->totals($top, $base, $tax);
+    }
+
+    /** Итоговая строка: база и налог есть, ставки нет — как и у авансовых, но она последняя. */
     private function totals(float $top, string $base, string $tax): array
     {
         return array_merge(
@@ -230,5 +236,62 @@ class SingleTaxReportReaderTest extends TestCase
         $result = $this->reader($words)->taxableBase('отчёт.pdf');
 
         $this->assertSame(DocumentValue::WRONG_DOC, $result->status);
+    }
+
+    /**
+     * Авансовые платежи входят в итог.
+     *
+     * Поле 182 — авансы текущего периода, поле 184 — те, что уже вошли в базу прошлых
+     * периодов. Второе бланк печатает отрицательным, поэтому складываем всё как есть.
+     * Числа взяты из боевого отчёта ФинЭко за июнь: без этих двух строк итог не сходился
+     * на 8 125 сомов, и разбор отказывался отвечать.
+     */
+    public function test_advance_payment_rows_are_part_of_the_total(): void
+    {
+        $words = array_merge(
+            $this->periodRow('01062026', '30062026'),
+            $this->line(300, '1 494 185,00', '4,00', '59 767,40'),
+            $this->advance(700, '89 350,00', '3 574,00'),
+            $this->advance(720, '-97 475,00', '-3 899,00'),
+            $this->totals(752, '1 486 060,00', '59 442,40'),
+        );
+
+        $result = $this->reader($words)->taxableBase('отчёт.pdf');
+
+        $this->assertTrue($result->isFound(), $result->reason ?? '');
+        $this->assertSame(1486060.00, $result->value);
+    }
+
+    /**
+     * Бланк без единой строки деятельности — только авансы.
+     *
+     * Так выглядит боевой отчёт Сан Планет за июнь: ставки нет нигде, а в итоге 450 000.
+     * Требование «хотя бы одна строка со ставкой» отвергало такой отчёт напрасно.
+     */
+    public function test_reads_report_filled_with_advances_only(): void
+    {
+        $words = array_merge(
+            $this->periodRow('01062026', '30062026'),
+            $this->advance(700, '450 000,00', '9 000,00'),
+            $this->advance(720, '0,00', '0,00'),
+            $this->totals(752, '450 000,00', '9 000,00'),
+        );
+
+        $result = $this->reader($words)->taxableBase('отчёт.pdf');
+
+        $this->assertTrue($result->isFound(), $result->reason ?? '');
+        $this->assertSame(450000.00, $result->value);
+    }
+
+    /** Отрицательное число не должно потеряться при разборе. */
+    public function test_negative_numbers_are_read(): void
+    {
+        $words = array_merge(
+            $this->periodRow('01062026', '30062026'),
+            $this->advance(700, '-1 000,00', '-40,00'),
+            $this->totals(752, '-1 000,00', '-40,00'),
+        );
+
+        $this->assertSame(-1000.00, $this->reader($words)->taxableBase('отчёт.pdf')->value);
     }
 }
