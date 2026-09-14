@@ -9,6 +9,7 @@ use App\Models\Client;
 use App\Models\EstimateItem;
 use App\Models\Service;
 use App\Support\TenantContext;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -169,6 +170,9 @@ class AutoAuditRunner
      * Смотрим задачу целиком, а не каждый файл: рядом с отчётом часто лежит квитанция об
      * оплате, и сама по себе она не ошибка. Ошибка, когда ни один файл задачи не прочитался
      * как нужная форма.
+     *
+     * Отчётный период из такого файла не прочитать, а на странице строки выбираются по
+     * периоду. Берём месяц перед месяцем задачи: отчёт за июль сдают в августовской задаче.
      */
     private function wrongDocuments(Client $client, string $side, Collection $documents): array
     {
@@ -190,11 +194,15 @@ class AutoAuditRunner
                 continue;
             }
 
+            // С первого числа, иначе «31 августа минус месяц» перельётся мимо июля.
+            $month  = CarbonImmutable::create($log->year, $log->month, 1)->subMonth();
+            $period = DocumentPeriod::of($month->year, $month->month);
+
             $rows[] = [
                 'client_id'   => $client->id,
                 'rule'        => null,
-                'period_from' => null,
-                'period_to'   => null,
+                'period_from' => $period->from->toDateString(),
+                'period_to'   => $period->to->toDateString(),
                 'outcome'     => AutoAuditResult::WRONG_DOCUMENT,
                 'left_value'  => null,
                 'right_value' => null,

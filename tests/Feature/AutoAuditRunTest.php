@@ -250,6 +250,9 @@ class AutoAuditRunTest extends TestCase
         $this->assertSame('форма-161.pdf', $issue->sources[0]['name']);
         $this->assertSame('Это не отчёт по единому налогу', $issue->sources[0]['reason']);
         $this->assertSame('08.2026', $issue->taskMonth());
+
+        // Из файла период не прочитать: берём месяц перед августовской задачей.
+        $this->assertSame('июль 2026', $issue->periodLabel());
     }
 
     /** Квитанция рядом с настоящим отчётом не ошибка: нужная форма в задаче есть. */
@@ -281,21 +284,6 @@ class AutoAuditRunTest extends TestCase
         $this->assertCount(1, $results);
         $this->assertSame(AutoAuditResult::WRONG_DOCUMENT, $results->first()->outcome);
         $this->assertSame('ОСВ (БП №11)', $results->first()->expectedDocument());
-    }
-
-    public function test_vendor_sees_the_wrong_document_block(): void
-    {
-        $client = $this->client();
-        $this->attachLog($client, $this->item($client, $this->taxService), 'форма-161.pdf');
-
-        $this->runAudit();
-
-        $this->asVendor()->get(route('auto-audit.index'))
-            ->assertOk()
-            ->assertSee('Не тот документ')
-            ->assertSee($client->name)
-            ->assertSee('форма-161.pdf')
-            ->assertSee('Это не отчёт по единому налогу');
     }
 
     /** 1С не печатает счёт без оборотов: нет строки в ведомости, значит оборот нулевой. */
@@ -379,14 +367,16 @@ class AutoAuditRunTest extends TestCase
         $this->asVendor()
             ->get(route('auto-audit.index'))
             ->assertOk()
-            ->assertSee('Проверка №1')
-            ->assertSee('Начисленный единый налог сходится с учётом')
+            ->assertSee('Отчётный период')
+            ->assertSee('№1 Налоговая база сходится с учётом')
+            ->assertSee('№3 Начисленный единый налог сходится с учётом')
             ->assertSee($client->name)
             ->assertSee('50,00')
+            ->assertSee('Не совпало')
             ->assertSee('осв.xls');
     }
 
-    /** По умолчанию виден самый свежий период, а не вся история. */
+    /** По умолчанию виден самый свежий отчётный период. */
     public function test_latest_period_is_shown_by_default(): void
     {
         $june = $this->client(['name' => 'ООО Июньский ' . uniqid()]);
@@ -407,37 +397,32 @@ class AutoAuditRunTest extends TestCase
             ->assertSee($june->name)
             ->assertDontSee($july->name);
 
-        $this->asVendor()->get(route('auto-audit.index', ['period' => 'all']))
-            ->assertSee($june->name)
+        // Мусор в адресе не ломает страницу: показываем самый свежий период.
+        $this->asVendor()->get(route('auto-audit.index', ['period' => 'z']))
+            ->assertOk()
             ->assertSee($july->name);
     }
 
-    public function test_filters_by_rule_and_outcome(): void
+    /** Не тот документ стоит в общем списке своего периода, со статусом в конце строки. */
+    public function test_wrong_document_shows_in_the_list_of_its_period(): void
     {
-        // Метод начисления: у клиента только проверка №3.
-        $accrual = $this->client(['name' => 'ООО Начисление ' . uniqid(), 'accounting_method' => Client::ACCOUNTING_ACCRUAL]);
-        $this->attachSheet($accrual, 'осв-начисление.xls', ['3210' => 1.00, '3410' => 1.00]);
-        $this->attachReport($accrual, 'отчёт-начисление.pdf', base: 1.00, tax: 1.00);
+        $fine = $this->client(['name' => 'ООО Сошлось ' . uniqid()]);
+        $this->attachSheet($fine, 'осв.xls', ['3210' => 1.00, '3410' => 1.00]);
+        $this->attachReport($fine, 'отчёт.pdf', base: 1.00, tax: 1.00);
 
-        $wrong = $this->client(['name' => 'ООО Расхождение ' . uniqid()]);
-        $this->attachSheet($wrong, 'осв-расхождение.xls', ['3210' => 5.00, '3410' => 1.00]);
-        $this->attachReport($wrong, 'отчёт-расхождение.pdf', base: 1.00, tax: 1.00);
+        $broken = $this->client(['name' => 'ООО Форма 161 ' . uniqid()]);
+        $this->attachLog($broken, $this->item($broken, $this->taxService), 'форма-161.pdf');
 
         $this->runAudit();
 
-        $this->asVendor()->get(route('auto-audit.index', ['rule' => '1']))
-            ->assertSee($wrong->name)
-            ->assertDontSee($accrual->name);
-
-        $this->asVendor()->get(route('auto-audit.index', ['outcome' => AutoAuditResult::MISMATCH]))
-            ->assertSee($wrong->name)
-            ->assertDontSee($accrual->name);
-
-        // Мусор в адресе не ломает страницу, а просто не фильтрует.
-        $this->asVendor()->get(route('auto-audit.index', ['rule' => 'x', 'outcome' => 'y', 'period' => 'z']))
+        $this->asVendor()->get(route('auto-audit.index'))
             ->assertOk()
-            ->assertSee($wrong->name)
-            ->assertSee($accrual->name);
+            ->assertSee($fine->name)
+            ->assertSee($broken->name)
+            ->assertSee('Документ: Отчёт по единому налогу (БП №3)')
+            ->assertSee('Не тот документ')
+            ->assertSee('форма-161.pdf')
+            ->assertSee('Это не отчёт по единому налогу');
     }
 
     private function asVendor(): static
