@@ -45,20 +45,6 @@ class AutoAuditResult extends Model
         return AutoAuditRunner::RULES[(int) $this->rule]['name'] ?? (string) $this->rule;
     }
 
-    /** Какой документ ждали в задаче: для строки «не тот документ». */
-    public function expectedDocument(): string
-    {
-        return ($this->sources[0]['side'] ?? null) === 'osv'
-            ? 'ОСВ (БП №' . AutoAuditRunner::REF_BALANCE_SHEET . ')'
-            : 'Отчёт по единому налогу (БП №' . AutoAuditRunner::REF_TAX_REPORT . ')';
-    }
-
-    /** Месяц задачи, «08.2026». */
-    public function taskMonth(): string
-    {
-        return $this->sources[0]['task_month'] ?? '';
-    }
-
     /** Ключ периода для фильтра на странице: «2026-07-01..2026-07-31». */
     public function periodKey(): string
     {

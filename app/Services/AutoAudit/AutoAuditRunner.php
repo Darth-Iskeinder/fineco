@@ -29,11 +29,11 @@ use Throwable;
  *   3. ставим в пару ведомость и отчёты за один и тот же период;
  *   4. отчёты филиалов за период складываем и сравниваем с ведомостью до копейки.
  *
- * Пишем два вида строк:
- *   - итог сверки, когда пару удалось сравнить: совпало или не совпало. Пары за период
- *     нет или отчёта одного из филиалов не хватает: такую строку не пишем, чтобы не
- *     засорять страницу;
+ * Каждая строка относится к одной из проверок, статусов три:
+ *   - совпало или не совпало, когда пару удалось сравнить. Пары за период нет или отчёта
+ *     одного из филиалов не хватает: такую строку не пишем, чтобы не засорять страницу;
  *   - «не тот документ»: задача закрыта с файлами, но ни один не читается как нужная форма.
+ *     Стоит под каждой проверкой клиента, которая берёт числа из этого документа.
  *
  * Каждый прогон стирает прошлые результаты фирмы и пишет заново.
  */
@@ -131,31 +131,36 @@ class AutoAuditRunner
 
     private function checkClient(Client $client, Service $osvService, Service $taxService): array
     {
+        // Ведём не всё: ведомость или отчёт может делать кто-то другой, сверка ни о чём.
+        if (!$client->servesEverything()) {
+            return [];
+        }
+
         $osvDocuments = $this->documents($client, $osvService);
         $taxDocuments = $this->documents($client, $taxService);
 
-        // Не тот документ ищем у всех клиентов: это ошибка задачи, и она не зависит от
-        // того, подходит ли клиенту какая-нибудь сверка.
-        $rows = array_merge(
+        if ($osvDocuments->isEmpty() && $taxDocuments->isEmpty()) {
+            return [];
+        }
+
+        // Не тот документ ломает каждую проверку, которая берёт из него число, поэтому и
+        // стоит под каждой. Второй стороны может не быть вовсе: ошибка в файле от этого
+        // не пропадает.
+        $wrong = array_merge(
             $this->wrongDocuments($client, 'osv', $osvDocuments),
             $this->wrongDocuments($client, 'tax', $taxDocuments),
         );
 
-        // Ведём не всё: ведомость или отчёт может делать кто-то другой, сверка ни о чём.
-        if (!$client->servesEverything()) {
-            return $rows;
-        }
-
-        // Пару не собрать, если одной из сторон нет вовсе.
-        if ($osvDocuments->isEmpty() || $taxDocuments->isEmpty()) {
-            return $rows;
-        }
-
         $taxItems = $this->estimateItems($client, $taxService);
+        $rows     = [];
 
         foreach (self::RULES as $number => $rule) {
             if ($rule['cash_only'] && $client->accounting_method !== Client::ACCOUNTING_CASH) {
                 continue;
+            }
+
+            foreach ($wrong as $row) {
+                $rows[] = array_merge($row, ['rule' => (string) $number]);
             }
 
             array_push($rows, ...$this->checkRule($client, $number, $rule, $osvDocuments, $taxDocuments, $taxItems));

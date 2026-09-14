@@ -78,13 +78,13 @@ class AutoAuditController extends Controller
         abort_unless(Impersonation::isActive(), 404);
     }
 
-    /** Проверки по порядку номеров, «не тот документ» после них, внутри по клиенту. */
+    /** По порядку номеров проверок, внутри по клиенту. */
     private function sortKey(AutoAuditResult $result): array
     {
         return [
-            $result->rule === null ? PHP_INT_MAX : (int) $result->rule,
-            $result->expectedDocument(),
+            (int) $result->rule,
             mb_strtolower($result->client?->name ?? ''),
+            $result->outcome,
         ];
     }
 }

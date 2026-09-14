@@ -90,13 +90,7 @@
                     @foreach ($results as $result)
                         @php [$label, $classes] = $statuses[$result->outcome] ?? [$result->outcome, 'bg-slate-100 text-slate-600']; @endphp
                         <tr class="align-top">
-                            <td class="px-4 py-3 text-slate-700">
-                                @if ($result->rule === null)
-                                    Документ: {{ $result->expectedDocument() }}
-                                @else
-                                    №{{ $result->rule }} {{ $result->ruleName() }}
-                                @endif
-                            </td>
+                            <td class="px-4 py-3 text-slate-700">№{{ $result->rule }} {{ $result->ruleName() }}</td>
                             <td class="px-4 py-3 font-medium text-slate-800">{{ $result->client?->name ?? 'клиент удалён' }}</td>
                             <td class="px-4 py-3 text-right whitespace-nowrap">{{ $money($result->left_value) }}</td>
                             <td class="px-4 py-3 text-right whitespace-nowrap">{{ $money($result->right_value) }}</td>

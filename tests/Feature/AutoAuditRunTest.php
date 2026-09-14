@@ -224,8 +224,8 @@ class AutoAuditRunTest extends TestCase
     }
 
     /**
-     * Форма 161 вместо отчёта по налогу: в сверку файл не идёт, зато задача попадает
-     * в «не тот документ». Остальных клиентов это не задевает.
+     * Форма 161 вместо отчёта по налогу: в сверку файл не идёт, зато под проверками
+     * клиента стоит «не тот документ». Остальных клиентов это не задевает.
      */
     public function test_wrong_document_is_listed_and_does_not_block_others(): void
     {
@@ -243,13 +243,16 @@ class AutoAuditRunTest extends TestCase
         $this->assertCount(2, $checks);
         $this->assertSame([$fine->id], $checks->pluck('client_id')->unique()->values()->all());
 
-        $issue = $results->firstWhere('outcome', AutoAuditResult::WRONG_DOCUMENT);
-        $this->assertSame($broken->id, $issue->client_id);
-        $this->assertNull($issue->rule);
+        // Кассовый метод и полное обслуживание: файл ломает обе проверки, строка под каждой.
+        $issues = $results->where('outcome', AutoAuditResult::WRONG_DOCUMENT);
+        $this->assertSame(['1', '3'], $issues->pluck('rule')->sort()->values()->all());
+        $this->assertSame([$broken->id], $issues->pluck('client_id')->unique()->values()->all());
+
+        $issue = $issues->first();
         $this->assertSame('Среди файлов задачи нет отчёта по единому налогу', $issue->reason);
         $this->assertSame('форма-161.pdf', $issue->sources[0]['name']);
         $this->assertSame('Это не отчёт по единому налогу', $issue->sources[0]['reason']);
-        $this->assertSame('08.2026', $issue->taskMonth());
+        $this->assertSame('08.2026', $issue->sources[0]['task_month']);
 
         // Из файла период не прочитать: берём месяц перед августовской задачей.
         $this->assertSame('июль 2026', $issue->periodLabel());
@@ -273,17 +276,27 @@ class AutoAuditRunTest extends TestCase
         $this->assertSame([AutoAuditResult::MATCHED], $results->pluck('outcome')->unique()->values()->all());
     }
 
-    /** Не тот документ ищем у всех: сверка клиенту не подходит, а ошибка в задаче есть. */
-    public function test_wrong_document_is_found_even_where_no_check_applies(): void
+    /**
+     * Не тот документ стоит только под проверками, что подходят клиенту. Второй стороны
+     * у клиента нет вовсе, а строка всё равно есть: ошибка в файле от этого не пропадает.
+     */
+    public function test_wrong_document_follows_check_applicability(): void
     {
-        $client = $this->client(['serves_accounting' => false, 'serves_payroll' => false]);
-        $this->attachLog($client, $this->item($client, $this->osvService), 'скриншот.pdf');
+        $accrual = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL]);
+        $this->attachLog($accrual, $this->item($accrual, $this->osvService), 'скриншот.pdf');
+
+        $narrowed = $this->client(['serves_accounting' => false, 'serves_payroll' => false]);
+        $this->attachLog($narrowed, $this->item($narrowed, $this->osvService), 'скриншот-2.pdf');
 
         $results = $this->runAudit();
 
         $this->assertCount(1, $results);
-        $this->assertSame(AutoAuditResult::WRONG_DOCUMENT, $results->first()->outcome);
-        $this->assertSame('ОСВ (БП №11)', $results->first()->expectedDocument());
+
+        $issue = $results->first();
+        $this->assertSame($accrual->id, $issue->client_id);
+        $this->assertSame('3', $issue->rule);
+        $this->assertSame(AutoAuditResult::WRONG_DOCUMENT, $issue->outcome);
+        $this->assertSame('Среди файлов задачи нет оборотно-сальдовой ведомости', $issue->reason);
     }
 
     /** 1С не печатает счёт без оборотов: нет строки в ведомости, значит оборот нулевой. */
@@ -419,7 +432,7 @@ class AutoAuditRunTest extends TestCase
             ->assertOk()
             ->assertSee($fine->name)
             ->assertSee($broken->name)
-            ->assertSee('Документ: Отчёт по единому налогу (БП №3)')
+            ->assertDontSee('Документ:')
             ->assertSee('Не тот документ')
             ->assertSee('форма-161.pdf')
             ->assertSee('Это не отчёт по единому налогу');
