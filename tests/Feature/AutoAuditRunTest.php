@@ -156,14 +156,15 @@ class AutoAuditRunTest extends TestCase
 
         $results = $this->runAudit();
 
-        $this->assertCount(2, $results);
+        $this->assertSame(['1', '3'], $results->pluck('rule')->sort()->values()->all());
         $this->assertSame([AutoAuditResult::MATCHED], $results->pluck('outcome')->unique()->values()->all());
 
-        $base = $results->firstWhere('rule', 'osv_3210_tax_base');
+        $base = $results->firstWhere('rule', '1');
         $this->assertSame('87513.60', $base->left_value);
         $this->assertSame('87513.60', $base->right_value);
         $this->assertSame('0.00', $base->difference);
         $this->assertSame('июль 2026', $base->periodLabel());
+        $this->assertSame('Налоговая база сходится с учётом', $base->ruleName());
         $this->assertCount(2, $base->sources);
     }
 
@@ -175,11 +176,11 @@ class AutoAuditRunTest extends TestCase
 
         $results = $this->runAudit();
 
-        $base = $results->firstWhere('rule', 'osv_3210_tax_base');
+        $base = $results->firstWhere('rule', '1');
         $this->assertSame(AutoAuditResult::MISMATCH, $base->outcome);
         $this->assertSame('50.00', $base->difference);
 
-        $this->assertSame(AutoAuditResult::MATCHED, $results->firstWhere('rule', 'osv_3410_tax_total')->outcome);
+        $this->assertSame(AutoAuditResult::MATCHED, $results->firstWhere('rule', '3')->outcome);
     }
 
     /** Филиальный БП: отчёт на каждый налоговый орган, в сумме они дают ведомость. */
@@ -193,14 +194,14 @@ class AutoAuditRunTest extends TestCase
         $this->attachReport($client, 'отчёт-бишкек.pdf', base: 60.00, tax: 2.40, item: $first);
         $this->attachReport($client, 'отчёт-ош.pdf', base: 40.00, tax: 1.60, item: $second);
 
-        $base = $this->runAudit()->firstWhere('rule', 'osv_3210_tax_base');
+        $base = $this->runAudit()->firstWhere('rule', '1');
 
         $this->assertSame(AutoAuditResult::MATCHED, $base->outcome);
         $this->assertSame('100.00', $base->right_value);
     }
 
-    /** Без отчёта одного филиала сумма заведомо меньше: это не расхождение, а нехватка. */
-    public function test_missing_branch_report_is_not_a_mismatch(): void
+    /** Без отчёта одного филиала сумма заведомо меньше: сравнивать нечего, строку не пишем. */
+    public function test_missing_branch_report_writes_nothing(): void
     {
         $client = $this->client();
         $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
@@ -209,43 +210,92 @@ class AutoAuditRunTest extends TestCase
         $this->item($client, $this->taxService, 'Ош');
         $this->attachReport($client, 'отчёт-бишкек.pdf', base: 60.00, tax: 2.40, item: $first);
 
-        $base = $this->runAudit()->firstWhere('rule', 'osv_3210_tax_base');
-
-        $this->assertSame(AutoAuditResult::NO_DOCUMENTS, $base->outcome);
-        $this->assertStringContainsString('филиалов 2', $base->reason);
+        $this->assertCount(0, $this->runAudit());
     }
 
-    /** Ведомость за июнь и отчёт за июль в пару не встают: у каждого нет своей половины. */
+    /** Ведомость за июнь и отчёт за июль в пару не встают. */
     public function test_documents_for_different_periods_do_not_pair(): void
     {
         $client = $this->client();
         $this->attachSheet($client, 'осв-июнь.xls', ['3210' => 100.00, '3410' => 4.00], month: 6);
         $this->attachReport($client, 'отчёт-июль.pdf', base: 100.00, tax: 4.00, month: 7);
 
-        $base = $this->runAudit()->where('rule', 'osv_3210_tax_base');
-
-        $this->assertCount(2, $base);
-        $this->assertSame([AutoAuditResult::NO_DOCUMENTS], $base->pluck('outcome')->unique()->values()->all());
-        $this->assertEqualsCanonicalizing(
-            ['Нет отчёта по налогу за этот период', 'Нет ведомости за этот период'],
-            $base->pluck('reason')->all(),
-        );
+        $this->assertCount(0, $this->runAudit());
     }
 
-    /** Приложили не тот документ: показываем причину, а не выдуманное число. */
-    public function test_unreadable_document_is_shown_with_its_reason(): void
+    /**
+     * Форма 161 вместо отчёта по налогу: в сверку файл не идёт, зато задача попадает
+     * в «не тот документ». Остальных клиентов это не задевает.
+     */
+    public function test_wrong_document_is_listed_and_does_not_block_others(): void
+    {
+        $broken = $this->client();
+        $this->attachSheet($broken, 'осв-сломанный.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachLog($broken, $this->item($broken, $this->taxService), 'форма-161.pdf');
+
+        $fine = $this->client();
+        $this->attachSheet($fine, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachReport($fine, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $results = $this->runAudit();
+
+        $checks = $results->where('outcome', '!==', AutoAuditResult::WRONG_DOCUMENT);
+        $this->assertCount(2, $checks);
+        $this->assertSame([$fine->id], $checks->pluck('client_id')->unique()->values()->all());
+
+        $issue = $results->firstWhere('outcome', AutoAuditResult::WRONG_DOCUMENT);
+        $this->assertSame($broken->id, $issue->client_id);
+        $this->assertNull($issue->rule);
+        $this->assertSame('Среди файлов задачи нет отчёта по единому налогу', $issue->reason);
+        $this->assertSame('форма-161.pdf', $issue->sources[0]['name']);
+        $this->assertSame('Это не отчёт по единому налогу', $issue->sources[0]['reason']);
+        $this->assertSame('08.2026', $issue->taskMonth());
+    }
+
+    /** Квитанция рядом с настоящим отчётом не ошибка: нужная форма в задаче есть. */
+    public function test_extra_file_next_to_the_right_one_is_not_flagged(): void
     {
         $client = $this->client();
         $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $log  = BuhTaskLog::orderByDesc('id')->first();
+        $path = "buh_task_documents/{$log->id}/квитанция.pdf";
+        Storage::disk('local')->put($path, 'x');
+        $log->documents()->create(['path' => $path, 'name' => 'квитанция.pdf']);
+
+        $results = $this->runAudit();
+
+        $this->assertCount(0, $results->where('outcome', AutoAuditResult::WRONG_DOCUMENT));
+        $this->assertSame([AutoAuditResult::MATCHED], $results->pluck('outcome')->unique()->values()->all());
+    }
+
+    /** Не тот документ ищем у всех: сверка клиенту не подходит, а ошибка в задаче есть. */
+    public function test_wrong_document_is_found_even_where_no_check_applies(): void
+    {
+        $client = $this->client(['serves_accounting' => false, 'serves_payroll' => false]);
+        $this->attachLog($client, $this->item($client, $this->osvService), 'скриншот.pdf');
+
+        $results = $this->runAudit();
+
+        $this->assertCount(1, $results);
+        $this->assertSame(AutoAuditResult::WRONG_DOCUMENT, $results->first()->outcome);
+        $this->assertSame('ОСВ (БП №11)', $results->first()->expectedDocument());
+    }
+
+    public function test_vendor_sees_the_wrong_document_block(): void
+    {
+        $client = $this->client();
         $this->attachLog($client, $this->item($client, $this->taxService), 'форма-161.pdf');
 
-        $broken = $this->runAudit()
-            ->where('rule', 'osv_3210_tax_base')
-            ->first(fn (AutoAuditResult $r) => $r->period_from === null);
+        $this->runAudit();
 
-        $this->assertSame(AutoAuditResult::NO_DOCUMENTS, $broken->outcome);
-        $this->assertStringContainsString('Это не отчёт по единому налогу', $broken->reason);
-        $this->assertSame('форма-161.pdf', $broken->sources[0]['name']);
+        $this->asVendor()->get(route('auto-audit.index'))
+            ->assertOk()
+            ->assertSee('Не тот документ')
+            ->assertSee($client->name)
+            ->assertSee('форма-161.pdf')
+            ->assertSee('Это не отчёт по единому налогу');
     }
 
     /** 1С не печатает счёт без оборотов: нет строки в ведомости, значит оборот нулевой. */
@@ -255,20 +305,20 @@ class AutoAuditRunTest extends TestCase
         $this->attachSheet($client, 'осв.xls', ['3210' => 100.00]);
         $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 0.00);
 
-        $tax = $this->runAudit()->firstWhere('rule', 'osv_3410_tax_total');
+        $tax = $this->runAudit()->firstWhere('rule', '3');
 
         $this->assertSame(AutoAuditResult::MATCHED, $tax->outcome);
         $this->assertStringContainsString('нет счёта 3410', $tax->reason);
     }
 
     /** Налоговая база и оборот 3210 сходятся только при кассовом методе. */
-    public function test_accrual_client_gets_only_the_tax_total_rule(): void
+    public function test_accrual_client_gets_only_rule_3(): void
     {
         $client = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL]);
         $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
         $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
 
-        $this->assertSame(['osv_3410_tax_total'], $this->runAudit()->pluck('rule')->all());
+        $this->assertSame(['3'], $this->runAudit()->pluck('rule')->all());
     }
 
     /** Ведём не всё: ведомость или отчёт делает кто-то другой, сверять незачем. */
@@ -319,28 +369,84 @@ class AutoAuditRunTest extends TestCase
         $this->attachSheet($client, 'осв.xls', ['3210' => 150.00, '3410' => 4.00]);
         $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
 
-        $vendor = [
-            'vendor.tenant_id'   => $this->tenant->id,
-            'vendor.tenant_name' => $this->tenant->name,
-            'vendor.last_seen'   => now()->timestamp,
-        ];
+        $this->asVendor()->get(route('employees.index'))->assertSee(route('auto-audit.index'));
 
-        $this->actingAs($this->admin, 'employee')->withSession($vendor)
-            ->get(route('employees.index'))
-            ->assertSee(route('auto-audit.index'));
-
-        $this->actingAs($this->admin, 'employee')->withSession($vendor)
+        $this->asVendor()
             ->post(route('auto-audit.run'))
             ->assertRedirect(route('auto-audit.index'))
             ->assertSessionHas('success');
 
-        $this->actingAs($this->admin, 'employee')->withSession($vendor)
+        $this->asVendor()
             ->get(route('auto-audit.index'))
             ->assertOk()
+            ->assertSee('Проверка №1')
+            ->assertSee('Начисленный единый налог сходится с учётом')
             ->assertSee($client->name)
-            ->assertSee('Не совпало')
             ->assertSee('50,00')
             ->assertSee('осв.xls');
+    }
+
+    /** По умолчанию виден самый свежий период, а не вся история. */
+    public function test_latest_period_is_shown_by_default(): void
+    {
+        $june = $this->client(['name' => 'ООО Июньский ' . uniqid()]);
+        $this->attachSheet($june, 'осв-июнь.xls', ['3210' => 1.00, '3410' => 1.00], month: 6);
+        $this->attachReport($june, 'отчёт-июнь.pdf', base: 1.00, tax: 1.00, month: 6);
+
+        $july = $this->client(['name' => 'ООО Июльский ' . uniqid()]);
+        $this->attachSheet($july, 'осв-июль.xls', ['3210' => 1.00, '3410' => 1.00]);
+        $this->attachReport($july, 'отчёт-июль.pdf', base: 1.00, tax: 1.00);
+
+        $this->runAudit();
+
+        $this->asVendor()->get(route('auto-audit.index'))
+            ->assertSee($july->name)
+            ->assertDontSee($june->name);
+
+        $this->asVendor()->get(route('auto-audit.index', ['period' => '2026-06-01..2026-06-30']))
+            ->assertSee($june->name)
+            ->assertDontSee($july->name);
+
+        $this->asVendor()->get(route('auto-audit.index', ['period' => 'all']))
+            ->assertSee($june->name)
+            ->assertSee($july->name);
+    }
+
+    public function test_filters_by_rule_and_outcome(): void
+    {
+        // Метод начисления: у клиента только проверка №3.
+        $accrual = $this->client(['name' => 'ООО Начисление ' . uniqid(), 'accounting_method' => Client::ACCOUNTING_ACCRUAL]);
+        $this->attachSheet($accrual, 'осв-начисление.xls', ['3210' => 1.00, '3410' => 1.00]);
+        $this->attachReport($accrual, 'отчёт-начисление.pdf', base: 1.00, tax: 1.00);
+
+        $wrong = $this->client(['name' => 'ООО Расхождение ' . uniqid()]);
+        $this->attachSheet($wrong, 'осв-расхождение.xls', ['3210' => 5.00, '3410' => 1.00]);
+        $this->attachReport($wrong, 'отчёт-расхождение.pdf', base: 1.00, tax: 1.00);
+
+        $this->runAudit();
+
+        $this->asVendor()->get(route('auto-audit.index', ['rule' => '1']))
+            ->assertSee($wrong->name)
+            ->assertDontSee($accrual->name);
+
+        $this->asVendor()->get(route('auto-audit.index', ['outcome' => AutoAuditResult::MISMATCH]))
+            ->assertSee($wrong->name)
+            ->assertDontSee($accrual->name);
+
+        // Мусор в адресе не ломает страницу, а просто не фильтрует.
+        $this->asVendor()->get(route('auto-audit.index', ['rule' => 'x', 'outcome' => 'y', 'period' => 'z']))
+            ->assertOk()
+            ->assertSee($wrong->name)
+            ->assertSee($accrual->name);
+    }
+
+    private function asVendor(): static
+    {
+        return $this->actingAs($this->admin, 'employee')->withSession([
+            'vendor.tenant_id'   => $this->tenant->id,
+            'vendor.tenant_name' => $this->tenant->name,
+            'vendor.last_seen'   => now()->timestamp,
+        ]);
     }
 
     private function runAudit(): Collection

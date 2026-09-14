@@ -16,9 +16,9 @@ class AutoAuditResult extends Model
 {
     use BelongsToTenant;
 
-    public const MATCHED      = 'matched';       // числа совпали
-    public const MISMATCH     = 'mismatch';      // числа разные
-    public const NO_DOCUMENTS = 'no_documents';  // сравнивать не с чем: документа нет или он не прочитался
+    public const MATCHED        = 'matched';         // числа совпали
+    public const MISMATCH       = 'mismatch';        // числа разные
+    public const WRONG_DOCUMENT = 'wrong_document';  // задача закрыта с файлами, но нужной формы среди них нет
 
     protected $fillable = [
         'client_id', 'rule', 'period_from', 'period_to', 'outcome',
@@ -42,7 +42,27 @@ class AutoAuditResult extends Model
 
     public function ruleName(): string
     {
-        return AutoAuditRunner::RULES[$this->rule]['name'] ?? $this->rule;
+        return AutoAuditRunner::RULES[(int) $this->rule]['name'] ?? (string) $this->rule;
+    }
+
+    /** Какой документ ждали в задаче: для строки «не тот документ». */
+    public function expectedDocument(): string
+    {
+        return ($this->sources[0]['side'] ?? null) === 'osv'
+            ? 'ОСВ (БП №' . AutoAuditRunner::REF_BALANCE_SHEET . ')'
+            : 'Отчёт по единому налогу (БП №' . AutoAuditRunner::REF_TAX_REPORT . ')';
+    }
+
+    /** Месяц задачи, «08.2026». */
+    public function taskMonth(): string
+    {
+        return $this->sources[0]['task_month'] ?? '';
+    }
+
+    /** Ключ периода для фильтра на странице: «2026-07-01..2026-07-31». */
+    public function periodKey(): string
+    {
+        return $this->period_from?->toDateString() . '..' . $this->period_to?->toDateString();
     }
 
     /** «июль 2026» для месяца, даты через тире для всего остального. */

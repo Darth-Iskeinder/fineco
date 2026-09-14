@@ -28,6 +28,12 @@ use Throwable;
  *   3. ставим в пару ведомость и отчёты за один и тот же период;
  *   4. отчёты филиалов за период складываем и сравниваем с ведомостью до копейки.
  *
+ * Пишем два вида строк:
+ *   - итог сверки, когда пару удалось сравнить: совпало или не совпало. Пары за период
+ *     нет или отчёта одного из филиалов не хватает: такую строку не пишем, чтобы не
+ *     засорять страницу;
+ *   - «не тот документ»: задача закрыта с файлами, но ни один не читается как нужная форма.
+ *
  * Каждый прогон стирает прошлые результаты фирмы и пишет заново.
  */
 class AutoAuditRunner
@@ -38,30 +44,47 @@ class AutoAuditRunner
     /**
      * Проверки первого варианта.
      *
-     * account: счёт в ОСВ, берём оборот за период по кредиту;
-     * field:   число из отчёта, 'base' (налоговая база) или 'tax' (сумма налога);
+     * Ключ: номер проверки, он же номер строки в таблице правил (колонка A). Номер не
+     * меняем и не переиспользуем: по нему связаны результаты и фильтр на странице.
+     *
+     * account:   счёт в ОСВ, берём оборот за период по кредиту;
+     * field:     число из отчёта, 'base' (налоговая база) или 'tax' (сумма налога);
      * cash_only: только для кассового метода. Полное обслуживание нужно обеим.
      */
     public const RULES = [
-        'osv_3210_tax_base' => [
-            'name'      => 'Оборот Кт 3210 = налоговая база',
+        1 => [
+            'name'      => 'Налоговая база сходится с учётом',
+            'formula'   => 'ОСВ, оборот Кт 3210 = налоговая база из отчёта по единому налогу',
+            'condition' => 'Кассовый метод, полное обслуживание',
             'account'   => '3210',
             'field'     => 'base',
             'cash_only' => true,
         ],
-        'osv_3410_tax_total' => [
-            'name'      => 'Оборот Кт 3410 = сумма единого налога',
+        3 => [
+            'name'      => 'Начисленный единый налог сходится с учётом',
+            'formula'   => 'ОСВ, оборот Кт 3410 = сумма единого налога из отчёта',
+            'condition' => 'Полное обслуживание, любой метод учёта',
             'account'   => '3410',
             'field'     => 'tax',
             'cash_only' => false,
         ],
     ];
 
+    /**
+     * Чем проверяем, что файл вообще нужная форма. Форму и период читалка проверяет до
+     * того, как искать число, поэтому годится любое. Берём то, что читает проверка №1:
+     * разбор из кеша пригодится ей же.
+     */
+    private const PROBE = ['osv' => '3210', 'tax' => 'base'];
+
     /** Задачи, документам которых верим: работа закрыта или сдана на проверку. */
     private const DONE_STATUSES = ['completed', 'review'];
 
     /** Меньше копейки: числа приходят из разбора текста, и float может дать хвост. */
     private const EPSILON = 0.005;
+
+    /** Прочитанное за прогон: один файл разбираем один раз на каждое число. */
+    private array $cache = [];
 
     public function __construct(
         private readonly BalanceSheetReader $balanceSheet,
@@ -79,6 +102,8 @@ class AutoAuditRunner
         if (!TenantContext::has()) {
             throw new RuntimeException('Автоаудит запускается только внутри фирмы');
         }
+
+        $this->cache = [];
 
         $osvService = Service::where('reference_id', self::REF_BALANCE_SHEET)->first();
         $taxService = Service::where('reference_id', self::REF_TAX_REPORT)->first();
@@ -105,28 +130,80 @@ class AutoAuditRunner
 
     private function checkClient(Client $client, Service $osvService, Service $taxService): array
     {
-        // Ведём не всё: ведомость или отчёт может делать кто-то другой, сверка ни о чём.
-        if (!$client->servesEverything()) {
-            return [];
-        }
-
         $osvDocuments = $this->documents($client, $osvService);
         $taxDocuments = $this->documents($client, $taxService);
 
-        // Ни одного документа: период узнать не из чего, строку не пишем.
-        if ($osvDocuments->isEmpty() && $taxDocuments->isEmpty()) {
-            return [];
+        // Не тот документ ищем у всех клиентов: это ошибка задачи, и она не зависит от
+        // того, подходит ли клиенту какая-нибудь сверка.
+        $rows = array_merge(
+            $this->wrongDocuments($client, 'osv', $osvDocuments),
+            $this->wrongDocuments($client, 'tax', $taxDocuments),
+        );
+
+        // Ведём не всё: ведомость или отчёт может делать кто-то другой, сверка ни о чём.
+        if (!$client->servesEverything()) {
+            return $rows;
+        }
+
+        // Пару не собрать, если одной из сторон нет вовсе.
+        if ($osvDocuments->isEmpty() || $taxDocuments->isEmpty()) {
+            return $rows;
         }
 
         $taxItems = $this->estimateItems($client, $taxService);
-        $rows     = [];
 
-        foreach (self::RULES as $key => $rule) {
+        foreach (self::RULES as $number => $rule) {
             if ($rule['cash_only'] && $client->accounting_method !== Client::ACCOUNTING_CASH) {
                 continue;
             }
 
-            array_push($rows, ...$this->checkRule($client, $key, $rule, $osvDocuments, $taxDocuments, $taxItems));
+            array_push($rows, ...$this->checkRule($client, $number, $rule, $osvDocuments, $taxDocuments, $taxItems));
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Задачи, где файлы приложены, но нужной формы среди них нет.
+     *
+     * Смотрим задачу целиком, а не каждый файл: рядом с отчётом часто лежит квитанция об
+     * оплате, и сама по себе она не ошибка. Ошибка, когда ни один файл задачи не прочитался
+     * как нужная форма.
+     */
+    private function wrongDocuments(Client $client, string $side, Collection $documents): array
+    {
+        $rows = [];
+
+        foreach ($documents->groupBy(fn (array $pair) => $pair[0]->id) as $pairs) {
+            $sources    = [];
+            $recognized = false;
+
+            foreach ($pairs as [$log, $document]) {
+                $value = $this->read($side, self::PROBE[$side], $document);
+
+                // Период читалка отдаёт, только когда форма опознана.
+                $recognized = $recognized || $value->period !== null;
+                $sources[]  = $this->source($side, $log, $document, $value);
+            }
+
+            if ($recognized) {
+                continue;
+            }
+
+            $rows[] = [
+                'client_id'   => $client->id,
+                'rule'        => null,
+                'period_from' => null,
+                'period_to'   => null,
+                'outcome'     => AutoAuditResult::WRONG_DOCUMENT,
+                'left_value'  => null,
+                'right_value' => null,
+                'difference'  => null,
+                'reason'      => $side === 'osv'
+                    ? 'Среди файлов задачи нет оборотно-сальдовой ведомости'
+                    : 'Среди файлов задачи нет отчёта по единому налогу',
+                'sources'     => $sources,
+            ];
         }
 
         return $rows;
@@ -134,72 +211,65 @@ class AutoAuditRunner
 
     private function checkRule(
         Client $client,
-        string $key,
+        int $number,
         array $rule,
         Collection $osvDocuments,
         Collection $taxDocuments,
         Collection $taxItems,
     ): array {
-        $rows    = [];
         $periods = [];   // подпись периода => ['period' => DocumentPeriod, 'osv' => [...], 'tax' => [...]]
 
         foreach (['osv' => $osvDocuments, 'tax' => $taxDocuments] as $side => $documents) {
             foreach ($documents as [$log, $document]) {
-                $value  = $this->read($side, $rule, $document);
-                $source = $this->source($side, $log, $document, $value);
+                $value = $this->read($side, $side === 'osv' ? $rule['account'] : $rule['field'], $document);
 
-                // Не тот документ или не открылся: в пару его не поставить, но показать надо.
+                // Не тот документ или не открылся: в пару его не поставить.
                 if (!$value->period) {
-                    $rows[] = $this->row($client, $key, null, AutoAuditResult::NO_DOCUMENTS,
-                        reason: ($side === 'osv' ? 'Не прочитали ведомость: ' : 'Не прочитали отчёт по налогу: ') . $value->reason,
-                        sources: [$source],
-                    );
-
                     continue;
                 }
 
                 $label = $value->period->label();
                 $periods[$label]['period'] = $value->period;
-                $periods[$label][$side][]  = $source;
+                $periods[$label][$side][]  = $this->source($side, $log, $document, $value);
             }
         }
 
+        $rows = [];
+
         foreach ($periods as $entry) {
-            $rows[] = $this->compare($client, $key, $rule, $entry['period'], $entry['osv'] ?? [], $entry['tax'] ?? [], $taxItems);
+            $row = $this->compare($client, $number, $rule, $entry['period'], $entry['osv'] ?? [], $entry['tax'] ?? [], $taxItems);
+
+            if ($row) {
+                $rows[] = $row;
+            }
         }
 
         return $rows;
     }
 
+    /** Строка результата, или null, если сравнивать за этот период не с чем. */
     private function compare(
         Client $client,
-        string $key,
+        int $number,
         array $rule,
         DocumentPeriod $period,
         array $osv,
         array $tax,
         Collection $taxItems,
-    ): array {
-        if (!$osv) {
-            return $this->row($client, $key, $period, AutoAuditResult::NO_DOCUMENTS,
-                reason: 'Нет ведомости за этот период', sources: $tax);
+    ): ?array {
+        // Документ за период только с одной стороны: пары нет.
+        if (!$osv || !$tax) {
+            return null;
         }
 
-        if (!$tax) {
-            return $this->row($client, $key, $period, AutoAuditResult::NO_DOCUMENTS,
-                reason: 'Нет отчёта по налогу за этот период', sources: $osv);
-        }
-
-        $notes    = [];
         $expected = $this->expectedReports($taxItems, $period);
 
-        // Без отчёта одного филиала сумма заведомо меньше, и красное было бы ложным.
+        // Без отчёта одного из филиалов сумма заведомо меньше, и красное было бы ложным.
         if (count($tax) < $expected) {
-            return $this->row($client, $key, $period, AutoAuditResult::NO_DOCUMENTS,
-                reason: sprintf('Отчётов по налогу %d, а филиалов %d: сумма неполная', count($tax), $expected),
-                sources: array_merge($osv, $tax),
-            );
+            return null;
         }
+
+        $notes = [];
 
         if (count($tax) > $expected) {
             $notes[] = sprintf('Отчётов по налогу %d, а филиалов %d: возможно, один приложен дважды', count($tax), $expected);
@@ -221,14 +291,18 @@ class AutoAuditRunner
         $right      = round((float) array_sum(array_column($tax, 'value')), 2);
         $difference = round($left - $right, 2);
 
-        return $this->row($client, $key, $period,
-            abs($difference) < self::EPSILON ? AutoAuditResult::MATCHED : AutoAuditResult::MISMATCH,
-            left: $left,
-            right: $right,
-            difference: $difference,
-            reason: $notes ? implode('. ', $notes) : null,
-            sources: array_merge($osv, $tax),
-        );
+        return [
+            'client_id'   => $client->id,
+            'rule'        => (string) $number,
+            'period_from' => $period->from->toDateString(),
+            'period_to'   => $period->to->toDateString(),
+            'outcome'     => abs($difference) < self::EPSILON ? AutoAuditResult::MATCHED : AutoAuditResult::MISMATCH,
+            'left_value'  => $left,
+            'right_value' => $right,
+            'difference'  => $difference,
+            'reason'      => $notes ? implode('. ', $notes) : null,
+            'sources'     => array_merge($osv, $tax),
+        ];
     }
 
     /**
@@ -272,20 +346,30 @@ class AutoAuditRunner
         return max(1, $working->count());
     }
 
-    private function read(string $side, array $rule, BuhTaskDocument $document): DocumentValue
+    /**
+     * Одно число из документа.
+     *
+     * @param string $field для ОСВ номер счёта, для отчёта 'base' или 'tax'
+     */
+    private function read(string $side, string $field, BuhTaskDocument $document): DocumentValue
+    {
+        return $this->cache["{$side}:{$field}:{$document->id}"] ??= $this->readFile($side, $field, $document);
+    }
+
+    private function readFile(string $side, string $field, BuhTaskDocument $document): DocumentValue
     {
         $path = Storage::disk('local')->path($document->path);
 
         if (!is_readable($path)) {
-            return DocumentValue::unreadable('файла нет на диске');
+            return DocumentValue::unreadable('Файла нет на диске');
         }
 
         try {
             if ($side === 'osv') {
-                return $this->balanceSheet->turnover($path, $rule['account'], 'credit');
+                return $this->balanceSheet->turnover($path, $field, 'credit');
             }
 
-            return $rule['field'] === 'tax'
+            return $field === 'tax'
                 ? $this->taxReport->totalTax($path)
                 : $this->taxReport->taxableBase($path);
         } catch (Throwable $e) {
@@ -306,31 +390,6 @@ class AutoAuditRunner
             'status'      => $value->status,
             'value'       => $value->value,
             'reason'      => $value->reason,
-        ];
-    }
-
-    private function row(
-        Client $client,
-        string $rule,
-        ?DocumentPeriod $period,
-        string $outcome,
-        ?float $left = null,
-        ?float $right = null,
-        ?float $difference = null,
-        ?string $reason = null,
-        array $sources = [],
-    ): array {
-        return [
-            'client_id'   => $client->id,
-            'rule'        => $rule,
-            'period_from' => $period?->from->toDateString(),
-            'period_to'   => $period?->to->toDateString(),
-            'outcome'     => $outcome,
-            'left_value'  => $left,
-            'right_value' => $right,
-            'difference'  => $difference,
-            'reason'      => $reason,
-            'sources'     => $sources,
         ];
     }
 }

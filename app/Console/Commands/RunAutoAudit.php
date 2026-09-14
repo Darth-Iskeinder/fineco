@@ -34,9 +34,9 @@ class RunAutoAudit extends Command
         $counts  = TenantContext::for($tenant, fn () => $runner->run());
 
         foreach ([
-            AutoAuditResult::MATCHED      => 'Совпало',
-            AutoAuditResult::MISMATCH     => 'Не совпало',
-            AutoAuditResult::NO_DOCUMENTS => 'Нет документов',
+            AutoAuditResult::MATCHED        => 'Совпало',
+            AutoAuditResult::MISMATCH       => 'Не совпало',
+            AutoAuditResult::WRONG_DOCUMENT => 'Не тот документ',
         ] as $outcome => $label) {
             // str_pad считает байты, а не буквы: с кириллицей столбцы разъезжаются.
             $this->line($label . ':' . str_repeat(' ', max(1, 18 - mb_strlen($label))) . ($counts[$outcome] ?? 0));
