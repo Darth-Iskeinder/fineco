@@ -299,6 +299,57 @@ class AutoAuditRunTest extends TestCase
         $this->assertSame('Среди файлов задачи нет оборотно-сальдовой ведомости', $issue->reason);
     }
 
+    /** Фото вместо PDF: документ может быть и тем, поэтому не «не тот документ», а скан. */
+    public function test_scan_is_not_called_a_wrong_document(): void
+    {
+        $client = $this->client(['name' => 'ООО Фото ' . uniqid()]);
+        $this->attachSheet($client, 'осв.xls', ['3210' => 1.00, '3410' => 1.00]);
+        $this->attachLog($client, $this->item($client, $this->taxService), 'отчёт-фото.jpg');
+
+        $results = $this->runAudit();
+
+        $this->assertSame(['1', '3'], $results->pluck('rule')->sort()->values()->all());
+        $this->assertSame([AutoAuditResult::SCAN], $results->pluck('outcome')->unique()->values()->all());
+        $this->assertSame(DocumentValue::SCAN, $results->first()->sources[0]['status']);
+
+        $this->asVendor()->get(route('auto-audit.index'))
+            ->assertSeeInOrder([$client->name, 'по месяцу задачи', 'отчёт-фото.jpg', 'Скан, не прочитать']);
+    }
+
+    /**
+     * Скан и чужая форма в одной задаче: какой из файлов нужный, не знаем. Уверенно сказать
+     * «не тот документ» нельзя, поэтому скан.
+     */
+    public function test_scan_wins_over_wrong_form_in_one_task(): void
+    {
+        $client = $this->client();
+        $this->attachLog($client, $this->item($client, $this->taxService), 'форма-161.pdf');
+
+        $log  = BuhTaskLog::orderByDesc('id')->first();
+        $path = "buh_task_documents/{$log->id}/отчёт-фото.jpg";
+        Storage::disk('local')->put($path, 'x');
+        $log->documents()->create(['path' => $path, 'name' => 'отчёт-фото.jpg']);
+
+        $results = $this->runAudit();
+
+        $this->assertSame([AutoAuditResult::SCAN], $results->pluck('outcome')->unique()->values()->all());
+        $this->assertCount(2, $results->first()->sources);
+    }
+
+    /** Файла нет на диске: это не скан и не чужая форма, а поломка хранения. */
+    public function test_missing_file_is_unreadable(): void
+    {
+        $client = $this->client();
+        $this->attachLog($client, $this->item($client, $this->osvService), 'осв.xls');
+        Storage::disk('local')->deleteDirectory('buh_task_documents');
+
+        $issue = $this->runAudit()->first();
+
+        $this->assertSame(AutoAuditResult::UNREADABLE, $issue->outcome);
+        $this->assertSame('Файл не открылся', $issue->reason);
+        $this->assertSame('Файла нет на диске', $issue->sources[0]['reason']);
+    }
+
     /** 1С не печатает счёт без оборотов: нет строки в ведомости, значит оборот нулевой. */
     public function test_account_missing_from_the_sheet_counts_as_zero(): void
     {

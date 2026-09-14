@@ -206,12 +206,15 @@ class SingleTaxReportReaderTest extends TestCase
         $this->assertStringContainsString('отчётного периода', $result->reason);
     }
 
-    /** Скан вместо выгрузки: текстового слоя нет, читать нечего. */
-    public function test_rejects_pdf_without_text(): void
+    /**
+     * Скан вместо выгрузки: текстового слоя нет, читать нечего. Но документ может быть и
+     * тем, поэтому это отдельный ответ, а не «не та форма».
+     */
+    public function test_pdf_without_text_is_a_scan(): void
     {
         $result = $this->reader([])->taxableBase('скан.pdf');
 
-        $this->assertSame(DocumentValue::WRONG_DOC, $result->status);
+        $this->assertSame(DocumentValue::SCAN, $result->status);
         $this->assertStringContainsString('скан', $result->reason);
     }
 

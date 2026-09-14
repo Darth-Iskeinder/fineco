@@ -81,7 +81,8 @@ class SingleTaxReportReader
         }
 
         if (!$words) {
-            return DocumentValue::wrongDocument('В PDF нет текста — похоже, это скан');
+            // Документ может быть и тем, просто прочитать его нечем: это не «не та форма».
+            return DocumentValue::scan('В PDF нет текста, это скан или фото');
         }
 
         $rows = $this->rows($words);

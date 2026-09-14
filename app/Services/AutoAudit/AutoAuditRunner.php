@@ -29,11 +29,11 @@ use Throwable;
  *   3. ставим в пару ведомость и отчёты за один и тот же период;
  *   4. отчёты филиалов за период складываем и сравниваем с ведомостью до копейки.
  *
- * Каждая строка относится к одной из проверок, статусов три:
+ * Каждая строка относится к одной из проверок:
  *   - совпало или не совпало, когда пару удалось сравнить. Пары за период нет или отчёта
  *     одного из филиалов не хватает: такую строку не пишем, чтобы не засорять страницу;
- *   - «не тот документ»: задача закрыта с файлами, но ни один не читается как нужная форма.
- *     Стоит под каждой проверкой клиента, которая берёт числа из этого документа.
+ *   - беда с документом: не тот документ, скан или файл не открылся. Стоит под каждой
+ *     проверкой клиента, которая берёт числа из этого документа.
  *
  * Каждый прогон стирает прошлые результаты фирмы и пишет заново.
  */
@@ -77,6 +77,9 @@ class AutoAuditRunner
      * разбор из кеша пригодится ей же.
      */
     private const PROBE = ['osv' => '3210', 'tax' => 'base'];
+
+    /** Картинки вместо PDF или Excel: скан или фото, без распознавания прочитать нечем. */
+    private const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tif', 'tiff', 'webp', 'heic'];
 
     /** Задачи, документам которых верим: работа закрыта или сдана на проверку. */
     private const DONE_STATUSES = ['completed', 'review'];
@@ -143,12 +146,11 @@ class AutoAuditRunner
             return [];
         }
 
-        // Не тот документ ломает каждую проверку, которая берёт из него число, поэтому и
-        // стоит под каждой. Второй стороны может не быть вовсе: ошибка в файле от этого
-        // не пропадает.
-        $wrong = array_merge(
-            $this->wrongDocuments($client, 'osv', $osvDocuments),
-            $this->wrongDocuments($client, 'tax', $taxDocuments),
+        // Беда с документом ломает каждую проверку, которая берёт из него число, поэтому и
+        // стоит под каждой. Второй стороны может не быть вовсе: беда от этого не пропадает.
+        $problems = array_merge(
+            $this->documentProblems($client, 'osv', $osvDocuments),
+            $this->documentProblems($client, 'tax', $taxDocuments),
         );
 
         $taxItems = $this->estimateItems($client, $taxService);
@@ -159,7 +161,7 @@ class AutoAuditRunner
                 continue;
             }
 
-            foreach ($wrong as $row) {
+            foreach ($problems as $row) {
                 $rows[] = array_merge($row, ['rule' => (string) $number]);
             }
 
@@ -170,16 +172,21 @@ class AutoAuditRunner
     }
 
     /**
-     * Задачи, где файлы приложены, но нужной формы среди них нет.
+     * Задачи, где файлы приложены, но нужную форму среди них прочитать не удалось.
      *
      * Смотрим задачу целиком, а не каждый файл: рядом с отчётом часто лежит квитанция об
-     * оплате, и сама по себе она не ошибка. Ошибка, когда ни один файл задачи не прочитался
-     * как нужная форма.
+     * оплате, и сама по себе она не ошибка.
+     *
+     * Причину называем уверенно, только когда можем:
+     *   - среди файлов есть скан или фото: нужный документ может быть как раз им, поэтому
+     *     «скан», а не «не тот документ»;
+     *   - какой-то файл не открылся: по той же причине «файл не открылся»;
+     *   - все файлы открылись и прочитались, но это другие формы: вот тогда «не тот документ».
      *
      * Отчётный период из такого файла не прочитать, а на странице строки выбираются по
      * периоду. Берём месяц перед месяцем задачи: отчёт за июль сдают в августовской задаче.
      */
-    private function wrongDocuments(Client $client, string $side, Collection $documents): array
+    private function documentProblems(Client $client, string $side, Collection $documents): array
     {
         $rows = [];
 
@@ -199,6 +206,25 @@ class AutoAuditRunner
                 continue;
             }
 
+            $statuses = array_column($sources, 'status');
+
+            [$outcome, $reason] = match (true) {
+                in_array(DocumentValue::SCAN, $statuses, true) => [
+                    AutoAuditResult::SCAN,
+                    'Документ отсканирован или сфотографирован, прочитать его пока нельзя',
+                ],
+                in_array(DocumentValue::UNREADABLE, $statuses, true) => [
+                    AutoAuditResult::UNREADABLE,
+                    'Файл не открылся',
+                ],
+                default => [
+                    AutoAuditResult::WRONG_DOCUMENT,
+                    $side === 'osv'
+                        ? 'Среди файлов задачи нет оборотно-сальдовой ведомости'
+                        : 'Среди файлов задачи нет отчёта по единому налогу',
+                ],
+            };
+
             // С первого числа, иначе «31 августа минус месяц» перельётся мимо июля.
             $month  = CarbonImmutable::create($log->year, $log->month, 1)->subMonth();
             $period = DocumentPeriod::of($month->year, $month->month);
@@ -208,13 +234,11 @@ class AutoAuditRunner
                 'rule'        => null,
                 'period_from' => $period->from->toDateString(),
                 'period_to'   => $period->to->toDateString(),
-                'outcome'     => AutoAuditResult::WRONG_DOCUMENT,
+                'outcome'     => $outcome,
                 'left_value'  => null,
                 'right_value' => null,
                 'difference'  => null,
-                'reason'      => $side === 'osv'
-                    ? 'Среди файлов задачи нет оборотно-сальдовой ведомости'
-                    : 'Среди файлов задачи нет отчёта по единому налогу',
+                'reason'      => $reason,
                 'sources'     => $sources,
             ];
         }
@@ -236,7 +260,7 @@ class AutoAuditRunner
             foreach ($documents as [$log, $document]) {
                 $value = $this->read($side, $side === 'osv' ? $rule['account'] : $rule['field'], $document);
 
-                // Не тот документ или не открылся: в пару его не поставить.
+                // Не тот документ, скан или не открылся: в пару его не поставить.
                 if (!$value->period) {
                     continue;
                 }
@@ -375,6 +399,12 @@ class AutoAuditRunner
 
         if (!is_readable($path)) {
             return DocumentValue::unreadable('Файла нет на диске');
+        }
+
+        // Картинку не открыть ни как таблицу, ни как PDF. Документ на ней может быть и тем,
+        // просто прочитать его без распознавания нечем.
+        if (in_array(strtolower(pathinfo($document->path, PATHINFO_EXTENSION)), self::IMAGE_EXTENSIONS, true)) {
+            return DocumentValue::scan('Это картинка, а не PDF или Excel');
         }
 
         try {

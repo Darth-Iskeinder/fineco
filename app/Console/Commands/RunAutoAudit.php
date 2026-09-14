@@ -33,13 +33,9 @@ class RunAutoAudit extends Command
         $started = microtime(true);
         $counts  = TenantContext::for($tenant, fn () => $runner->run());
 
-        foreach ([
-            AutoAuditResult::MATCHED        => 'Совпало',
-            AutoAuditResult::MISMATCH       => 'Не совпало',
-            AutoAuditResult::WRONG_DOCUMENT => 'Не тот документ',
-        ] as $outcome => $label) {
+        foreach (AutoAuditResult::LABELS as $outcome => $label) {
             // str_pad считает байты, а не буквы: с кириллицей столбцы разъезжаются.
-            $this->line($label . ':' . str_repeat(' ', max(1, 18 - mb_strlen($label))) . ($counts[$outcome] ?? 0));
+            $this->line($label . ':' . str_repeat(' ', max(1, 21 - mb_strlen($label))) . ($counts[$outcome] ?? 0));
         }
 
         $this->line(sprintf('Заняло %.1f с', microtime(true) - $started));

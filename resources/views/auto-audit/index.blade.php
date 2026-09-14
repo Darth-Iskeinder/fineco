@@ -6,10 +6,12 @@
 @php
     use App\Models\AutoAuditResult;
 
-    $statuses = [
-        AutoAuditResult::MATCHED        => ['Совпало',         'bg-emerald-50 text-emerald-700'],
-        AutoAuditResult::MISMATCH       => ['Не совпало',      'bg-red-50 text-red-700'],
-        AutoAuditResult::WRONG_DOCUMENT => ['Не тот документ', 'bg-amber-50 text-amber-700'],
+    $statusClasses = [
+        AutoAuditResult::MATCHED        => 'bg-emerald-50 text-emerald-700',
+        AutoAuditResult::MISMATCH       => 'bg-red-50 text-red-700',
+        AutoAuditResult::WRONG_DOCUMENT => 'bg-amber-50 text-amber-700',
+        AutoAuditResult::SCAN           => 'bg-slate-100 text-slate-600',
+        AutoAuditResult::UNREADABLE     => 'bg-slate-100 text-slate-600',
     ];
 
     $money = fn ($value) => $value === null ? '' : number_format((float) $value, 2, ',', ' ');
@@ -55,14 +57,14 @@
                         @endforeach
                     </select>
                     <span class="text-sm text-slate-500">
-                        Совпало: {{ $counts[AutoAuditResult::MATCHED] ?? 0 }},
-                        не совпало: {{ $counts[AutoAuditResult::MISMATCH] ?? 0 }},
-                        не тот документ: {{ $counts[AutoAuditResult::WRONG_DOCUMENT] ?? 0 }}
+                        @foreach (AutoAuditResult::LABELS as $outcome => $label)
+                            {{ $label }}: {{ $counts[$outcome] ?? 0 }}{{ $loop->last ? '' : ';' }}
+                        @endforeach
                     </span>
                 </form>
                 <p class="text-xs text-slate-400 mt-2">
                     Период, за который составлены документы, а не месяц задачи: отчёт за июль сдают в августе, и он здесь в июле.
-                    Если документ не тот, период из него не прочитать, и он взят как месяц перед задачей.
+                    Если документ прочитать не удалось (не тот, скан или не открылся), период взят как месяц перед задачей.
                 </p>
             </div>
         @endif
@@ -89,14 +91,13 @@
                 </thead>
                 <tbody class="divide-y divide-slate-100">
                     @foreach ($results as $result)
-                        @php [$label, $classes] = $statuses[$result->outcome] ?? [$result->outcome, 'bg-slate-100 text-slate-600']; @endphp
                         <tr class="align-top">
                             <td class="px-4 py-3 text-slate-700">№{{ $result->rule }} {{ $result->ruleName() }}</td>
                             <td class="px-4 py-3 font-medium text-slate-800">{{ $result->client?->name ?? 'клиент удалён' }}</td>
                             <td class="px-4 py-3 text-slate-700 whitespace-nowrap">
                                 {{ $result->periodLabel() }}
                                 {{-- Из непрочитанного файла период не узнать: он взят по задаче, и это надо видеть. --}}
-                                @if ($result->outcome === AutoAuditResult::WRONG_DOCUMENT)
+                                @if (in_array($result->outcome, AutoAuditResult::DOCUMENT_PROBLEMS, true))
                                     <p class="text-xs text-slate-400">по месяцу задачи</p>
                                 @endif
                             </td>
@@ -121,7 +122,9 @@
                                 @endforeach
                             </td>
                             <td class="px-4 py-3">
-                                <span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap {{ $classes }}">{{ $label }}</span>
+                                <span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap {{ $statusClasses[$result->outcome] ?? 'bg-slate-100 text-slate-600' }}">
+                                    {{ AutoAuditResult::LABELS[$result->outcome] ?? $result->outcome }}
+                                </span>
                                 @if ($result->reason)
                                     <p class="mt-1 text-xs text-slate-500">{{ $result->reason }}</p>
                                 @endif

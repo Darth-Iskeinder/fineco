@@ -18,7 +18,21 @@ class AutoAuditResult extends Model
 
     public const MATCHED        = 'matched';         // числа совпали
     public const MISMATCH       = 'mismatch';        // числа разные
-    public const WRONG_DOCUMENT = 'wrong_document';  // задача закрыта с файлами, но нужной формы среди них нет
+    public const WRONG_DOCUMENT = 'wrong_document';  // все файлы задачи прочитаны, но нужной формы среди них нет
+    public const SCAN           = 'scan';            // среди файлов скан или фото, нужную форму не прочитать
+    public const UNREADABLE     = 'unreadable';      // файл не открылся: битый или его нет на диске
+
+    /** Подписи статусов для страницы и сводок, в порядке показа. */
+    public const LABELS = [
+        self::MATCHED        => 'Совпало',
+        self::MISMATCH       => 'Не совпало',
+        self::WRONG_DOCUMENT => 'Не тот документ',
+        self::SCAN           => 'Скан, не прочитать',
+        self::UNREADABLE     => 'Файл не открылся',
+    ];
+
+    /** Сравнивать нечего, беда с самим документом. Период у таких строк взят по задаче. */
+    public const DOCUMENT_PROBLEMS = [self::WRONG_DOCUMENT, self::SCAN, self::UNREADABLE];
 
     protected $fillable = [
         'client_id', 'rule', 'period_from', 'period_to', 'outcome',

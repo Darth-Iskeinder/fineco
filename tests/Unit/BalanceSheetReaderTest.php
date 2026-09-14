@@ -425,4 +425,15 @@ class BalanceSheetReaderTest extends TestCase
 
         $this->assertSame(DocumentValue::WRONG_DOC, $result->status);
     }
+
+    /**
+     * Скан, сохранённый в PDF: текста нет вовсе. Документ может быть и тем, поэтому это
+     * не «не та форма», а отдельный ответ.
+     */
+    public function test_pdf_without_text_is_a_scan(): void
+    {
+        $result = $this->reader([])->turnover('скан.pdf', '3210', 'credit');
+
+        $this->assertSame(DocumentValue::SCAN, $result->status);
+    }
 }

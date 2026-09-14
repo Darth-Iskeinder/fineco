@@ -74,9 +74,19 @@ class BalanceSheetReader
     public function turnover(string $path, string $account, string $side = 'credit'): DocumentValue
     {
         try {
-            $rows = strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'pdf'
-                ? $this->rowsFromPdf($path)
-                : $this->rowsFromSpreadsheet($path);
+            if (strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'pdf') {
+                $words = $this->pdf->words($path);
+
+                // Текста нет вовсе: скан или фото, сохранённое в PDF. Документ может быть
+                // и тем, просто прочитать его нечем, поэтому это не «не та форма».
+                if (!$words) {
+                    return DocumentValue::scan('В PDF нет текста, это скан или фото');
+                }
+
+                $rows = $this->rowsFromPdf($words);
+            } else {
+                $rows = $this->rowsFromSpreadsheet($path);
+            }
         } catch (Throwable $e) {
             return DocumentValue::unreadable('Файл не открылся как ведомость: ' . $e->getMessage());
         }
@@ -139,9 +149,9 @@ class BalanceSheetReader
      * колонки, и попадание однозначно. Дальше таблица уходит в общую логику, и разбираться,
      * из какого формата она пришла, никому не нужно.
      */
-    private function rowsFromPdf(string $path): array
+    private function rowsFromPdf(array $words): array
     {
-        $lines = $this->groupByLine($this->pdf->words($path));
+        $lines = $this->groupByLine($words);
         $starts = $this->columnStarts($lines);
 
         if (!$starts) {

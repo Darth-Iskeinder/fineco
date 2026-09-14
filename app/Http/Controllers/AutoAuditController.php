@@ -64,12 +64,14 @@ class AutoAuditController extends Controller
         $started = microtime(true);
         $counts  = $runner->run();
 
+        $summary = collect(AutoAuditResult::LABELS)
+            ->map(fn (string $label, string $outcome) => $label . ': ' . ($counts[$outcome] ?? 0))
+            ->implode('; ');
+
         return redirect()->route('auto-audit.index')->with('success', sprintf(
-            'Проверка прошла за %.1f с. Совпало: %d, не совпало: %d, не тот документ: %d.',
+            'Проверка прошла за %.1f с. %s.',
             microtime(true) - $started,
-            $counts[AutoAuditResult::MATCHED] ?? 0,
-            $counts[AutoAuditResult::MISMATCH] ?? 0,
-            $counts[AutoAuditResult::WRONG_DOCUMENT] ?? 0,
+            $summary,
         ));
     }
 
