@@ -53,4 +53,22 @@ class DocumentPeriod
     {
         return $this->from->format('d.m.Y') . ' – ' . $this->to->format('d.m.Y');
     }
+
+    /** Для людей: «июль 2026», «2 квартал 2026», всё остальное датами. */
+    public function title(): string
+    {
+        $months      = count($this->months());
+        $wholeMonths = $this->from->day === 1 && $this->to->isSameDay($this->to->endOfMonth());
+
+        if ($wholeMonths && $months === 1) {
+            return $this->from->locale('ru')->isoFormat('MMMM YYYY');
+        }
+
+        // Квартал начинается с января, апреля, июля или октября.
+        if ($wholeMonths && $months === 3 && $this->from->month % 3 === 1) {
+            return intdiv($this->from->month + 2, 3) . ' квартал ' . $this->from->year;
+        }
+
+        return $this->label();
+    }
 }

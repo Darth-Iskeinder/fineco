@@ -9,6 +9,7 @@
     $statusClasses = [
         AutoAuditResult::MATCHED        => 'bg-emerald-50 text-emerald-700',
         AutoAuditResult::MISMATCH       => 'bg-red-50 text-red-700',
+        AutoAuditResult::MISSING_SHEET  => 'bg-amber-50 text-amber-700',
         AutoAuditResult::WRONG_DOCUMENT => 'bg-amber-50 text-amber-700',
         AutoAuditResult::SCAN           => 'bg-slate-100 text-slate-600',
         AutoAuditResult::UNREADABLE     => 'bg-slate-100 text-slate-600',

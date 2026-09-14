@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToTenant;
 use App\Services\AutoAudit\AutoAuditRunner;
+use App\Services\AutoAudit\DocumentPeriod;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -18,6 +19,7 @@ class AutoAuditResult extends Model
 
     public const MATCHED        = 'matched';         // числа совпали
     public const MISMATCH       = 'mismatch';        // числа разные
+    public const MISSING_SHEET  = 'missing_sheet';   // квартальный отчёт есть, а ведомости за какой-то месяц квартала нет
     public const WRONG_DOCUMENT = 'wrong_document';  // все файлы задачи прочитаны, но нужной формы среди них нет
     public const SCAN           = 'scan';            // среди файлов скан или фото, нужную форму не прочитать
     public const UNREADABLE     = 'unreadable';      // файл не открылся: битый или его нет на диске
@@ -26,6 +28,7 @@ class AutoAuditResult extends Model
     public const LABELS = [
         self::MATCHED        => 'Совпало',
         self::MISMATCH       => 'Не совпало',
+        self::MISSING_SHEET  => 'Нет ОСВ',
         self::WRONG_DOCUMENT => 'Не тот документ',
         self::SCAN           => 'Скан, не прочитать',
         self::UNREADABLE     => 'Файл не открылся',
@@ -65,19 +68,14 @@ class AutoAuditResult extends Model
         return $this->period_from?->toDateString() . '..' . $this->period_to?->toDateString();
     }
 
-    /** «июль 2026» для месяца, даты через тире для всего остального. */
+    /** «июль 2026», «2 квартал 2026», всё остальное датами. */
     public function periodLabel(): string
     {
         if (!$this->period_from || !$this->period_to) {
             return 'период не разобран';
         }
 
-        $from = $this->period_from->locale('ru');
-
-        if ($from->day === 1 && $this->period_to->isSameDay($from->endOfMonth())) {
-            return $from->isoFormat('MMMM YYYY');
-        }
-
-        return $from->format('d.m.Y') . ' – ' . $this->period_to->format('d.m.Y');
+        // Неизменяемые копии: у обычной даты расчёт конца месяца сдвигает её саму.
+        return (new DocumentPeriod($this->period_from->toImmutable(), $this->period_to->toImmutable()))->title();
     }
 }

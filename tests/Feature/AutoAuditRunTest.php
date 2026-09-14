@@ -145,7 +145,76 @@ class AutoAuditRunTest extends TestCase
             return DocumentValue::wrongDocument('Это не отчёт по единому налогу');
         }
 
-        return DocumentValue::found($report[$field], [], DocumentPeriod::of(...$report['month']));
+        return DocumentValue::found($report[$field], [], $report['period'] ?? DocumentPeriod::of(...$report['month']));
+    }
+
+    /** Квартальный отчёт сравниваем с суммой трёх помесячных ведомостей. */
+    public function test_quarterly_report_is_compared_with_three_monthly_sheets(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв-апрель.xls', ['3210' => 100.00, '3410' => 4.00], month: 4);
+        $this->attachSheet($client, 'осв-май.xls', ['3210' => 200.00, '3410' => 8.00], month: 5);
+        $this->attachSheet($client, 'осв-июнь.xls', ['3210' => 300.00, '3410' => 12.00], month: 6);
+        $this->attachQuarterReport($client, 'отчёт-2кв.pdf', base: 600.00, tax: 25.00);
+
+        $results = $this->runAudit();
+
+        $this->assertCount(2, $results);
+
+        $base = $results->firstWhere('rule', '1');
+        $this->assertSame(AutoAuditResult::MATCHED, $base->outcome);
+        $this->assertSame('600.00', $base->left_value);
+        $this->assertSame('2 квартал 2026', $base->periodLabel());
+        $this->assertCount(4, $base->sources);
+
+        $tax = $results->firstWhere('rule', '3');
+        $this->assertSame(AutoAuditResult::MISMATCH, $tax->outcome);
+        $this->assertSame('-1.00', $tax->difference);
+    }
+
+    /** Нет ведомости за месяц квартала: оборот не сложить, но видно, какого месяца не хватает. */
+    public function test_quarter_without_one_monthly_sheet_says_which_month_is_missing(): void
+    {
+        $client = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL]);
+        $this->attachSheet($client, 'осв-апрель.xls', ['3210' => 1.00, '3410' => 4.00], month: 4);
+        $this->attachSheet($client, 'осв-июнь.xls', ['3210' => 1.00, '3410' => 12.00], month: 6);
+        $this->attachQuarterReport($client, 'отчёт-2кв.pdf', base: 3.00, tax: 24.00);
+
+        $results = $this->runAudit();
+
+        $this->assertCount(1, $results);
+
+        $row = $results->first();
+        $this->assertSame(AutoAuditResult::MISSING_SHEET, $row->outcome);
+        $this->assertSame('Нет ведомости за май 2026', $row->reason);
+        $this->assertNull($row->left_value);
+        $this->assertNull($row->difference);
+        $this->assertSame('24.00', $row->right_value);
+        $this->assertSame('2 квартал 2026', $row->periodLabel());
+
+        $this->asVendor()->get(route('auto-audit.index'))
+            ->assertSeeInOrder([$client->name, '2 квартал 2026', 'отчёт-2кв.pdf', 'Нет ОСВ', 'Нет ведомости за май 2026']);
+    }
+
+    /** Ни одной ведомости за квартал: пары нет вовсе, как и у помесячного отчёта. */
+    public function test_quarter_without_any_sheet_writes_nothing(): void
+    {
+        $client = $this->client();
+        $this->attachQuarterReport($client, 'отчёт-2кв.pdf', base: 3.00, tax: 24.00);
+
+        $this->assertCount(0, $this->runAudit());
+    }
+
+    /** Отчёт за 2 квартал 2026 на июльской задаче. */
+    private function attachQuarterReport(Client $client, string $file, float $base, float $tax): void
+    {
+        $this->reports[$file] = [
+            'period' => new DocumentPeriod(DocumentPeriod::of(2026, 4)->from, DocumentPeriod::of(2026, 6)->to),
+            'base'   => $base,
+            'tax'    => $tax,
+        ];
+
+        $this->attachLog($client, $this->item($client, $this->taxService), $file);
     }
 
     public function test_equal_numbers_match_for_both_rules(): void
@@ -489,6 +558,18 @@ class AutoAuditRunTest extends TestCase
             ->assertSee('Не тот документ')
             ->assertSee('форма-161.pdf')
             ->assertSee('Это не отчёт по единому налогу');
+    }
+
+    /** Месяц и квартал подписываются словами, всё остальное датами, и первый день не съезжает. */
+    public function test_period_labels(): void
+    {
+        $label = fn (string $from, string $to) => (new AutoAuditResult(['period_from' => $from, 'period_to' => $to]))->periodLabel();
+
+        $this->assertSame('июль 2026', $label('2026-07-01', '2026-07-31'));
+        $this->assertSame('2 квартал 2026', $label('2026-04-01', '2026-06-30'));
+        $this->assertSame('4 квартал 2026', $label('2026-10-01', '2026-12-31'));
+        $this->assertSame('01.05.2026 – 31.07.2026', $label('2026-05-01', '2026-07-31'));
+        $this->assertSame('30.04.2026 – 30.06.2026', $label('2026-04-30', '2026-06-30'));
     }
 
     private function asVendor(): static

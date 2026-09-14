@@ -26,12 +26,14 @@ use Throwable;
  * Как идёт сверка у одного клиента:
  *   1. берём документы закрытых задач двух эталонных БП;
  *   2. читаем каждый и узнаём период из самого документа, а не из месяца задачи;
- *   3. ставим в пару ведомость и отчёты за один и тот же период;
+ *   3. ставим в пару ведомость и отчёты за один и тот же период. Ведомость всегда
+ *      помесячная, а отчёт бывает квартальным: тогда складываем ведомости трёх месяцев;
  *   4. отчёты филиалов за период складываем и сравниваем с ведомостью до копейки.
  *
  * Каждая строка относится к одной из проверок:
- *   - совпало или не совпало, когда пару удалось сравнить. Пары за период нет или отчёта
+ *   - совпало или не совпало, когда пару удалось сравнить. Пары нет вовсе или отчёта
  *     одного из филиалов не хватает: такую строку не пишем, чтобы не засорять страницу;
+ *   - нет ОСВ: отчёт квартальный, а ведомости за какой-то месяц квартала нет;
  *   - беда с документом: не тот документ, скан или файл не открылся. Стоит под каждой
  *     проверкой клиента, которая берёт числа из этого документа.
  *
@@ -51,6 +53,9 @@ class AutoAuditRunner
      * account:   счёт в ОСВ, берём оборот за период по кредиту;
      * field:     число из отчёта, 'base' (налоговая база) или 'tax' (сумма налога);
      * cash_only: только для кассового метода. Полное обслуживание нужно обеим.
+     *
+     * Обе проверки берут обороты, поэтому ведомости за квартал складываются. У будущих
+     * проверок по сальдо так нельзя: там нужен последний месяц.
      */
     public const RULES = [
         1 => [
@@ -274,7 +279,16 @@ class AutoAuditRunner
         $rows = [];
 
         foreach ($periods as $entry) {
-            $row = $this->compare($client, $number, $rule, $entry['period'], $entry['osv'] ?? [], $entry['tax'] ?? [], $taxItems);
+            $osv = $entry['osv'] ?? [];
+            $tax = $entry['tax'] ?? [];
+
+            // Отчёт за несколько месяцев, а ведомости за тот же период нет: ведомости у нас
+            // помесячные, собираем их по месяцам отчёта.
+            $sheets = !$osv && $tax && count($entry['period']->months()) > 1
+                ? $this->sheetsByMonth($entry['period'], $periods)
+                : [$entry['period']->title() => $osv];
+
+            $row = $this->compare($client, $number, $rule, $entry['period'], $sheets, $tax, $taxItems);
 
             if ($row) {
                 $rows[] = $row;
@@ -284,18 +298,38 @@ class AutoAuditRunner
         return $rows;
     }
 
-    /** Строка результата, или null, если сравнивать за этот период не с чем. */
+    /**
+     * Ведомости за каждый месяц периода, ключ «май 2026». Пустой список, если за месяц
+     * ведомости нет.
+     */
+    private function sheetsByMonth(DocumentPeriod $period, array $periods): array
+    {
+        $sheets = [];
+
+        foreach ($period->months() as [$year, $month]) {
+            $monthPeriod = DocumentPeriod::of($year, $month);
+            $sheets[$monthPeriod->title()] = $periods[$monthPeriod->label()]['osv'] ?? [];
+        }
+
+        return $sheets;
+    }
+
+    /**
+     * Строка результата, или null, если сравнивать не с чем.
+     *
+     * @param array<string, array> $sheets ведомости по месяцам периода: «июль 2026» => источники
+     */
     private function compare(
         Client $client,
         int $number,
         array $rule,
         DocumentPeriod $period,
-        array $osv,
+        array $sheets,
         array $tax,
         Collection $taxItems,
     ): ?array {
-        // Документ за период только с одной стороны: пары нет.
-        if (!$osv || !$tax) {
+        // Документы только с одной стороны: пары нет.
+        if (!$tax || !array_filter($sheets)) {
             return null;
         }
 
@@ -312,33 +346,75 @@ class AutoAuditRunner
             $notes[] = sprintf('Отчётов по налогу %d, а филиалов %d: возможно, один приложен дважды', count($tax), $expected);
         }
 
-        // Ведомость за период одна. Приложили несколько, берём последнюю загруженную.
-        $sheet = $osv[0];
+        $left    = 0.0;
+        $sources = [];
 
-        if (count($osv) > 1) {
-            $notes[] = sprintf('Ведомостей за период %d, взята последняя', count($osv));
+        foreach ($sheets as $month => $osv) {
+            if (!$osv) {
+                continue;
+            }
+
+            // Ведомость за месяц одна. Приложили несколько, берём последнюю загруженную.
+            if (count($osv) > 1) {
+                $notes[] = sprintf('Ведомостей за %s: %d, взята последняя', $month, count($osv));
+            }
+
+            // В ОСВ 1С не печатает счета без оборотов и сальдо: нет строки, значит ноль.
+            if ($osv[0]['status'] === DocumentValue::NOT_FOUND) {
+                $notes[] = "В ведомости за {$month} нет счёта {$rule['account']}, оборот считаем нулевым";
+            }
+
+            $left += (float) ($osv[0]['value'] ?? 0);
+            array_push($sources, ...$osv);
         }
 
-        // В ОСВ 1С не печатает счета без оборотов и сальдо: нет строки, значит ноль.
-        if ($sheet['status'] === DocumentValue::NOT_FOUND) {
-            $notes[] = "В ведомости нет счёта {$rule['account']}, оборот считаем нулевым";
+        $right   = round((float) array_sum(array_column($tax, 'value')), 2);
+        $sources = array_merge($sources, $tax);
+        $missing = array_keys(array_filter($sheets, fn (array $osv) => !$osv));
+
+        // Квартал без ведомости за какой-то месяц: оборот не сложить, и сумма двух месяцев
+        // дала бы ложное красное. Но это конкретная дыра, которую бухгалтер закроет.
+        if ($missing) {
+            array_unshift($notes, 'Нет ведомости за ' . implode(', ', $missing));
+
+            return $this->result($client, $number, $period, AutoAuditResult::MISSING_SHEET, null, $right, $notes, $sources);
         }
 
-        $left       = round((float) ($sheet['value'] ?? 0), 2);
-        $right      = round((float) array_sum(array_column($tax, 'value')), 2);
-        $difference = round($left - $right, 2);
+        $left = round($left, 2);
 
+        return $this->result(
+            $client,
+            $number,
+            $period,
+            abs($left - $right) < self::EPSILON ? AutoAuditResult::MATCHED : AutoAuditResult::MISMATCH,
+            $left,
+            $right,
+            $notes,
+            $sources,
+        );
+    }
+
+    private function result(
+        Client $client,
+        int $number,
+        DocumentPeriod $period,
+        string $outcome,
+        ?float $left,
+        ?float $right,
+        array $notes,
+        array $sources,
+    ): array {
         return [
             'client_id'   => $client->id,
             'rule'        => (string) $number,
             'period_from' => $period->from->toDateString(),
             'period_to'   => $period->to->toDateString(),
-            'outcome'     => abs($difference) < self::EPSILON ? AutoAuditResult::MATCHED : AutoAuditResult::MISMATCH,
+            'outcome'     => $outcome,
             'left_value'  => $left,
             'right_value' => $right,
-            'difference'  => $difference,
+            'difference'  => $left === null || $right === null ? null : round($left - $right, 2),
             'reason'      => $notes ? implode('. ', $notes) : null,
-            'sources'     => array_merge($osv, $tax),
+            'sources'     => $sources,
         ];
     }
 

@@ -323,13 +323,15 @@ class SingleTaxReportReader
                 }
             }
 
-            $rows[$key ?? $word->top][] = [
+            // Ключ строкой: дробный ключ массива PHP обрезает до целого и пишет об этом
+            // предупреждение на каждое слово.
+            $rows[(string) ($key ?? $word->top)][] = [
                 'left' => $word->left,
                 'text' => $word->text,
             ];
         }
 
-        ksort($rows);
+        uksort($rows, fn ($a, $b) => (float) $a <=> (float) $b);
 
         foreach ($rows as &$cells) {
             usort($cells, fn ($a, $b) => $a['left'] <=> $b['left']);
