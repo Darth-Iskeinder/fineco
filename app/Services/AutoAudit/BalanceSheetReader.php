@@ -104,7 +104,7 @@ class BalanceSheetReader
         $row = $this->findAccountRow($rows, $account);
 
         if ($row === null) {
-            return DocumentValue::notFound("В ведомости нет счёта {$account}");
+            return DocumentValue::notFound("В ведомости нет счёта {$account}", [], $period);
         }
 
         $raw = $rows[$row][$column] ?? null;

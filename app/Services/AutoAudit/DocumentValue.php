@@ -31,9 +31,13 @@ class DocumentValue
         return new self($value, self::FOUND, null, $trace, $period);
     }
 
-    public static function notFound(string $reason, array $trace = []): self
+    /**
+     * Период здесь бывает известен: форма опознана, заголовок прочитан, нет только строки.
+     * Сверке он нужен, чтобы поставить документ в пару, даже когда числа в нём нет.
+     */
+    public static function notFound(string $reason, array $trace = [], ?DocumentPeriod $period = null): self
     {
-        return new self(null, self::NOT_FOUND, $reason, $trace);
+        return new self(null, self::NOT_FOUND, $reason, $trace, $period);
     }
 
     public static function wrongDocument(string $reason, array $trace = []): self

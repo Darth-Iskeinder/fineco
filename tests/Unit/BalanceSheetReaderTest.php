@@ -171,6 +171,8 @@ class BalanceSheetReaderTest extends TestCase
         $result = $this->reader()->turnover($this->file, '9999', 'credit');
 
         $this->assertSame(DocumentValue::NOT_FOUND, $result->status);
+        // Форма опознана, значит период известен: сверке он нужен, чтобы поставить ведомость в пару.
+        $this->assertSame('01.07.2026 – 31.07.2026', $result->period?->label());
     }
 
     /**

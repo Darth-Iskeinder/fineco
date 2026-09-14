@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AuditController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\AutoAuditController;
 use App\Http\Controllers\BuhSmetaController;
 use App\Http\Controllers\BuhTasksController;
 use App\Http\Controllers\ClientController;
@@ -132,6 +133,12 @@ Route::middleware('auth:employee')->group(function () {
     // с любой страницы ERP и вне системы модулей (доступ проверяет сам контроллер).
     Route::get('/task-alerts', [TaskAlertController::class, 'index'])->name('task-alerts.index');
     Route::post('/task-alerts/seen', [TaskAlertController::class, 'seen'])->name('task-alerts.seen');
+
+    // Автоаудит: пока только для владельца системы, зашедшего в фирму. Сотрудникам фирмы
+    // страница отвечает 404, проверка внутри контроллера. По крону не запускается:
+    // сначала смотрим результат руками, прогон по кнопке «Проверить сейчас».
+    Route::get('/auto-audit', [AutoAuditController::class, 'index'])->name('auto-audit.index');
+    Route::post('/auto-audit/run', [AutoAuditController::class, 'run'])->name('auto-audit.run');
 
     // Страница руководителя (только роль manager, вне системы модулей)
     Route::prefix('dashboard')->name('dashboard.')->middleware('manager')->group(function () {

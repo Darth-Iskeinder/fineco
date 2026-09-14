@@ -109,6 +109,16 @@ class SingleTaxReportReaderTest extends TestCase
         $this->assertSame(1465310.00, $result->value);
     }
 
+    /** Рядом с базой лежит общая сумма налога (поле 187): её сверяем со счётом 3410. */
+    public function test_reads_total_tax(): void
+    {
+        $result = $this->reader($this->report())->totalTax('отчёт.pdf');
+
+        $this->assertTrue($result->isFound(), $result->reason ?? '');
+        $this->assertSame(59072.40, $result->value);
+        $this->assertSame('01.07.2026 – 31.07.2026', $result->period->label());
+    }
+
     /** Период читается из самого документа: месяц задачи ему не равен. */
     public function test_reads_period_from_the_document(): void
     {

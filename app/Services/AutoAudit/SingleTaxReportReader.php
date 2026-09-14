@@ -52,8 +52,25 @@ class SingleTaxReportReader
 
     public function __construct(private readonly PdfTextLayer $pdf) {}
 
-    /** Итоговая налогооблагаемая база из отчёта. */
+    /** Итоговая налогооблагаемая база из отчёта (поле 186). */
     public function taxableBase(string $path): DocumentValue
+    {
+        return $this->total($path, 'base');
+    }
+
+    /** Общая сумма единого налога из отчёта (поле 187). */
+    public function totalTax(string $path): DocumentValue
+    {
+        return $this->total($path, 'tax');
+    }
+
+    /**
+     * Одно из двух итоговых чисел бланка: 'base' или 'tax'.
+     *
+     * Проверки у них общие. Бланк, который не сошёлся сам с собой, не годится ни для
+     * базы, ни для налога.
+     */
+    private function total(string $path, string $field): DocumentValue
     {
         try {
             $words = $this->pdf->words($path);
@@ -95,7 +112,7 @@ class SingleTaxReportReader
             return $mismatch;
         }
 
-        return DocumentValue::found($totals['base'], [
+        return DocumentValue::found($totals[$field], [
             'период'      => $period->label(),
             'база'        => number_format($totals['base'], 2, ',', ' '),
             'налог'       => number_format($totals['tax'], 2, ',', ' '),
