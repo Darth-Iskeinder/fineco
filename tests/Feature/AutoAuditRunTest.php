@@ -433,6 +433,8 @@ class AutoAuditRunTest extends TestCase
             ->assertSee($fine->name)
             ->assertSee($broken->name)
             ->assertDontSee('Документ:')
+            // Период у такой строки не из файла, и это подписано.
+            ->assertSeeInOrder([$broken->name, 'июль 2026', 'по месяцу задачи', 'форма-161.pdf'])
             ->assertSee('Не тот документ')
             ->assertSee('форма-161.pdf')
             ->assertSee('Это не отчёт по единому налогу');

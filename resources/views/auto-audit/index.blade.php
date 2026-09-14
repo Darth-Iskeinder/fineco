@@ -79,6 +79,7 @@
                     <tr>
                         <th class="px-4 py-3">Проверка</th>
                         <th class="px-4 py-3">Клиент</th>
+                        <th class="px-4 py-3">Период</th>
                         <th class="px-4 py-3 text-right">ОСВ</th>
                         <th class="px-4 py-3 text-right">Отчёт</th>
                         <th class="px-4 py-3 text-right">Разница</th>
@@ -92,6 +93,13 @@
                         <tr class="align-top">
                             <td class="px-4 py-3 text-slate-700">№{{ $result->rule }} {{ $result->ruleName() }}</td>
                             <td class="px-4 py-3 font-medium text-slate-800">{{ $result->client?->name ?? 'клиент удалён' }}</td>
+                            <td class="px-4 py-3 text-slate-700 whitespace-nowrap">
+                                {{ $result->periodLabel() }}
+                                {{-- Из непрочитанного файла период не узнать: он взят по задаче, и это надо видеть. --}}
+                                @if ($result->outcome === AutoAuditResult::WRONG_DOCUMENT)
+                                    <p class="text-xs text-slate-400">по месяцу задачи</p>
+                                @endif
+                            </td>
                             <td class="px-4 py-3 text-right whitespace-nowrap">{{ $money($result->left_value) }}</td>
                             <td class="px-4 py-3 text-right whitespace-nowrap">{{ $money($result->right_value) }}</td>
                             <td @class([
