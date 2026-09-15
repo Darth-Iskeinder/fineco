@@ -6,7 +6,6 @@ use App\Models\AutoAuditResult;
 use App\Models\BuhTaskDocument;
 use App\Models\BuhTaskLog;
 use App\Models\Client;
-use App\Models\EstimateItem;
 use App\Models\Service;
 use App\Support\TenantContext;
 use Carbon\CarbonImmutable;
@@ -38,6 +37,9 @@ use Throwable;
  *     какой-то месяц. Одна строка на клиента и период, в ней проверки, которые это ломает;
  *   - беда с документом: не тот документ, скан или файл не открылся. Стоит под каждой
  *     проверкой клиента, которая берёт числа из этого документа.
+ *
+ * Принудительно закрытые задачи ни документа, ни пропуска не дают: человек записал причину,
+ * почему документа не будет («ежеквартально», «нет движений», «только один район»).
  *
  * Каждый прогон стирает прошлые результаты фирмы и пишет заново.
  */
@@ -210,7 +212,7 @@ class AutoAuditRunner
             $problems[$side] = $this->documentProblems($client, $side, $found);
         }
 
-        $items = [];
+        $logs = [];
 
         foreach ($rules as $number => $rule) {
             $side = $rule['document'];
@@ -219,9 +221,9 @@ class AutoAuditRunner
                 $rows[] = array_merge($row, ['rule' => (string) $number]);
             }
 
-            $items[$side] ??= $this->estimateItems($client, $services[$side]);
+            $logs[$side] ??= $this->taskLogs($client, $services[$side]);
 
-            array_push($rows, ...$this->checkRule($client, $number, $rule, $documents['osv'], $documents[$side], $items[$side]));
+            array_push($rows, ...$this->checkRule($client, $number, $rule, $documents['osv'], $documents[$side], $logs[$side]));
         }
 
         return $rows;
@@ -348,11 +350,16 @@ class AutoAuditRunner
         return $result;
     }
 
-    /** Закрытые или сданные на проверку задачи клиента по БП, где нет ни одного файла. */
+    /**
+     * Закрытые или сданные на проверку задачи клиента по БП, где нет ни одного файла.
+     *
+     * Принудительно закрытые не берём: человек записал причину, почему файла не будет.
+     */
     private function closedWithoutFiles(Client $client, Service $service): Collection
     {
         return BuhTaskLog::where('client_id', $client->id)
             ->whereIn('status', self::DONE_STATUSES)
+            ->where(fn ($q) => $q->where('force_closed', false)->orWhereNull('force_closed'))
             ->whereHas('estimateItem', fn ($q) => $q->where('service_id', $service->id))
             ->whereDoesntHave('documents')
             ->with('employee:id,full_name')
@@ -372,10 +379,6 @@ class AutoAuditRunner
         $parts[] = $log->status === 'review'
             ? 'сдана на проверку без файла'
             : trim('закрыта ' . ($log->completed_at?->format('d.m.Y') ?? '')) . ' без файла';
-
-        if ($log->force_closed) {
-            $parts[] = 'закрыта принудительно' . ($log->force_close_comment ? ' («' . $log->force_close_comment . '»)' : '');
-        }
 
         return sprintf('Задача «%s» за %02d.%d: %s', $service->name, $log->month, $log->year, implode(', ', $parts));
     }
@@ -460,7 +463,7 @@ class AutoAuditRunner
         array $rule,
         Collection $sheetDocuments,
         Collection $reportDocuments,
-        Collection $reportItems,
+        Collection $reportLogs,
     ): array {
         $periods = [];   // подпись периода => ['period' => DocumentPeriod, 'osv' => [...], 'report' => [...]]
 
@@ -494,7 +497,7 @@ class AutoAuditRunner
                 ? $this->sheetsByMonth($entry['period'], $periods)
                 : [$entry['period']->title() => $osv];
 
-            $row = $this->compare($client, $number, $rule, $entry['period'], $sheets, $reports, $reportItems);
+            $row = $this->compare($client, $number, $rule, $entry['period'], $sheets, $reports, $reportLogs);
 
             if ($row) {
                 $rows[] = $row;
@@ -532,7 +535,7 @@ class AutoAuditRunner
         DocumentPeriod $period,
         array $sheets,
         array $reports,
-        Collection $reportItems,
+        Collection $reportLogs,
     ): ?array {
         // Документы только с одной стороны: пары нет.
         if (!$reports || !array_filter($sheets)) {
@@ -545,7 +548,7 @@ class AutoAuditRunner
             return null;
         }
 
-        $expected = $this->expectedReports($reportItems, $period);
+        $expected = $this->expectedReports($reportLogs, $period);
 
         // Без документа одного из филиалов сумма заведомо меньше, и красное было бы ложным.
         if (count($reports) < $expected) {
@@ -615,28 +618,38 @@ class AutoAuditRunner
             ->values();
     }
 
-    /** Строки сметы клиента по БП. У филиального БП строка на каждый налоговый орган. */
-    private function estimateItems(Client $client, Service $service): Collection
+    /** Все задачи клиента по БП в любом статусе: по ним считаем, от скольких филиалов ждать документ. */
+    private function taskLogs(Client $client, Service $service): Collection
     {
-        return EstimateItem::where('service_id', $service->id)
-            ->whereNull('parent_id')
-            ->whereHas('estimate', fn ($q) => $q->where('client_id', $client->id))
-            ->get();
+        return BuhTaskLog::where('client_id', $client->id)
+            ->whereHas('estimateItem', fn ($q) => $q->where('service_id', $service->id))
+            ->get(['id', 'estimate_item_id', 'year', 'month', 'force_closed']);
     }
 
     /**
-     * Сколько документов ждём за период: столько, сколько строк сметы тогда работало.
+     * Сколько документов ждём за период: по одному от каждого филиала, у которого есть
+     * задача за этот период. Задача идёт месяцем позже периода: отчёт за июль сдают в
+     * августе. У филиального БП задача своя на каждый налоговый орган.
      *
-     * Строку, закрытую раньше начала периода, не считаем: филиал закрыли, документа по нему
-     * больше не будет.
+     * Принудительно закрытую задачу не считаем: человек записал, почему документа не будет
+     * («только один район», «ежеквартально»).
      */
-    private function expectedReports(Collection $items, DocumentPeriod $period): int
+    private function expectedReports(Collection $logs, DocumentPeriod $period): int
     {
-        $working = $items->filter(
-            fn (EstimateItem $item) => !$item->isClosed() || $item->tasksEndAt()->greaterThanOrEqualTo($period->from),
-        );
+        $months = array_map(fn (array $month) => sprintf('%04d-%02d', ...$month), $period->months());
 
-        return max(1, $working->count());
+        $expected = $logs
+            ->reject(fn (BuhTaskLog $log) => (bool) $log->force_closed)
+            ->filter(fn (BuhTaskLog $log) => in_array(
+                CarbonImmutable::create($log->year, $log->month, 1)->subMonth()->format('Y-m'),
+                $months,
+                true,
+            ))
+            ->pluck('estimate_item_id')
+            ->unique()
+            ->count();
+
+        return max(1, $expected);
     }
 
     /**
@@ -650,11 +663,14 @@ class AutoAuditRunner
     }
 
     /**
-     * Документ другой организации: ИНН в шапке не тот, что в карточке клиента.
+     * ИНН в шапке документа не тот, что в карточке клиента.
      *
      * Без этой проверки чужая форма дала бы «не совпало» по числам, и расхождение искали бы
      * в учёте, хотя перепутан файл. Так нашлась форма 161 «Нова Трек» у «Нова трек плюс».
      * Сверяем, только когда ИНН есть и в документе, и в карточке. В ОСВ ИНН нет.
+     *
+     * Кто ошибся, документ или карточка, мы не знаем: у ИНАМ отчёт и форма 161 показывают
+     * один и тот же ИНН, а в карточке записан другой. Поэтому причину пишем без обвинения.
      *
      * В части карточек вместо ИНН стоит заглушка вроде «00000000000003»: клиентов заводили,
      * пока ИНН не знали. Настоящий ИНН не начинается с пяти нулей (у организации там ноль
@@ -669,7 +685,9 @@ class AutoAuditRunner
             return $value;
         }
 
-        return DocumentValue::wrongDocument("Документ другой организации: ИНН {$value->inn}, а в карточке клиента {$clientInn}");
+        return DocumentValue::wrongDocument(
+            "ИНН не совпадает: в документе {$value->inn}, в карточке клиента {$clientInn}. Документ чужой или ошибка в карточке",
+        );
     }
 
     private function readFile(string $side, string $field, BuhTaskDocument $document): DocumentValue

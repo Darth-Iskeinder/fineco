@@ -345,7 +345,10 @@ class AutoAuditRunTest extends TestCase
         $this->assertSame('4', $row->rule);
         $this->assertSame(AutoAuditResult::WRONG_DOCUMENT, $row->outcome);
         $this->assertSame('Среди файлов задачи нет формы 161', $row->reason);
-        $this->assertStringContainsString('ИНН 02101202510267, а в карточке клиента 00907202510583', $row->sources[0]['reason']);
+        $this->assertSame(
+            'ИНН не совпадает: в документе 02101202510267, в карточке клиента 00907202510583. Документ чужой или ошибка в карточке',
+            $row->sources[0]['reason'],
+        );
     }
 
     /**
@@ -476,9 +479,52 @@ class AutoAuditRunTest extends TestCase
         $client = $this->client();
         $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
 
-        $first = $this->item($client, $this->taxService, 'Бишкек');
-        $this->item($client, $this->taxService, 'Ош');
+        $first  = $this->item($client, $this->taxService, 'Бишкек');
+        $second = $this->item($client, $this->taxService, 'Ош');
         $this->attachReport($client, 'отчёт-бишкек.pdf', base: 60.00, tax: 2.40, item: $first);
+
+        // У филиала Ош задача за август есть, но ещё не закрыта: его отчёт ждём.
+        BuhTaskLog::create([
+            'employee_id' => $this->admin->id, 'client_id' => $client->id,
+            'estimate_item_id' => $second->id, 'year' => 2026, 'month' => 8, 'status' => 'running',
+        ]);
+
+        $this->assertCount(0, $this->runAudit());
+    }
+
+    /** Задача филиала закрыта принудительно («только один район»): его отчёта не ждём. */
+    public function test_force_closed_branch_task_is_not_expected(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 60.00, '3410' => 2.40]);
+
+        $first  = $this->item($client, $this->taxService, 'Бишкек');
+        $second = $this->item($client, $this->taxService, 'Ош');
+        $this->attachReport($client, 'отчёт-бишкек.pdf', base: 60.00, tax: 2.40, item: $first);
+
+        BuhTaskLog::create([
+            'employee_id' => $this->admin->id, 'client_id' => $client->id,
+            'estimate_item_id' => $second->id, 'year' => 2026, 'month' => 8, 'status' => 'completed',
+            'force_closed' => true, 'force_close_comment' => 'Только один район',
+        ]);
+
+        $results = $this->runAudit();
+
+        $this->assertSame([AutoAuditResult::MATCHED], $results->pluck('outcome')->unique()->values()->all());
+        $this->assertSame('60.00', $results->firstWhere('rule', '1')->right_value);
+    }
+
+    /** Принудительно закрытая задача без файла: человек записал причину, «нет документа» не пишем. */
+    public function test_force_closed_task_without_file_is_not_missing(): void
+    {
+        $client = $this->client();
+
+        BuhTaskLog::create([
+            'employee_id' => $this->admin->id, 'client_id' => $client->id,
+            'estimate_item_id' => $this->item($client, $this->taxService)->id,
+            'year' => 2026, 'month' => 8, 'status' => 'completed',
+            'force_closed' => true, 'force_close_comment' => 'Отчёт сдаётся ежеквартально',
+        ]);
 
         $this->assertCount(0, $this->runAudit());
     }
