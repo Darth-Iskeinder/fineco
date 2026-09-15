@@ -325,8 +325,19 @@ class AutoAuditRunTest extends TestCase
         $this->assertSame('25000.00', $row->left_value);
         $this->assertSame(['ОСВ', 'Форма 161'], array_column($row->sources, 'label'));
 
+        // Исполнитель у каждого документа свой, поэтому и показан у документа, а не у строки.
+        $this->assertSame(['Админ А.', 'Админ А.'], array_column($row->sources, 'employee'));
+
         $this->asVendor()->get(route('auto-audit.index'))
-            ->assertSeeInOrder(['№4 Начисленный доход сходится с учётом', $client->name, 'ОСВ, задача', 'Форма 161, задача', 'Совпало']);
+            ->assertSeeInOrder([
+                '№4 Начисленный доход сходится с учётом',
+                $client->name,
+                'ОСВ, задача за 08.2026',
+                'Админ А.',
+                'Форма 161, задача за 08.2026',
+                'Админ А.',
+                'Совпало',
+            ]);
     }
 
     /** Чужая форма 161: ИНН не тот, что в карточке. Это «не тот документ», а не расхождение в цифрах. */

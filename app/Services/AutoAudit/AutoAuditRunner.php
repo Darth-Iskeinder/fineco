@@ -611,7 +611,7 @@ class AutoAuditRunner
         return BuhTaskLog::where('client_id', $client->id)
             ->whereIn('status', self::DONE_STATUSES)
             ->whereHas('estimateItem', fn ($q) => $q->where('service_id', $service->id))
-            ->with('documents')
+            ->with(['documents', 'employee:id,full_name'])
             ->get()
             ->flatMap(fn (BuhTaskLog $log) => $log->documents->map(fn (BuhTaskDocument $document) => [$log, $document]))
             ->sortByDesc(fn (array $pair) => $pair[1]->id)
@@ -724,11 +724,29 @@ class AutoAuditRunner
             'label'       => self::SIDES[$side]['label'],
             'log_id'      => $log->id,
             'task_month'  => sprintf('%02d.%d', $log->month, $log->year),
+            'employee'    => $this->shortName($log->employee?->full_name),
             'document_id' => $document->id,
             'name'        => $document->name,
             'status'      => $value->status,
             'value'       => $value->value,
             'reason'      => $value->reason,
         ];
+    }
+
+    /**
+     * Исполнитель задачи коротко: «Обозова Айзада Алмасбековна» становится «Обозова А. А.».
+     * Полные ФИО раздувают колонку с документами.
+     */
+    private function shortName(?string $fullName): ?string
+    {
+        $parts = preg_split('/\s+/u', trim((string) $fullName), -1, PREG_SPLIT_NO_EMPTY);
+
+        if (!$parts) {
+            return null;
+        }
+
+        $initials = array_map(fn (string $part) => mb_strtoupper(mb_substr($part, 0, 1)) . '.', array_slice($parts, 1));
+
+        return trim($parts[0] . ' ' . implode(' ', $initials));
     }
 }

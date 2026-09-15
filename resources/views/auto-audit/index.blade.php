@@ -125,7 +125,7 @@
                             <td class="px-4 py-3 text-xs space-y-1">
                                 @foreach ($result->sources ?? [] as $source)
                                     <div>
-                                        <span class="text-slate-400">{{ $source['label'] ?? ($source['side'] === 'osv' ? 'ОСВ' : 'Отчёт') }}, задача за {{ $source['task_month'] }}:</span>
+                                        <span class="text-slate-400">{{ $source['label'] ?? ($source['side'] === 'osv' ? 'ОСВ' : 'Отчёт') }}, задача за {{ $source['task_month'] }}@if (!empty($source['employee'])), <span class="font-medium text-slate-500">{{ $source['employee'] }}</span>@endif:</span>
                                         <a href="{{ route('documents.task', $source['document_id']) }}" target="_blank"
                                            class="text-indigo-600 hover:underline">{{ $source['name'] }}</a>
                                         @if ($source['value'] !== null)
