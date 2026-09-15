@@ -30,7 +30,7 @@
                 </p>
                 <p class="text-sm text-slate-500 mt-0.5">
                     @if ($checkedAt)
-                        Последняя проверка: {{ $checkedAt->format('d.m.Y H:i') }}
+                        Последняя проверка: {{ $checkedAt->format('d.m.Y H:i') }}@if (($state['status'] ?? null) === \App\Jobs\RunAutoAuditJob::DONE && isset($state['seconds'])), заняла {{ $state['seconds'] }} с@endif
                     @else
                         Проверки ещё не было
                     @endif
@@ -38,15 +38,29 @@
             </div>
 
             <form method="POST" action="{{ route('auto-audit.run') }}"
-                  x-data="{ busy: false }" @submit="busy = true">
+                  x-data="{ busy: @js($running) }" @submit="busy = true">
                 @csrf
-                <button type="submit" :disabled="busy"
+                <button type="submit" :disabled="busy" @disabled($running)
                         class="inline-flex items-center px-4 py-2 bg-gradient-to-r from-violet-500 to-indigo-600 text-white text-sm font-medium rounded-lg shadow-sm disabled:opacity-60 transition">
                     {{-- x-text, а не x-show с x-cloak: правила [x-cloak] в проекте нет --}}
-                    <span x-text="busy ? 'Проверяю, это займёт до минуты…' : 'Проверить сейчас'">Проверить сейчас</span>
+                    <span x-text="busy ? 'Проверка идёт…' : 'Проверить сейчас'">{{ $running ? 'Проверка идёт…' : 'Проверить сейчас' }}</span>
                 </button>
             </form>
         </div>
+
+        @if ($running)
+            {{-- Прогон идёт после ответа браузеру: показываем это и обновляем страницу, пока не закончится. --}}
+            <div class="mx-6 mb-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                Идёт проверка с {{ \Carbon\CarbonImmutable::parse($state['started_at'])->setTimezone(config('app.timezone'))->format('H:i') }}.
+                Ниже пока прежние результаты. Страница обновится сама.
+            </div>
+            <script>setTimeout(() => window.location.reload(), 15000);</script>
+        @elseif (($state['status'] ?? null) === \App\Jobs\RunAutoAuditJob::FAILED)
+            <div class="mx-6 mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
+                Последняя проверка упала и не записала результаты: {{ $state['error'] ?? 'причина неизвестна' }}.
+                Ниже результаты предыдущей проверки.
+            </div>
+        @endif
 
         @if ($periods)
             <div class="px-6 pb-4">

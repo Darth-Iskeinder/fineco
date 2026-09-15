@@ -139,6 +139,9 @@ Route::middleware('auth:employee')->group(function () {
     // сначала смотрим результат руками, прогон по кнопке «Проверить сейчас».
     Route::get('/auto-audit', [AutoAuditController::class, 'index'])->name('auto-audit.index');
     Route::post('/auto-audit/run', [AutoAuditController::class, 'run'])->name('auto-audit.run');
+    // Сюда попадают обновлением страницы после долгой проверки или по адресу из истории.
+    // Проверка запускается только кнопкой, а вместо ошибки просто возвращаем на страницу.
+    Route::get('/auto-audit/run', fn () => redirect()->route('auto-audit.index'));
 
     // Страница руководителя (только роль manager, вне системы модулей)
     Route::prefix('dashboard')->name('dashboard.')->middleware('manager')->group(function () {

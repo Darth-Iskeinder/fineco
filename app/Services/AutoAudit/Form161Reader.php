@@ -37,6 +37,9 @@ use Throwable;
  * Числа в клетках итоговой строки стоят по центру: у «1600» и «0» в одной колонке левый
  * край разный, а середина одна. Поэтому колонку итога определяем по середине числа, и
  * длинная сумма не уезжает в соседнюю колонку. В списке сотрудников числа прижаты влево.
+ *
+ * Форму разбираем один раз на файл: четыре проверки просят у одной формы четыре числа, и
+ * разбор на каждое вместе с разбором ведомостей упёрся на бою в ограничение времени запроса.
  */
 class Form161Reader
 {
@@ -73,6 +76,9 @@ class Form161Reader
     /** Копейки складываются из разбора текста, float может дать хвост. */
     private const TOLERANCE = 0.05;
 
+    /** Разобранные формы: путь к файлу => разбор или отказ. */
+    private array $forms = [];
+
     public function __construct(private readonly PdfTextLayer $pdf) {}
 
     /** Общая сумма начисленного дохода из итоговой строки. */
@@ -87,6 +93,45 @@ class Form161Reader
      * @param string $field 'income', 'income_tax', 'contributions' или 'pension'
      */
     public function read(string $path, string $field): DocumentValue
+    {
+        $form = $this->forms[$path] ??= $this->parse($path);
+
+        if ($form instanceof DocumentValue) {
+            return $form;
+        }
+
+        ['period' => $period, 'inn' => $inn, 'totals' => $totals, 'sums' => $sums] = $form;
+
+        // Взносы и НПФ есть и в списке: сверяем и их. Налога к уплате в списке нет.
+        if ($field !== 'income' && isset($sums[$field]) && abs($sums[$field] - $totals[$field]) > self::TOLERANCE) {
+            return DocumentValue::wrongDocument(sprintf(
+                'Форма 161 не сходится: %s в итоге %s, а сумма по сотрудникам %s',
+                self::LABELS[$field],
+                $this->money($totals[$field]),
+                $this->money($sums[$field]),
+            ));
+        }
+
+        return DocumentValue::found($totals[$field], [
+            'период'      => $period->label(),
+            'сотрудников' => $totals['employees'],
+            'поле'        => self::LABELS[$field],
+            'значение'    => $this->money($totals[$field]),
+            'сходимость'  => isset($sums[$field])
+                ? self::LABELS[$field] . ' и число сотрудников в итоге = сумма по списку сотрудников'
+                : 'итоговая строка сверена по доходу и числу сотрудников, налог к уплате по месту колонки',
+        ], $period, $inn);
+    }
+
+    /**
+     * Разбор формы целиком: период, ИНН, итоговая строка и суммы по списку сотрудников.
+     *
+     * Здесь же проверка, общая для всех полей: итоговая строка та, только если доход и число
+     * сотрудников сходятся со списком.
+     *
+     * @return array{period: DocumentPeriod, inn: ?string, totals: array, sums: array}|DocumentValue
+     */
+    private function parse(string $path): array|DocumentValue
     {
         try {
             $pages = $this->pdf->pages($path);
@@ -117,7 +162,6 @@ class Form161Reader
 
         [$listed, $sums] = $this->employees(array_slice($pages, 1));
 
-        // Итоговая строка та, только если доход и число сотрудников сходятся со списком.
         if ($listed !== $totals['employees'] || abs($sums['income'] - $totals['income']) > self::TOLERANCE) {
             return DocumentValue::wrongDocument(sprintf(
                 'Форма 161 не сходится: в итоге %d сотрудников и доход %s, а в списке %d сотрудников на %s',
@@ -128,25 +172,7 @@ class Form161Reader
             ));
         }
 
-        // Взносы и НПФ есть и в списке: сверяем и их. Налога к уплате в списке нет.
-        if ($field !== 'income' && isset($sums[$field]) && abs($sums[$field] - $totals[$field]) > self::TOLERANCE) {
-            return DocumentValue::wrongDocument(sprintf(
-                'Форма 161 не сходится: %s в итоге %s, а сумма по сотрудникам %s',
-                self::LABELS[$field],
-                $this->money($totals[$field]),
-                $this->money($sums[$field]),
-            ));
-        }
-
-        return DocumentValue::found($totals[$field], [
-            'период'      => $period->label(),
-            'сотрудников' => $totals['employees'],
-            'поле'        => self::LABELS[$field],
-            'значение'    => $this->money($totals[$field]),
-            'сходимость'  => isset($sums[$field])
-                ? self::LABELS[$field] . ' и число сотрудников в итоге = сумма по списку сотрудников'
-                : 'итоговая строка сверена по доходу и числу сотрудников, налог к уплате по месту колонки',
-        ], $period, PdfBlank::inn($rows));
+        return ['period' => $period, 'inn' => PdfBlank::inn($rows), 'totals' => $totals, 'sums' => $sums];
     }
 
     /**

@@ -64,6 +64,9 @@ class BalanceSheetReader
         9 => 'сентябр', 10 => 'октябр', 11 => 'ноябр', 12 => 'декабр',
     ];
 
+    /** Разобранные ведомости: путь к файлу => строки листа или отказ. */
+    private array $tables = [];
+
     /**
      * Оборот по счёту за период ведомости.
      *
@@ -73,22 +76,10 @@ class BalanceSheetReader
      */
     public function turnover(string $path, string $account, string $side = 'credit'): DocumentValue
     {
-        try {
-            if (strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'pdf') {
-                $words = $this->pdf->words($path);
+        $rows = $this->table($path);
 
-                // Текста нет вовсе: скан или фото, сохранённое в PDF. Документ может быть
-                // и тем, просто прочитать его нечем, поэтому это не «не та форма».
-                if (!$words) {
-                    return DocumentValue::scan('В PDF нет текста, это скан или фото');
-                }
-
-                $rows = $this->rowsFromPdf($words);
-            } else {
-                $rows = $this->rowsFromSpreadsheet($path);
-            }
-        } catch (Throwable $e) {
-            return DocumentValue::unreadable('Файл не открылся как ведомость: ' . $e->getMessage());
+        if ($rows instanceof DocumentValue) {
+            return $rows;
         }
 
         $head = $this->header($rows);
@@ -127,6 +118,39 @@ class BalanceSheetReader
             'ячейка'  => $this->columnLetter($column) . ($row + 1),
             'сырое'   => (string) $raw,
         ], $period);
+    }
+
+    /**
+     * Строки ведомости, разобранные один раз на файл, или отказ.
+     *
+     * Проверки берут из одной ведомости обороты по нескольким счетам. Без запоминания файл
+     * разбирался заново на каждый счёт, и на боевой фирме прогон упёрся в ограничение
+     * времени запроса.
+     */
+    private function table(string $path): array|DocumentValue
+    {
+        return $this->tables[$path] ??= $this->loadTable($path);
+    }
+
+    private function loadTable(string $path): array|DocumentValue
+    {
+        try {
+            if (strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'pdf') {
+                $words = $this->pdf->words($path);
+
+                // Текста нет вовсе: скан или фото, сохранённое в PDF. Документ может быть
+                // и тем, просто прочитать его нечем, поэтому это не «не та форма».
+                if (!$words) {
+                    return DocumentValue::scan('В PDF нет текста, это скан или фото');
+                }
+
+                return $this->rowsFromPdf($words);
+            }
+
+            return $this->rowsFromSpreadsheet($path);
+        } catch (Throwable $e) {
+            return DocumentValue::unreadable('Файл не открылся как ведомость: ' . $e->getMessage());
+        }
     }
 
     /** Лист Excel как есть: строки и колонки уже разложены за нас. */

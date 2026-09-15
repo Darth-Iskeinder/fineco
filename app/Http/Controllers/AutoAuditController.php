@@ -2,11 +2,15 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\RunAutoAuditJob;
 use App\Models\AutoAuditResult;
 use App\Services\AutoAudit\AutoAuditRunner;
 use App\Support\Impersonation;
+use App\Support\TenantContext;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\View\View;
 
 /**
@@ -22,9 +26,18 @@ use Illuminate\View\View;
  *     задачи. По умолчанию самый свежий;
  *   - проверка. По умолчанию все;
  *   - статус. По умолчанию все.
+ *
+ * Кнопка «Проверить сейчас» не ждёт конца прогона: он идёт после ответа браузеру, см.
+ * RunAutoAuditJob. Пока прогон идёт, страница показывает это и сама обновляется.
  */
 class AutoAuditController extends Controller
 {
+    /**
+     * «Идёт» дольше этого не бывает. Значит, процесс умер, не записав итог (его, например,
+     * убил сервер), и запуск надо снова разрешить, а не блокировать кнопку навсегда.
+     */
+    private const STALE_MINUTES = 15;
+
     public function index(Request $request): View
     {
         $this->vendorOnly();
@@ -65,6 +78,8 @@ class AutoAuditController extends Controller
             ->sort(fn (AutoAuditResult $a, AutoAuditResult $b) => $this->sortKey($a) <=> $this->sortKey($b))
             ->values();
 
+        $state = $this->state();
+
         return view('auto-audit.index', [
             'results'   => $results,
             'periods'   => $periods,
@@ -74,33 +89,42 @@ class AutoAuditController extends Controller
             // Счётчики без фильтра статуса: иначе при выборе одного статуса остальные обнулятся.
             'counts'    => $inPeriodAndRule->countBy('outcome'),
             'checkedAt' => $all->max('created_at'),
+            'state'     => $state,
+            'running'   => $this->isRunning($state),
         ]);
     }
 
-    public function run(AutoAuditRunner $runner): RedirectResponse
+    public function run(): RedirectResponse
     {
         $this->vendorOnly();
 
-        // Разбор PDF и таблиц занимает секунды на документ, у фирмы их десятки.
-        set_time_limit(300);
+        // Второй прогон поверх идущего стирал бы и писал результаты вперемешку с первым.
+        if ($this->isRunning($this->state())) {
+            return redirect()->route('auto-audit.index')
+                ->with('success', 'Проверка уже идёт. Страница обновится сама, когда она закончится.');
+        }
 
-        $started = microtime(true);
-        $counts  = $runner->run();
+        RunAutoAuditJob::markRunning(TenantContext::id());
+        RunAutoAuditJob::dispatchAfterResponse(TenantContext::id());
 
-        $summary = collect(AutoAuditResult::LABELS)
-            ->map(fn (string $label, string $outcome) => $label . ': ' . ($counts[$outcome] ?? 0))
-            ->implode('; ');
-
-        return redirect()->route('auto-audit.index')->with('success', sprintf(
-            'Проверка прошла за %.1f с. %s.',
-            microtime(true) - $started,
-            $summary,
-        ));
+        return redirect()->route('auto-audit.index')
+            ->with('success', 'Проверка запущена и идёт в фоне. Страница обновится сама, когда она закончится.');
     }
 
     private function vendorOnly(): void
     {
         abort_unless(Impersonation::isActive(), 404);
+    }
+
+    private function state(): ?array
+    {
+        return Cache::get(RunAutoAuditJob::stateKey(TenantContext::id()));
+    }
+
+    private function isRunning(?array $state): bool
+    {
+        return ($state['status'] ?? null) === RunAutoAuditJob::RUNNING
+            && CarbonImmutable::parse($state['started_at'])->greaterThan(now()->subMinutes(self::STALE_MINUTES));
     }
 
     /** По порядку номеров проверок, внутри по клиенту. */

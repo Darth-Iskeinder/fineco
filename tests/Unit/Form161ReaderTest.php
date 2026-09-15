@@ -287,4 +287,29 @@ class Form161ReaderTest extends TestCase
 
         $this->assertSame(DocumentValue::WRONG_DOC, $this->reader([1 => $words])->income('счёт.pdf')->status);
     }
+
+    /** Четыре проверки просят у одной формы четыре числа: файл разбираем один раз. */
+    public function test_form_is_parsed_once_for_all_fields(): void
+    {
+        $layer = new class($this->metaCom()) extends PdfTextLayer {
+            public int $calls = 0;
+
+            public function __construct(private array $pages) {}
+
+            public function pages(string $path): array
+            {
+                $this->calls++;
+
+                return $this->pages;
+            }
+        };
+
+        $reader = new Form161Reader($layer);
+
+        foreach (['income', 'income_tax', 'contributions', 'pension'] as $field) {
+            $this->assertTrue($reader->read('форма.pdf', $field)->isFound());
+        }
+
+        $this->assertSame(1, $layer->calls);
+    }
 }

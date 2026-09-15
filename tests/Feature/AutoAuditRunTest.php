@@ -948,6 +948,75 @@ class AutoAuditRunTest extends TestCase
             ->assertSee($matched->name);
     }
 
+    /** Кнопка не ждёт прогона: он идёт после ответа и записывает итог и длительность. */
+    public function test_run_goes_after_the_response_and_records_its_state(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 1.00, '3410' => 1.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 1.00, tax: 1.00);
+
+        $this->asVendor()->post(route('auto-audit.run'))
+            ->assertRedirect(route('auto-audit.index'))
+            ->assertSessionHas('success', 'Проверка запущена и идёт в фоне. Страница обновится сама, когда она закончится.');
+
+        $state = \Illuminate\Support\Facades\Cache::get(\App\Jobs\RunAutoAuditJob::stateKey($this->tenant->id));
+
+        $this->assertSame(\App\Jobs\RunAutoAuditJob::DONE, $state['status']);
+        $this->assertSame(2, $state['counts'][AutoAuditResult::MATCHED]);
+        $this->assertCount(2, AutoAuditResult::all());
+
+        $this->asVendor()->get(route('auto-audit.index'))
+            ->assertSee('заняла')
+            ->assertDontSee('Идёт проверка');
+    }
+
+    /** Пока прогон идёт, второй не запускается, а страница показывает это и обновляется сама. */
+    public function test_second_run_does_not_start_while_one_is_running(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 1.00, '3410' => 1.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 1.00, tax: 1.00);
+
+        \App\Jobs\RunAutoAuditJob::markRunning($this->tenant->id);
+
+        $this->asVendor()->post(route('auto-audit.run'))
+            ->assertSessionHas('success', 'Проверка уже идёт. Страница обновится сама, когда она закончится.');
+
+        $this->assertCount(0, AutoAuditResult::all());
+
+        $this->asVendor()->get(route('auto-audit.index'))
+            ->assertSee('Идёт проверка с')
+            ->assertSee('window.location.reload', false);
+    }
+
+    /** «Идёт» дольше 15 минут значит, что процесс умер: запуск снова разрешён. */
+    public function test_stale_running_state_does_not_block_the_button(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 1.00, '3410' => 1.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 1.00, tax: 1.00);
+
+        \App\Jobs\RunAutoAuditJob::markRunning($this->tenant->id);
+        $this->travel(16)->minutes();
+
+        $this->asVendor()->post(route('auto-audit.run'))
+            ->assertSessionHas('success', 'Проверка запущена и идёт в фоне. Страница обновится сама, когда она закончится.');
+
+        $this->assertCount(2, AutoAuditResult::all());
+    }
+
+    /** Упавший прогон виден на странице, а не молча оставляет старые результаты. */
+    public function test_failed_run_is_shown_on_the_page(): void
+    {
+        \Illuminate\Support\Facades\Cache::put(\App\Jobs\RunAutoAuditJob::stateKey($this->tenant->id), [
+            'status' => \App\Jobs\RunAutoAuditJob::FAILED, 'error' => 'Не хватило памяти',
+        ]);
+
+        $this->asVendor()->get(route('auto-audit.index'))
+            ->assertOk()
+            ->assertSee('Последняя проверка упала и не записала результаты: Не хватило памяти');
+    }
+
     private function asVendor(): static
     {
         return $this->actingAs($this->admin, 'employee')->withSession([

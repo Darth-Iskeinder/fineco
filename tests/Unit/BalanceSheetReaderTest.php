@@ -436,4 +436,32 @@ class BalanceSheetReaderTest extends TestCase
 
         $this->assertSame(DocumentValue::SCAN, $result->status);
     }
+
+    /**
+     * Проверки берут из одной ведомости обороты по нескольким счетам. Файл разбираем один
+     * раз: разбор на каждый счёт упёрся на бою в ограничение времени запроса.
+     */
+    public function test_pdf_is_parsed_once_for_several_accounts(): void
+    {
+        $layer = new class($this->pdfBalanceSheet()) extends PdfTextLayer {
+            public int $calls = 0;
+
+            public function __construct(private array $words) {}
+
+            public function words(string $path, int $page = 1): array
+            {
+                $this->calls++;
+
+                return $this->words;
+            }
+        };
+
+        $reader = new BalanceSheetReader($layer);
+
+        $this->assertTrue($reader->turnover('осв.pdf', '3210', 'credit')->isFound());
+        $this->assertTrue($reader->turnover('осв.pdf', '3210', 'debit')->isFound());
+        $this->assertSame(DocumentValue::NOT_FOUND, $reader->turnover('осв.pdf', '9999', 'credit')->status);
+
+        $this->assertSame(1, $layer->calls);
+    }
 }
