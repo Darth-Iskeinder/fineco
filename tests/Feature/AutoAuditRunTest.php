@@ -1017,6 +1017,25 @@ class AutoAuditRunTest extends TestCase
             ->assertSee('Последняя проверка упала и не записала результаты: Не хватило памяти');
     }
 
+    /** Имя файла открывает окно просмотра прямо на странице, а не скачивание. */
+    public function test_document_names_open_the_viewer(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 1.00, '3410' => 1.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 1.00, tax: 1.00);
+        $this->runAudit();
+
+        $document = \App\Models\BuhTaskDocument::where('name', 'отчёт.pdf')->firstOrFail();
+
+        $this->asVendor()->get(route('auto-audit.index'))
+            ->assertOk()
+            ->assertSee('x-data="autoAuditDocs()"', false)
+            ->assertSee('openDocFromLink($event', false)
+            ->assertSee('href="' . route('documents.task', $document) . '"', false)
+            // Разбор таблиц для Excel подключён: без него окно не нарисует ведомость.
+            ->assertSee('function sheetPreview()', false);
+    }
+
     private function asVendor(): static
     {
         return $this->actingAs($this->admin, 'employee')->withSession([
