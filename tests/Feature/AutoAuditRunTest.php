@@ -773,6 +773,42 @@ class AutoAuditRunTest extends TestCase
         $this->assertSame('30.04.2026 – 30.06.2026', $label('2026-04-30', '2026-06-30'));
     }
 
+    /** Фильтр по проверке: общая строка «нет документа» видна под каждой своей проверкой. */
+    public function test_filters_by_check(): void
+    {
+        $f161 = $this->service('Форма 161 и зарплатные налоги', AutoAuditRunner::REF_FORM_161);
+
+        $taxOnly = $this->client(['name' => 'ООО Налог ' . uniqid(), 'accounting_method' => Client::ACCOUNTING_ACCRUAL]);
+        $this->attachSheet($taxOnly, 'осв-налог.xls', ['3410' => 4.00]);
+        $this->attachReport($taxOnly, 'отчёт-налог.pdf', base: 100.00, tax: 4.00);
+
+        $payroll = $this->client(['name' => 'ООО Зарплата ' . uniqid(), 'accounting_method' => Client::ACCOUNTING_ACCRUAL]);
+        $this->attachSheet($payroll, 'осв-зарплата.xls', ['3520' => 1000.00]);
+        $this->attachForm($payroll, $f161, 'форма-зарплата.pdf', income: 1000.00);
+
+        $noSheet = $this->client(['name' => 'ООО Без ведомости ' . uniqid()]);
+        $this->closeWithoutFile($noSheet, $this->osvService);
+
+        $this->runAudit();
+
+        $this->asVendor()->get(route('auto-audit.index', ['rule' => '4']))
+            ->assertOk()
+            ->assertSee($payroll->name)
+            ->assertSee($noSheet->name)
+            ->assertDontSee($taxOnly->name);
+
+        $this->asVendor()->get(route('auto-audit.index', ['rule' => '3']))
+            ->assertSee($taxOnly->name)
+            ->assertSee($noSheet->name)
+            ->assertDontSee($payroll->name);
+
+        // Мусор в адресе не ломает страницу: показываем все проверки.
+        $this->asVendor()->get(route('auto-audit.index', ['rule' => 'x']))
+            ->assertOk()
+            ->assertSee($taxOnly->name)
+            ->assertSee($payroll->name);
+    }
+
     private function asVendor(): static
     {
         return $this->actingAs($this->admin, 'employee')->withSession([

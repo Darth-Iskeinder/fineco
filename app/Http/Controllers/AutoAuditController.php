@@ -17,8 +17,10 @@ use Illuminate\View\View;
  * подорвало бы доверие к проверке с первого дня. Всем остальным страница отвечает 404,
  * как будто её нет.
  *
- * Фильтр один: отчётный период, то есть период, за который составлены документы, а не
- * месяц задачи. По умолчанию самый свежий.
+ * Фильтров два, оба в адресе страницы:
+ *   - отчётный период, то есть период, за который составлены документы, а не месяц
+ *     задачи. По умолчанию самый свежий;
+ *   - проверка. По умолчанию все.
  */
 class AutoAuditController extends Controller
 {
@@ -40,8 +42,16 @@ class AutoAuditController extends Controller
             $period = array_key_first($periods);
         }
 
+        $rule = $request->query('rule');
+
+        if (!is_string($rule) || !ctype_digit($rule) || !isset(AutoAuditRunner::RULES[(int) $rule])) {
+            $rule = null;
+        }
+
         $results = $all
             ->filter(fn (AutoAuditResult $r) => $r->periodKey() === $period)
+            // «Нет документа» бывает общим для нескольких проверок: строка видна под каждой.
+            ->filter(fn (AutoAuditResult $r) => $rule === null || in_array((int) $rule, $r->ruleNumbers(), true))
             ->sort(fn (AutoAuditResult $a, AutoAuditResult $b) => $this->sortKey($a) <=> $this->sortKey($b))
             ->values();
 
@@ -49,6 +59,7 @@ class AutoAuditController extends Controller
             'results'   => $results,
             'periods'   => $periods,
             'period'    => $period,
+            'rule'      => $rule,
             'counts'    => $results->countBy('outcome'),
             'checkedAt' => $all->max('created_at'),
         ]);

@@ -58,6 +58,14 @@
                             <option value="{{ $key }}" @selected($period === $key)>{{ $label }}</option>
                         @endforeach
                     </select>
+                    <label for="rule" class="text-sm font-medium text-slate-700">Проверка</label>
+                    <select id="rule" name="rule" onchange="this.form.submit()"
+                            class="rounded-lg border border-slate-200 text-sm px-3 py-2">
+                        <option value="">Все проверки</option>
+                        @foreach (AutoAuditRunner::RULES as $number => $definition)
+                            <option value="{{ $number }}" @selected($rule === (string) $number)>№{{ $number }} {{ $definition['name'] }}</option>
+                        @endforeach
+                    </select>
                     <span class="text-sm text-slate-500">
                         @foreach (AutoAuditResult::LABELS as $outcome => $label)
                             {{ $label }}: {{ $counts[$outcome] ?? 0 }}{{ $loop->last ? '' : ';' }}
