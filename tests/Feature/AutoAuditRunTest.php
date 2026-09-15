@@ -117,9 +117,9 @@ class AutoAuditRunTest extends TestCase
         $this->app->instance(\App\Services\AutoAudit\Form161Reader::class, new class($test) extends \App\Services\AutoAudit\Form161Reader {
             public function __construct(private AutoAuditRunTest $test) {}
 
-            public function income(string $path): DocumentValue
+            public function read(string $path, string $field): DocumentValue
             {
-                return $this->test->fakeForm(basename($path));
+                return $this->test->fakeForm(basename($path), $field);
             }
         });
     }
@@ -296,7 +296,7 @@ class AutoAuditRunTest extends TestCase
     /** Имя файла => ['month' => [год, месяц], 'income' => ..., 'inn' => ...]. */
     private array $forms = [];
 
-    public function fakeForm(string $file): DocumentValue
+    public function fakeForm(string $file, string $field = 'income'): DocumentValue
     {
         $form = $this->forms[$file] ?? null;
 
@@ -304,7 +304,48 @@ class AutoAuditRunTest extends TestCase
             return DocumentValue::wrongDocument('Это не форма 161');
         }
 
-        return DocumentValue::found($form['income'], [], DocumentPeriod::of(...$form['month']), $form['inn']);
+        return DocumentValue::found($form[$field] ?? 0.0, [], DocumentPeriod::of(...$form['month']), $form['inn']);
+    }
+
+    /** Проверки №5-№7: налог к уплате, взносы и НПФ из той же формы 161 против своих счетов. */
+    public function test_payroll_taxes_are_compared_with_form_161(): void
+    {
+        $f161   = $this->service('Форма 161 и зарплатные налоги', AutoAuditRunner::REF_FORM_161);
+        $client = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL]);
+        $this->attachSheet($client, 'осв.xls', ['3520' => 214400.00, '3420' => 19907.20, '3531' => 21976.00, '3534' => 4000.00]);
+
+        $this->forms['форма-161.pdf'] = [
+            'month' => [2026, 7], 'inn' => null,
+            'income' => 214400.00, 'income_tax' => 19907.20, 'contributions' => 21976.00, 'pension' => 4288.00,
+        ];
+        $this->attachLog($client, $this->item($client, $f161), 'форма-161.pdf');
+
+        $results = $this->runAudit();
+
+        // Отчёта по налогу у клиента нет, поэтому строки только по форме 161.
+        $this->assertSame(['4', '5', '6', '7'], $results->pluck('rule')->sort()->values()->all());
+
+        $results = $results->keyBy('rule');
+        $this->assertSame(AutoAuditResult::MATCHED, $results['4']->outcome);
+        $this->assertSame(AutoAuditResult::MATCHED, $results['5']->outcome);
+        $this->assertSame('19907.20', $results['5']->right_value);
+        $this->assertSame(AutoAuditResult::MATCHED, $results['6']->outcome);
+        $this->assertSame(AutoAuditResult::MISMATCH, $results['7']->outcome);
+        $this->assertSame('-288.00', $results['7']->difference);
+        $this->assertSame('Взносы в НПФ сходятся с учётом', $results['7']->ruleName());
+    }
+
+    /** Нет формы 161: «нет документа» ломает сразу все четыре проверки по ней. */
+    public function test_missing_form_161_breaks_checks_4_to_7(): void
+    {
+        $f161   = $this->service('Форма 161 и зарплатные налоги', AutoAuditRunner::REF_FORM_161);
+        $client = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL]);
+        $this->attachSheet($client, 'осв.xls', ['3520' => 1000.00]);
+        $this->closeWithoutFile($client, $f161);
+
+        $missing = $this->runAudit()->firstWhere('outcome', AutoAuditResult::MISSING_DOCUMENT);
+
+        $this->assertSame([4, 5, 6, 7], $missing->ruleNumbers());
     }
 
     /** Проверка №4: оборот Кт 3520 сверяем с доходом из формы 161. */
@@ -317,10 +358,10 @@ class AutoAuditRunTest extends TestCase
 
         $results = $this->runAudit();
 
-        $this->assertCount(1, $results);
+        // По форме 161 сразу четыре проверки: доход, налог к уплате, взносы и НПФ.
+        $this->assertSame(['4', '5', '6', '7'], $results->pluck('rule')->sort()->values()->all());
 
-        $row = $results->first();
-        $this->assertSame('4', $row->rule);
+        $row = $results->firstWhere('rule', '4');
         $this->assertSame(AutoAuditResult::MATCHED, $row->outcome);
         $this->assertSame('25000.00', $row->left_value);
         $this->assertSame(['ОСВ', 'Форма 161'], array_column($row->sources, 'label'));
@@ -350,11 +391,11 @@ class AutoAuditRunTest extends TestCase
 
         $results = $this->runAudit();
 
-        $this->assertCount(1, $results);
+        // Чужая форма ломает все четыре проверки по ней.
+        $this->assertSame(['4', '5', '6', '7'], $results->pluck('rule')->sort()->values()->all());
+        $this->assertSame([AutoAuditResult::WRONG_DOCUMENT], $results->pluck('outcome')->unique()->values()->all());
 
-        $row = $results->first();
-        $this->assertSame('4', $row->rule);
-        $this->assertSame(AutoAuditResult::WRONG_DOCUMENT, $row->outcome);
+        $row = $results->firstWhere('rule', '4');
         $this->assertSame('Среди файлов задачи нет формы 161', $row->reason);
         $this->assertSame(
             'ИНН не совпадает: в документе 02101202510267, в карточке клиента 00907202510583. Документ чужой или ошибка в карточке',
@@ -378,10 +419,14 @@ class AutoAuditRunTest extends TestCase
         $this->attachSheet($stub, 'осв-заглушка.xls', ['3520' => 25000.00]);
         $this->attachForm($stub, $f161, 'форма-заглушка.pdf', income: 25000.00, inn: '21402198800720');
 
-        $this->assertSame([AutoAuditResult::MATCHED, AutoAuditResult::MATCHED], $this->runAudit()->pluck('outcome')->all());
+        $results = $this->runAudit();
+
+        // По четыре проверки формы 161 у каждого из двух клиентов, и все сошлись.
+        $this->assertCount(8, $results);
+        $this->assertSame([AutoAuditResult::MATCHED], $results->pluck('outcome')->unique()->values()->all());
     }
 
-    /** Нет формы 161: ломается только проверка №4, а №1 и №3 сверяются как обычно. */
+    /** Нет формы 161: ломаются проверки №4-№7, а №1 и №3 сверяются как обычно. */
     public function test_missing_form_161_breaks_only_its_check(): void
     {
         $f161   = $this->service('Форма 161 и зарплатные налоги', AutoAuditRunner::REF_FORM_161);
@@ -395,12 +440,12 @@ class AutoAuditRunTest extends TestCase
         $this->assertSame(['1', '3'], $results->where('outcome', AutoAuditResult::MATCHED)->pluck('rule')->sort()->values()->all());
 
         $missing = $results->firstWhere('outcome', AutoAuditResult::MISSING_DOCUMENT);
-        $this->assertSame([4], $missing->ruleNumbers());
+        $this->assertSame([4, 5, 6, 7], $missing->ruleNumbers());
         $this->assertStringContainsString('Форма 161 и зарплатные налоги', $missing->reason);
         $this->assertSame(['осв.xls'], array_column($missing->sources, 'name'));
     }
 
-    /** Нет ведомости: ломаются все проверки клиента, в том числе №4. */
+    /** Нет ведомости: ломаются все проверки клиента, в том числе проверки по форме 161. */
     public function test_missing_sheet_breaks_every_check(): void
     {
         $f161   = $this->service('Форма 161 и зарплатные налоги', AutoAuditRunner::REF_FORM_161);
@@ -410,7 +455,7 @@ class AutoAuditRunTest extends TestCase
 
         $missing = $this->runAudit()->firstWhere('outcome', AutoAuditResult::MISSING_DOCUMENT);
 
-        $this->assertSame([1, 3, 4], $missing->ruleNumbers());
+        $this->assertSame([1, 3, 4, 5, 6, 7], $missing->ruleNumbers());
     }
 
     /** Форма 161 на августовской задаче, по умолчанию за июль. */

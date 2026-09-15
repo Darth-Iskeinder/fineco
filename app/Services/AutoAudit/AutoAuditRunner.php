@@ -72,7 +72,8 @@ class AutoAuditRunner
      *
      * account:   счёт в ОСВ, берём оборот за период по кредиту;
      * document:  сторона второго документа, см. SIDES;
-     * field:     число из него: 'base' и 'tax' у отчёта по налогу, 'income' у формы 161;
+     * field:     число из него: 'base' и 'tax' у отчёта по налогу; 'income', 'income_tax',
+     *            'contributions' и 'pension' у формы 161;
      * cash_only: только для кассового метода. Полное обслуживание нужно всем.
      *
      * Все проверки берут обороты, поэтому ведомости за квартал складываются. У будущих
@@ -108,6 +109,33 @@ class AutoAuditRunner
             'account'   => '3520',
             'document'  => 'f161',
             'field'     => 'income',
+            'cash_only' => false,
+        ],
+        5 => [
+            'name'      => 'Подоходный налог к уплате сходится с учётом',
+            'formula'   => 'ОСВ, оборот Кт 3420 = подоходный налог к уплате из формы 161',
+            'condition' => 'Полное обслуживание, любой метод учёта',
+            'account'   => '3420',
+            'document'  => 'f161',
+            'field'     => 'income_tax',
+            'cash_only' => false,
+        ],
+        6 => [
+            'name'      => 'Страховые взносы сходятся с учётом',
+            'formula'   => 'ОСВ, оборот Кт 3531 = начисленные страховые взносы из формы 161',
+            'condition' => 'Полное обслуживание, любой метод учёта',
+            'account'   => '3531',
+            'document'  => 'f161',
+            'field'     => 'contributions',
+            'cash_only' => false,
+        ],
+        7 => [
+            'name'      => 'Взносы в НПФ сходятся с учётом',
+            'formula'   => 'ОСВ, оборот Кт 3534 = начисленные взносы в НПФ из формы 161',
+            'condition' => 'Полное обслуживание, любой метод учёта',
+            'account'   => '3534',
+            'document'  => 'f161',
+            'field'     => 'pension',
             'cash_only' => false,
         ],
     ];
@@ -708,7 +736,7 @@ class AutoAuditRunner
             return match ($side) {
                 'osv'  => $this->balanceSheet->turnover($path, $field, 'credit'),
                 'tax'  => $field === 'tax' ? $this->taxReport->totalTax($path) : $this->taxReport->taxableBase($path),
-                'f161' => $this->form161->income($path),
+                'f161' => $this->form161->read($path, $field),
             };
         } catch (Throwable $e) {
             // Один кривой файл не должен ронять проверку всей фирмы.
