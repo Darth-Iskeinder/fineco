@@ -113,6 +113,15 @@ class AutoAuditRunTest extends TestCase
                 return $this->test->fakeReport(basename($path), 'tax');
             }
         });
+
+        $this->app->instance(\App\Services\AutoAudit\Form161Reader::class, new class($test) extends \App\Services\AutoAudit\Form161Reader {
+            public function __construct(private AutoAuditRunTest $test) {}
+
+            public function income(string $path): DocumentValue
+            {
+                return $this->test->fakeForm(basename($path));
+            }
+        });
     }
 
     protected function tearDown(): void
@@ -282,6 +291,119 @@ class AutoAuditRunTest extends TestCase
         $this->attachQuarterReport($client, 'отчёт-2кв.pdf', base: 3.00, tax: 24.00);
 
         $this->assertCount(0, $this->runAudit());
+    }
+
+    /** Имя файла => ['month' => [год, месяц], 'income' => ..., 'inn' => ...]. */
+    private array $forms = [];
+
+    public function fakeForm(string $file): DocumentValue
+    {
+        $form = $this->forms[$file] ?? null;
+
+        if (!$form) {
+            return DocumentValue::wrongDocument('Это не форма 161');
+        }
+
+        return DocumentValue::found($form['income'], [], DocumentPeriod::of(...$form['month']), $form['inn']);
+    }
+
+    /** Проверка №4: оборот Кт 3520 сверяем с доходом из формы 161. */
+    public function test_payroll_check_compares_3520_with_form_161(): void
+    {
+        $f161   = $this->service('Форма 161 и зарплатные налоги', AutoAuditRunner::REF_FORM_161, splitsByBranch: true);
+        $client = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL, 'inn' => '00907202510583']);
+        $this->attachSheet($client, 'осв.xls', ['3520' => 25000.00]);
+        $this->attachForm($client, $f161, 'форма-161.pdf', income: 25000.00, inn: '00907202510583');
+
+        $results = $this->runAudit();
+
+        $this->assertCount(1, $results);
+
+        $row = $results->first();
+        $this->assertSame('4', $row->rule);
+        $this->assertSame(AutoAuditResult::MATCHED, $row->outcome);
+        $this->assertSame('25000.00', $row->left_value);
+        $this->assertSame(['ОСВ', 'Форма 161'], array_column($row->sources, 'label'));
+
+        $this->asVendor()->get(route('auto-audit.index'))
+            ->assertSeeInOrder(['№4 Начисленный доход сходится с учётом', $client->name, 'ОСВ, задача', 'Форма 161, задача', 'Совпало']);
+    }
+
+    /** Чужая форма 161: ИНН не тот, что в карточке. Это «не тот документ», а не расхождение в цифрах. */
+    public function test_form_161_of_another_company_is_a_wrong_document(): void
+    {
+        $f161   = $this->service('Форма 161 и зарплатные налоги', AutoAuditRunner::REF_FORM_161);
+        $client = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL, 'inn' => '00907202510583']);
+        $this->attachSheet($client, 'осв.xls', ['3520' => 25000.00]);
+        $this->attachForm($client, $f161, 'форма-чужая.pdf', income: 16000.00, inn: '02101202510267');
+
+        $results = $this->runAudit();
+
+        $this->assertCount(1, $results);
+
+        $row = $results->first();
+        $this->assertSame('4', $row->rule);
+        $this->assertSame(AutoAuditResult::WRONG_DOCUMENT, $row->outcome);
+        $this->assertSame('Среди файлов задачи нет формы 161', $row->reason);
+        $this->assertStringContainsString('ИНН 02101202510267, а в карточке клиента 00907202510583', $row->sources[0]['reason']);
+    }
+
+    /**
+     * В карточке нет настоящего ИНН: сверять не с чем, документ идёт в сверку как есть.
+     * Заглушка «00000000000003» из импорта тоже не ИНН, иначе свой отчёт назвался бы чужим.
+     */
+    public function test_inn_is_not_checked_when_client_card_has_none(): void
+    {
+        $f161 = $this->service('Форма 161 и зарплатные налоги', AutoAuditRunner::REF_FORM_161);
+
+        $empty = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL]);
+        $this->attachSheet($empty, 'осв-пустой.xls', ['3520' => 25000.00]);
+        $this->attachForm($empty, $f161, 'форма-пустой.pdf', income: 25000.00, inn: '02101202510267');
+
+        $stub = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL, 'inn' => '00000000000003']);
+        $this->attachSheet($stub, 'осв-заглушка.xls', ['3520' => 25000.00]);
+        $this->attachForm($stub, $f161, 'форма-заглушка.pdf', income: 25000.00, inn: '21402198800720');
+
+        $this->assertSame([AutoAuditResult::MATCHED, AutoAuditResult::MATCHED], $this->runAudit()->pluck('outcome')->all());
+    }
+
+    /** Нет формы 161: ломается только проверка №4, а №1 и №3 сверяются как обычно. */
+    public function test_missing_form_161_breaks_only_its_check(): void
+    {
+        $f161   = $this->service('Форма 161 и зарплатные налоги', AutoAuditRunner::REF_FORM_161);
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00, '3520' => 1000.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $this->closeWithoutFile($client, $f161);
+
+        $results = $this->runAudit();
+
+        $this->assertSame(['1', '3'], $results->where('outcome', AutoAuditResult::MATCHED)->pluck('rule')->sort()->values()->all());
+
+        $missing = $results->firstWhere('outcome', AutoAuditResult::MISSING_DOCUMENT);
+        $this->assertSame([4], $missing->ruleNumbers());
+        $this->assertStringContainsString('Форма 161 и зарплатные налоги', $missing->reason);
+        $this->assertSame(['осв.xls'], array_column($missing->sources, 'name'));
+    }
+
+    /** Нет ведомости: ломаются все проверки клиента, в том числе №4. */
+    public function test_missing_sheet_breaks_every_check(): void
+    {
+        $f161   = $this->service('Форма 161 и зарплатные налоги', AutoAuditRunner::REF_FORM_161);
+        $client = $this->client();
+        $this->closeWithoutFile($client, $this->osvService);
+        $this->attachForm($client, $f161, 'форма-161.pdf', income: 1000.00);
+
+        $missing = $this->runAudit()->firstWhere('outcome', AutoAuditResult::MISSING_DOCUMENT);
+
+        $this->assertSame([1, 3, 4], $missing->ruleNumbers());
+    }
+
+    /** Форма 161 на августовской задаче, по умолчанию за июль. */
+    private function attachForm(Client $client, Service $service, string $file, float $income, ?string $inn = null, int $month = 7): void
+    {
+        $this->forms[$file] = ['month' => [2026, $month], 'income' => $income, 'inn' => $inn];
+        $this->attachLog($client, $this->item($client, $service), $file);
     }
 
     /** Отчёт за 2 квартал 2026 на июльской задаче. */

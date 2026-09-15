@@ -22,6 +22,8 @@ class DocumentValue
         public readonly array $trace = [],
         /** Период, за который составлен документ. Читается из него самого, см. DocumentPeriod. */
         public readonly ?DocumentPeriod $period = null,
+        /** ИНН организации из шапки документа, если он там есть. По нему ловим чужой документ. */
+        public readonly ?string $inn = null,
     ) {}
 
     public const FOUND        = 'found';         // показатель прочитан
@@ -30,9 +32,9 @@ class DocumentValue
     public const UNREADABLE   = 'unreadable';    // файл не открылся
     public const SCAN         = 'scan';          // текста нет: скан или фото, прочитать нечем
 
-    public static function found(float $value, array $trace = [], ?DocumentPeriod $period = null): self
+    public static function found(float $value, array $trace = [], ?DocumentPeriod $period = null, ?string $inn = null): self
     {
-        return new self($value, self::FOUND, null, $trace, $period);
+        return new self($value, self::FOUND, null, $trace, $period, $inn);
     }
 
     /**

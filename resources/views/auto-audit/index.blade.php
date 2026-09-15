@@ -85,7 +85,7 @@
                         <th class="px-4 py-3">Клиент</th>
                         <th class="px-4 py-3">Период</th>
                         <th class="px-4 py-3 text-right">ОСВ</th>
-                        <th class="px-4 py-3 text-right">Отчёт</th>
+                        <th class="px-4 py-3 text-right">Документ</th>
                         <th class="px-4 py-3 text-right">Разница</th>
                         <th class="px-4 py-3">Документы</th>
                         <th class="px-4 py-3">Статус</th>
@@ -117,7 +117,7 @@
                             <td class="px-4 py-3 text-xs space-y-1">
                                 @foreach ($result->sources ?? [] as $source)
                                     <div>
-                                        <span class="text-slate-400">{{ $source['side'] === 'osv' ? 'ОСВ' : 'Отчёт' }}, задача за {{ $source['task_month'] }}:</span>
+                                        <span class="text-slate-400">{{ $source['label'] ?? ($source['side'] === 'osv' ? 'ОСВ' : 'Отчёт') }}, задача за {{ $source['task_month'] }}:</span>
                                         <a href="{{ route('documents.task', $source['document_id']) }}" target="_blank"
                                            class="text-indigo-600 hover:underline">{{ $source['name'] }}</a>
                                         @if ($source['value'] !== null)

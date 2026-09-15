@@ -119,6 +119,19 @@ class SingleTaxReportReaderTest extends TestCase
         $this->assertSame('01.07.2026 – 31.07.2026', $result->period->label());
     }
 
+    /** ИНН из шапки нужен, чтобы убедиться, что отчёт той самой организации. */
+    public function test_reads_inn_from_the_header(): void
+    {
+        $inn = [];
+
+        foreach (str_split('21402198800720') as $i => $digit) {
+            $inn[] = new PdfWord(67.6 + $i * 13.6, 90.0, $digit);
+        }
+
+        $this->assertSame('21402198800720', $this->reader(array_merge($inn, $this->report()))->taxableBase('отчёт.pdf')->inn);
+        $this->assertNull($this->reader($this->report())->taxableBase('отчёт.pdf')->inn);
+    }
+
     /** Период читается из самого документа: месяц задачи ему не равен. */
     public function test_reads_period_from_the_document(): void
     {

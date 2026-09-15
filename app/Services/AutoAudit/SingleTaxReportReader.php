@@ -119,7 +119,7 @@ class SingleTaxReportReader
             'налог'       => number_format($totals['tax'], 2, ',', ' '),
             'строк'       => count($lines) + count($rateless),
             'сходимость'  => 'итог = сумма строк, база × ставка = налог',
-        ], $period);
+        ], $period, PdfBlank::inn($rows));
     }
 
     /**

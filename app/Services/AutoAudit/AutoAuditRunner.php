@@ -17,24 +17,25 @@ use RuntimeException;
 use Throwable;
 
 /**
- * Первый, самый простой прогон автоаудита: ОСВ против отчёта по единому налогу.
+ * Автоаудит: ОСВ против отчёта по единому налогу и против формы 161.
  *
- * Правила зашиты здесь же, списком. Это сознательно топорно: цель первого варианта
- * увидеть на боевых документах, совпадают числа или нет. Каталог правил, допуски и
- * переключатели появятся потом, когда станет понятно, как выглядит настоящее расхождение.
+ * Правила зашиты здесь же, списком. Это сознательно топорно: цель увидеть на боевых
+ * документах, совпадают числа или нет. Каталог правил, допуски и переключатели появятся
+ * потом, когда станет понятно, как выглядит настоящее расхождение.
  *
  * Как идёт сверка у одного клиента:
- *   1. берём документы закрытых задач двух эталонных БП;
+ *   1. берём документы закрытых задач эталонных БП: ведомость и второй документ проверки;
  *   2. читаем каждый и узнаём период из самого документа, а не из месяца задачи;
- *   3. ставим в пару ведомость и отчёты за один и тот же период. Ведомость всегда
+ *   3. ИНН в шапке документа сверяем с карточкой клиента: чужая организация, чужой файл;
+ *   4. ставим в пару ведомость и документы за один и тот же период. Ведомость всегда
  *      помесячная, а отчёт бывает квартальным: тогда складываем ведомости трёх месяцев;
- *   4. отчёты филиалов за период складываем и сравниваем с ведомостью до копейки.
+ *   5. документы филиалов за период складываем и сравниваем с ведомостью до копейки.
  *
  * Какие строки пишем:
- *   - совпало или не совпало, когда пару удалось сравнить. Пары нет вовсе или отчёта
+ *   - совпало или не совпало, когда пару удалось сравнить. Пары нет вовсе или документа
  *     одного из филиалов не хватает: такую строку не пишем, чтобы не засорять страницу;
  *   - нет документа: задача закрыта без файла, или у квартального отчёта нет ведомости за
- *     какой-то месяц. Одна строка на клиента и период сразу для всех его проверок;
+ *     какой-то месяц. Одна строка на клиента и период, в ней проверки, которые это ломает;
  *   - беда с документом: не тот документ, скан или файл не открылся. Стоит под каждой
  *     проверкой клиента, которая берёт числа из этого документа.
  *
@@ -43,20 +44,41 @@ use Throwable;
 class AutoAuditRunner
 {
     public const REF_TAX_REPORT    = 3;
+    public const REF_FORM_161      = 7;
     public const REF_BALANCE_SHEET = 11;
 
     /**
-     * Проверки первого варианта.
+     * Документы, из которых берутся числа. Ключ: сторона сверки.
+     *
+     * ref:      эталонный номер БП, к задачам которого документ прикладывают;
+     * label:    как подписать файл на странице;
+     * genitive: «нет …» в причине;
+     * probe:    чем проверить, что файл вообще нужная форма. Форму и период читалка
+     *           проверяет до того, как искать число, поэтому годится любое поле.
+     */
+    private const SIDES = [
+        'osv'  => ['ref' => self::REF_BALANCE_SHEET, 'label' => 'ОСВ',         'genitive' => 'оборотно-сальдовой ведомости', 'probe' => '3210'],
+        'tax'  => ['ref' => self::REF_TAX_REPORT,    'label' => 'Отчёт по ЕН', 'genitive' => 'отчёта по единому налогу',     'probe' => 'base'],
+        'f161' => ['ref' => self::REF_FORM_161,      'label' => 'Форма 161',   'genitive' => 'формы 161',                    'probe' => 'income'],
+    ];
+
+    /**
+     * Проверки.
      *
      * Ключ: номер проверки, он же номер строки в таблице правил (колонка A). Номер не
      * меняем и не переиспользуем: по нему связаны результаты и фильтр на странице.
      *
      * account:   счёт в ОСВ, берём оборот за период по кредиту;
-     * field:     число из отчёта, 'base' (налоговая база) или 'tax' (сумма налога);
-     * cash_only: только для кассового метода. Полное обслуживание нужно обеим.
+     * document:  сторона второго документа, см. SIDES;
+     * field:     число из него: 'base' и 'tax' у отчёта по налогу, 'income' у формы 161;
+     * cash_only: только для кассового метода. Полное обслуживание нужно всем.
      *
-     * Обе проверки берут обороты, поэтому ведомости за квартал складываются. У будущих
+     * Все проверки берут обороты, поэтому ведомости за квартал складываются. У будущих
      * проверок по сальдо так нельзя: там нужен последний месяц.
+     *
+     * У №4 в таблице правил стоит счёт 3510, но в ведомостях фирм его нет вовсе: зарплата
+     * на 3520 «Начисленная заработная плата». На боевых парах за июль 2026 оборот 3520
+     * сошёлся с доходом формы 161 у всех, у кого форма своя.
      */
     public const RULES = [
         1 => [
@@ -64,6 +86,7 @@ class AutoAuditRunner
             'formula'   => 'ОСВ, оборот Кт 3210 = налоговая база из отчёта по единому налогу',
             'condition' => 'Кассовый метод, полное обслуживание',
             'account'   => '3210',
+            'document'  => 'tax',
             'field'     => 'base',
             'cash_only' => true,
         ],
@@ -72,17 +95,20 @@ class AutoAuditRunner
             'formula'   => 'ОСВ, оборот Кт 3410 = сумма единого налога из отчёта',
             'condition' => 'Полное обслуживание, любой метод учёта',
             'account'   => '3410',
+            'document'  => 'tax',
             'field'     => 'tax',
             'cash_only' => false,
         ],
+        4 => [
+            'name'      => 'Начисленный доход сходится с учётом',
+            'formula'   => 'ОСВ, оборот Кт 3520 = общая сумма начисленного дохода из формы 161',
+            'condition' => 'Полное обслуживание, любой метод учёта',
+            'account'   => '3520',
+            'document'  => 'f161',
+            'field'     => 'income',
+            'cash_only' => false,
+        ],
     ];
-
-    /**
-     * Чем проверяем, что файл вообще нужная форма. Форму и период читалка проверяет до
-     * того, как искать число, поэтому годится любое. Берём то, что читает проверка №1:
-     * разбор из кеша пригодится ей же.
-     */
-    private const PROBE = ['osv' => '3210', 'tax' => 'base'];
 
     /** Картинки вместо PDF или Excel: скан или фото, без распознавания прочитать нечем. */
     private const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tif', 'tiff', 'webp', 'heic'];
@@ -99,6 +125,7 @@ class AutoAuditRunner
     public function __construct(
         private readonly BalanceSheetReader $balanceSheet,
         private readonly SingleTaxReportReader $taxReport,
+        private readonly Form161Reader $form161,
     ) {}
 
     /**
@@ -115,15 +142,23 @@ class AutoAuditRunner
 
         $this->cache = [];
 
-        $osvService = Service::where('reference_id', self::REF_BALANCE_SHEET)->first();
-        $taxService = Service::where('reference_id', self::REF_TAX_REPORT)->first();
+        $byRef    = Service::whereIn('reference_id', array_column(self::SIDES, 'ref'))->get()->keyBy('reference_id');
+        $services = [];   // сторона => БП этой фирмы
+
+        foreach (self::SIDES as $side => $definition) {
+            if ($byRef->has($definition['ref'])) {
+                $services[$side] = $byRef[$definition['ref']];
+            }
+        }
+
+        // Проверка работает, только если в фирме размечены оба её БП.
+        $rules = array_filter(self::RULES, fn (array $rule) => isset($services['osv'], $services[$rule['document']]));
 
         $rows = [];
 
-        // Фирма без обоих эталонных БП не размечена, сверять в ней нечего.
-        if ($osvService && $taxService) {
+        if ($rules) {
             foreach (Client::orderBy('name')->get() as $client) {
-                array_push($rows, ...$this->checkClient($client, $osvService, $taxService));
+                array_push($rows, ...$this->checkClient($client, $services, $rules));
             }
         }
 
@@ -138,77 +173,89 @@ class AutoAuditRunner
         return collect($rows)->countBy('outcome')->all();
     }
 
-    private function checkClient(Client $client, Service $osvService, Service $taxService): array
+    /**
+     * @param array<string, Service> $services сторона => БП
+     * @param array<int, array>      $rules    проверки, для которых в фирме есть оба БП
+     */
+    private function checkClient(Client $client, array $services, array $rules): array
     {
         // Ведём не всё: ведомость или отчёт может делать кто-то другой, сверка ни о чём.
         if (!$client->servesEverything()) {
             return [];
         }
 
-        $numbers = array_keys(array_filter(
-            self::RULES,
+        $rules = array_filter(
+            $rules,
             fn (array $rule) => !$rule['cash_only'] || $client->accounting_method === Client::ACCOUNTING_CASH,
-        ));
-
-        $osvDocuments = $this->documents($client, $osvService);
-        $taxDocuments = $this->documents($client, $taxService);
-
-        // «Нет документа» одинаково для всех проверок клиента: одна строка, в ней все номера.
-        $rows = array_map(
-            fn (array $row) => array_merge($row, ['rule' => implode(',', $numbers)]),
-            $this->missingDocuments($client, $osvService, $taxService, $osvDocuments, $taxDocuments),
         );
 
-        if ($osvDocuments->isEmpty() && $taxDocuments->isEmpty()) {
+        // Ведомость нужна всем проверкам, вторые документы только своим.
+        $documents = [];
+
+        foreach (array_unique(['osv', ...array_column($rules, 'document')]) as $side) {
+            $documents[$side] = $this->documents($client, $services[$side]);
+        }
+
+        $rows = $this->missingDocuments($client, $services, $documents, $rules);
+
+        if (collect($documents)->every(fn (Collection $found) => $found->isEmpty())) {
             return $rows;
         }
 
         // Беда с документом ломает каждую проверку, которая берёт из него число, поэтому и
         // стоит под каждой. Второй стороны может не быть вовсе: беда от этого не пропадает.
-        $problems = array_merge(
-            $this->documentProblems($client, 'osv', $osvDocuments),
-            $this->documentProblems($client, 'tax', $taxDocuments),
-        );
+        $problems = [];
 
-        $taxItems = $this->estimateItems($client, $taxService);
+        foreach ($documents as $side => $found) {
+            $problems[$side] = $this->documentProblems($client, $side, $found);
+        }
 
-        foreach ($numbers as $number) {
-            foreach ($problems as $row) {
+        $items = [];
+
+        foreach ($rules as $number => $rule) {
+            $side = $rule['document'];
+
+            foreach (array_merge($problems['osv'], $problems[$side]) as $row) {
                 $rows[] = array_merge($row, ['rule' => (string) $number]);
             }
 
-            array_push($rows, ...$this->checkRule($client, $number, self::RULES[$number], $osvDocuments, $taxDocuments, $taxItems));
+            $items[$side] ??= $this->estimateItems($client, $services[$side]);
+
+            array_push($rows, ...$this->checkRule($client, $number, $rule, $documents['osv'], $documents[$side], $items[$side]));
         }
 
         return $rows;
     }
 
     /**
-     * Нет документа: одна строка на период, сразу для всех проверок клиента.
+     * Нет документа: одна строка на период, в ней проверки, которые это ломает.
      *
      * Два случая:
-     *   - задача по ОСВ или отчёту закрыта (или сдана на проверку), а файла в ней нет. Работу
-     *     отметили сделанной, а подтверждения нет. Незакрытые задачи не трогаем: это обычная
-     *     работа или просрочка, её уже показывает БухЗадачник. Период берём месяцем перед
-     *     задачей, как у беды с документом;
+     *   - задача закрыта (или сдана на проверку), а файла в ней нет. Работу отметили
+     *     сделанной, а подтверждения нет. Незакрытые задачи не трогаем: это обычная работа
+     *     или просрочка, её уже показывает БухЗадачник. Период берём месяцем перед задачей;
      *   - отчёт квартальный, а ведомости за какой-то месяц квартала нет. Нет ни одной
      *     ведомости за квартал: пары нет вовсе, строку не пишем. Период берём из отчёта.
      *
+     * Нет ведомости, значит сломаны все проверки клиента. Нет второго документа, значит
+     * только те, что берут из него число.
+     *
      * Числа в такой строке не показываем: строка общая для проверок, а числа у них разные.
      */
-    private function missingDocuments(
-        Client $client,
-        Service $osvService,
-        Service $taxService,
-        Collection $osvDocuments,
-        Collection $taxDocuments,
-    ): array {
-        // Опознанные документы по периодам: сторона => подпись периода => период и источники.
-        $recognized = ['osv' => [], 'tax' => []];
+    private function missingDocuments(Client $client, array $services, array $documents, array $rules): array
+    {
+        $affects = ['osv' => array_keys($rules)];
 
-        foreach (['osv' => $osvDocuments, 'tax' => $taxDocuments] as $side => $documents) {
-            foreach ($documents as [$log, $document]) {
-                $value = $this->read($side, self::PROBE[$side], $document);
+        foreach ($rules as $number => $rule) {
+            $affects[$rule['document']][] = $number;
+        }
+
+        // Опознанные документы: сторона => подпись периода => период и источники.
+        $recognized = [];
+
+        foreach ($documents as $side => $found) {
+            foreach ($found as [$log, $document]) {
+                $value = $this->read($client, $side, self::SIDES[$side]['probe'], $document);
 
                 if (!$value->period) {
                     continue;
@@ -220,68 +267,85 @@ class AutoAuditRunner
             }
         }
 
-        $rows = [];   // подпись периода => ['period' => DocumentPeriod, 'notes' => [...], 'sources' => [...]]
+        // Подпись периода => период, номера проверок, причины и файлы, найденные сверх опознанных.
+        $rows = [];
 
-        foreach (['osv' => $osvService, 'tax' => $taxService] as $service) {
-            foreach ($this->closedWithoutFiles($client, $service) as $log) {
+        foreach (array_keys($documents) as $side) {
+            foreach ($this->closedWithoutFiles($client, $services[$side]) as $log) {
                 // С первого числа, иначе «31 августа минус месяц» перельётся мимо июля.
                 $month  = CarbonImmutable::create($log->year, $log->month, 1)->subMonth();
                 $period = DocumentPeriod::of($month->year, $month->month);
                 $label  = $period->label();
 
-                // Документы второй стороны за тот же период видны рядом: понятно, что уже есть.
-                $rows[$label] ??= [
-                    'period'  => $period,
-                    'notes'   => [],
-                    'sources' => array_merge(
-                        $recognized['osv'][$label]['sources'] ?? [],
-                        $recognized['tax'][$label]['sources'] ?? [],
-                    ),
-                ];
-
-                $rows[$label]['notes'][] = $this->closedWithoutFileNote($log, $service);
+                $rows[$label] ??= ['period' => $period, 'numbers' => [], 'notes' => [], 'extra' => []];
+                array_push($rows[$label]['numbers'], ...$affects[$side]);
+                $rows[$label]['notes'][] = $this->closedWithoutFileNote($log, $services[$side]);
             }
         }
 
-        foreach ($recognized['tax'] as $label => $report) {
-            // Отчёт месячный, или ведомость ровно за его период есть: сверка идёт обычным путём.
-            if (count($report['period']->months()) === 1 || isset($recognized['osv'][$label])) {
+        foreach ($recognized as $side => $periods) {
+            if ($side === 'osv') {
                 continue;
             }
 
-            $present = [];
-            $missing = [];
-
-            foreach ($report['period']->months() as [$year, $month]) {
-                $monthPeriod = DocumentPeriod::of($year, $month);
-
-                if (isset($recognized['osv'][$monthPeriod->label()])) {
-                    array_push($present, ...$recognized['osv'][$monthPeriod->label()]['sources']);
-                } else {
-                    $missing[] = $monthPeriod->title();
+            foreach ($periods as $label => $report) {
+                // Документ месячный, или ведомость ровно за его период есть: сверка идёт обычным путём.
+                if (count($report['period']->months()) === 1 || isset($recognized['osv'][$label])) {
+                    continue;
                 }
-            }
 
-            if (!$missing || !$present) {
-                continue;
-            }
+                $present = [];
+                $missing = [];
 
-            $rows[$label] ??= ['period' => $report['period'], 'notes' => [], 'sources' => array_merge($present, $report['sources'])];
-            $rows[$label]['notes'][] = 'Нет ведомости за ' . implode(', ', $missing);
+                foreach ($report['period']->months() as [$year, $month]) {
+                    $monthPeriod = DocumentPeriod::of($year, $month);
+
+                    if (isset($recognized['osv'][$monthPeriod->label()])) {
+                        array_push($present, ...$recognized['osv'][$monthPeriod->label()]['sources']);
+                    } else {
+                        $missing[] = $monthPeriod->title();
+                    }
+                }
+
+                if (!$missing || !$present) {
+                    continue;
+                }
+
+                $rows[$label] ??= ['period' => $report['period'], 'numbers' => [], 'notes' => [], 'extra' => []];
+                array_push($rows[$label]['numbers'], ...$affects[$side]);
+                array_push($rows[$label]['extra'], ...$present);
+                $rows[$label]['notes'][] = 'Нет ведомости за ' . implode(', ', $missing);
+            }
         }
 
-        return array_map(fn (array $row) => [
-            'client_id'   => $client->id,
-            'rule'        => null,
-            'period_from' => $row['period']->from->toDateString(),
-            'period_to'   => $row['period']->to->toDateString(),
-            'outcome'     => AutoAuditResult::MISSING_DOCUMENT,
-            'left_value'  => null,
-            'right_value' => null,
-            'difference'  => null,
-            'reason'      => implode('. ', $row['notes']),
-            'sources'     => $row['sources'],
-        ], array_values($rows));
+        $result = [];
+
+        foreach ($rows as $label => $row) {
+            $numbers = array_values(array_unique($row['numbers']));
+            sort($numbers);
+
+            // Рядом видны уже приложенные документы этих проверок за тот же период.
+            $sources = $row['extra'];
+
+            foreach (array_unique(['osv', ...array_map(fn (int $number) => $rules[$number]['document'], $numbers)]) as $side) {
+                array_push($sources, ...($recognized[$side][$label]['sources'] ?? []));
+            }
+
+            $result[] = [
+                'client_id'   => $client->id,
+                'rule'        => implode(',', $numbers),
+                'period_from' => $row['period']->from->toDateString(),
+                'period_to'   => $row['period']->to->toDateString(),
+                'outcome'     => AutoAuditResult::MISSING_DOCUMENT,
+                'left_value'  => null,
+                'right_value' => null,
+                'difference'  => null,
+                'reason'      => implode('. ', $row['notes']),
+                'sources'     => collect($sources)->unique('document_id')->values()->all(),
+            ];
+        }
+
+        return $result;
     }
 
     /** Закрытые или сданные на проверку задачи клиента по БП, где нет ни одного файла. */
@@ -326,7 +390,8 @@ class AutoAuditRunner
      *   - среди файлов есть скан или фото: нужный документ может быть как раз им, поэтому
      *     «скан», а не «не тот документ»;
      *   - какой-то файл не открылся: по той же причине «файл не открылся»;
-     *   - все файлы открылись и прочитались, но это другие формы: вот тогда «не тот документ».
+     *   - все файлы открылись и прочитались, но это другие формы или другая организация:
+     *     вот тогда «не тот документ».
      *
      * Отчётный период из такого файла не прочитать, а на странице строки выбираются по
      * периоду. Берём месяц перед месяцем задачи: отчёт за июль сдают в августовской задаче.
@@ -340,7 +405,7 @@ class AutoAuditRunner
             $recognized = false;
 
             foreach ($pairs as [$log, $document]) {
-                $value = $this->read($side, self::PROBE[$side], $document);
+                $value = $this->read($client, $side, self::SIDES[$side]['probe'], $document);
 
                 // Период читалка отдаёт, только когда форма опознана.
                 $recognized = $recognized || $value->period !== null;
@@ -364,9 +429,7 @@ class AutoAuditRunner
                 ],
                 default => [
                     AutoAuditResult::WRONG_DOCUMENT,
-                    $side === 'osv'
-                        ? 'Среди файлов задачи нет оборотно-сальдовой ведомости'
-                        : 'Среди файлов задачи нет отчёта по единому налогу',
+                    'Среди файлов задачи нет ' . self::SIDES[$side]['genitive'],
                 ],
             };
 
@@ -395,15 +458,18 @@ class AutoAuditRunner
         Client $client,
         int $number,
         array $rule,
-        Collection $osvDocuments,
-        Collection $taxDocuments,
-        Collection $taxItems,
+        Collection $sheetDocuments,
+        Collection $reportDocuments,
+        Collection $reportItems,
     ): array {
-        $periods = [];   // подпись периода => ['period' => DocumentPeriod, 'osv' => [...], 'tax' => [...]]
+        $periods = [];   // подпись периода => ['period' => DocumentPeriod, 'osv' => [...], 'report' => [...]]
 
-        foreach (['osv' => $osvDocuments, 'tax' => $taxDocuments] as $side => $documents) {
+        foreach (['osv' => $sheetDocuments, 'report' => $reportDocuments] as $slot => $documents) {
+            $side  = $slot === 'osv' ? 'osv' : $rule['document'];
+            $field = $slot === 'osv' ? $rule['account'] : $rule['field'];
+
             foreach ($documents as [$log, $document]) {
-                $value = $this->read($side, $side === 'osv' ? $rule['account'] : $rule['field'], $document);
+                $value = $this->read($client, $side, $field, $document);
 
                 // Не тот документ, скан или не открылся: в пару его не поставить.
                 if (!$value->period) {
@@ -412,23 +478,23 @@ class AutoAuditRunner
 
                 $label = $value->period->label();
                 $periods[$label]['period'] = $value->period;
-                $periods[$label][$side][]  = $this->source($side, $log, $document, $value);
+                $periods[$label][$slot][]  = $this->source($side, $log, $document, $value);
             }
         }
 
         $rows = [];
 
         foreach ($periods as $entry) {
-            $osv = $entry['osv'] ?? [];
-            $tax = $entry['tax'] ?? [];
+            $osv     = $entry['osv'] ?? [];
+            $reports = $entry['report'] ?? [];
 
-            // Отчёт за несколько месяцев, а ведомости за тот же период нет: ведомости у нас
-            // помесячные, собираем их по месяцам отчёта.
-            $sheets = !$osv && $tax && count($entry['period']->months()) > 1
+            // Документ за несколько месяцев, а ведомости за тот же период нет: ведомости у нас
+            // помесячные, собираем их по месяцам документа.
+            $sheets = !$osv && $reports && count($entry['period']->months()) > 1
                 ? $this->sheetsByMonth($entry['period'], $periods)
                 : [$entry['period']->title() => $osv];
 
-            $row = $this->compare($client, $number, $rule, $entry['period'], $sheets, $tax, $taxItems);
+            $row = $this->compare($client, $number, $rule, $entry['period'], $sheets, $reports, $reportItems);
 
             if ($row) {
                 $rows[] = $row;
@@ -465,11 +531,11 @@ class AutoAuditRunner
         array $rule,
         DocumentPeriod $period,
         array $sheets,
-        array $tax,
-        Collection $taxItems,
+        array $reports,
+        Collection $reportItems,
     ): ?array {
         // Документы только с одной стороны: пары нет.
-        if (!$tax || !array_filter($sheets)) {
+        if (!$reports || !array_filter($sheets)) {
             return null;
         }
 
@@ -479,17 +545,22 @@ class AutoAuditRunner
             return null;
         }
 
-        $expected = $this->expectedReports($taxItems, $period);
+        $expected = $this->expectedReports($reportItems, $period);
 
-        // Без отчёта одного из филиалов сумма заведомо меньше, и красное было бы ложным.
-        if (count($tax) < $expected) {
+        // Без документа одного из филиалов сумма заведомо меньше, и красное было бы ложным.
+        if (count($reports) < $expected) {
             return null;
         }
 
         $notes = [];
 
-        if (count($tax) > $expected) {
-            $notes[] = sprintf('Отчётов по налогу %d, а филиалов %d: возможно, один приложен дважды', count($tax), $expected);
+        if (count($reports) > $expected) {
+            $notes[] = sprintf(
+                'Документов «%s» за период %d, а филиалов %d: возможно, один приложен дважды',
+                self::SIDES[$rule['document']]['label'],
+                count($reports),
+                $expected,
+            );
         }
 
         $left    = 0.0;
@@ -511,7 +582,7 @@ class AutoAuditRunner
         }
 
         $left  = round($left, 2);
-        $right = round((float) array_sum(array_column($tax, 'value')), 2);
+        $right = round((float) array_sum(array_column($reports, 'value')), 2);
 
         return [
             'client_id'   => $client->id,
@@ -523,7 +594,7 @@ class AutoAuditRunner
             'right_value' => $right,
             'difference'  => round($left - $right, 2),
             'reason'      => $notes ? implode('. ', $notes) : null,
-            'sources'     => array_merge($sources, $tax),
+            'sources'     => array_merge($sources, $reports),
         ];
     }
 
@@ -554,9 +625,9 @@ class AutoAuditRunner
     }
 
     /**
-     * Сколько отчётов по налогу ждём за период: столько, сколько строк сметы тогда работало.
+     * Сколько документов ждём за период: столько, сколько строк сметы тогда работало.
      *
-     * Строку, закрытую раньше начала периода, не считаем: филиал закрыли, отчёта по нему
+     * Строку, закрытую раньше начала периода, не считаем: филиал закрыли, документа по нему
      * больше не будет.
      */
     private function expectedReports(Collection $items, DocumentPeriod $period): int
@@ -569,13 +640,36 @@ class AutoAuditRunner
     }
 
     /**
-     * Одно число из документа.
+     * Одно число из документа клиента.
      *
-     * @param string $field для ОСВ номер счёта, для отчёта 'base' или 'tax'
+     * @param string $field для ОСВ номер счёта, для второго документа его поле
      */
-    private function read(string $side, string $field, BuhTaskDocument $document): DocumentValue
+    private function read(Client $client, string $side, string $field, BuhTaskDocument $document): DocumentValue
     {
-        return $this->cache["{$side}:{$field}:{$document->id}"] ??= $this->readFile($side, $field, $document);
+        return $this->cache["{$side}:{$field}:{$document->id}"] ??= $this->checkInn($client, $this->readFile($side, $field, $document));
+    }
+
+    /**
+     * Документ другой организации: ИНН в шапке не тот, что в карточке клиента.
+     *
+     * Без этой проверки чужая форма дала бы «не совпало» по числам, и расхождение искали бы
+     * в учёте, хотя перепутан файл. Так нашлась форма 161 «Нова Трек» у «Нова трек плюс».
+     * Сверяем, только когда ИНН есть и в документе, и в карточке. В ОСВ ИНН нет.
+     *
+     * В части карточек вместо ИНН стоит заглушка вроде «00000000000003»: клиентов заводили,
+     * пока ИНН не знали. Настоящий ИНН не начинается с пяти нулей (у организации там ноль
+     * и дата регистрации, у человека единица или двойка), поэтому такую карточку пропускаем.
+     * Иначе свой документ клиента назывался бы чужим.
+     */
+    private function checkInn(Client $client, DocumentValue $value): DocumentValue
+    {
+        $clientInn = preg_replace('/\D+/', '', (string) $client->inn);
+
+        if ($value->inn === null || strlen($clientInn) !== 14 || str_starts_with($clientInn, '00000') || $value->inn === $clientInn) {
+            return $value;
+        }
+
+        return DocumentValue::wrongDocument("Документ другой организации: ИНН {$value->inn}, а в карточке клиента {$clientInn}");
     }
 
     private function readFile(string $side, string $field, BuhTaskDocument $document): DocumentValue
@@ -593,13 +687,11 @@ class AutoAuditRunner
         }
 
         try {
-            if ($side === 'osv') {
-                return $this->balanceSheet->turnover($path, $field, 'credit');
-            }
-
-            return $field === 'tax'
-                ? $this->taxReport->totalTax($path)
-                : $this->taxReport->taxableBase($path);
+            return match ($side) {
+                'osv'  => $this->balanceSheet->turnover($path, $field, 'credit'),
+                'tax'  => $field === 'tax' ? $this->taxReport->totalTax($path) : $this->taxReport->taxableBase($path),
+                'f161' => $this->form161->income($path),
+            };
         } catch (Throwable $e) {
             // Один кривой файл не должен ронять проверку всей фирмы.
             return DocumentValue::unreadable(class_basename($e) . ': ' . $e->getMessage());
@@ -611,6 +703,7 @@ class AutoAuditRunner
     {
         return [
             'side'        => $side,
+            'label'       => self::SIDES[$side]['label'],
             'log_id'      => $log->id,
             'task_month'  => sprintf('%02d.%d', $log->month, $log->year),
             'document_id' => $document->id,
