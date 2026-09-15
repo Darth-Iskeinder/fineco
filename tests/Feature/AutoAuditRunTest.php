@@ -866,6 +866,43 @@ class AutoAuditRunTest extends TestCase
             ->assertSee($payroll->name);
     }
 
+    /** Фильтр по статусу работает вместе с периодом и проверкой, а счётчики его не учитывают. */
+    public function test_filters_by_status_together_with_other_filters(): void
+    {
+        $f161 = $this->service('Форма 161 и зарплатные налоги', AutoAuditRunner::REF_FORM_161);
+
+        $matched = $this->client(['name' => 'ООО Сошлось ' . uniqid(), 'accounting_method' => Client::ACCOUNTING_ACCRUAL]);
+        $this->attachSheet($matched, 'осв-сошлось.xls', ['3410' => 4.00, '3520' => 1000.00]);
+        $this->attachReport($matched, 'отчёт-сошлось.pdf', base: 100.00, tax: 4.00);
+        $this->attachForm($matched, $f161, 'форма-сошлось.pdf', income: 1000.00);
+
+        $mismatch = $this->client(['name' => 'ООО Расхождение ' . uniqid(), 'accounting_method' => Client::ACCOUNTING_ACCRUAL]);
+        $this->attachSheet($mismatch, 'осв-расхождение.xls', ['3410' => 4.00, '3520' => 1500.00]);
+        $this->attachReport($mismatch, 'отчёт-расхождение.pdf', base: 100.00, tax: 4.00);
+        $this->attachForm($mismatch, $f161, 'форма-расхождение.pdf', income: 1000.00);
+
+        $this->runAudit();
+
+        // Только расхождения по №4: остаётся одна строка.
+        $this->asVendor()->get(route('auto-audit.index', ['rule' => '4', 'status' => AutoAuditResult::MISMATCH]))
+            ->assertOk()
+            ->assertSee($mismatch->name)
+            ->assertDontSee($matched->name)
+            ->assertSee('Совпало: 1;')
+            ->assertSee('Не совпало: 1;');
+
+        // Совпавшие по №3: у обоих клиентов налог сошёлся.
+        $this->asVendor()->get(route('auto-audit.index', ['rule' => '3', 'status' => AutoAuditResult::MATCHED]))
+            ->assertSee($mismatch->name)
+            ->assertSee($matched->name);
+
+        // Мусор в адресе не ломает страницу: показываем все статусы.
+        $this->asVendor()->get(route('auto-audit.index', ['status' => 'x']))
+            ->assertOk()
+            ->assertSee($mismatch->name)
+            ->assertSee($matched->name);
+    }
+
     private function asVendor(): static
     {
         return $this->actingAs($this->admin, 'employee')->withSession([

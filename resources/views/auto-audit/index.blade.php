@@ -66,6 +66,14 @@
                             <option value="{{ $number }}" @selected($rule === (string) $number)>№{{ $number }} {{ $definition['name'] }}</option>
                         @endforeach
                     </select>
+                    <label for="status" class="text-sm font-medium text-slate-700">Статус</label>
+                    <select id="status" name="status" onchange="this.form.submit()"
+                            class="rounded-lg border border-slate-200 text-sm px-3 py-2">
+                        <option value="">Все статусы</option>
+                        @foreach (AutoAuditResult::LABELS as $outcome => $label)
+                            <option value="{{ $outcome }}" @selected($status === $outcome)>{{ $label }}</option>
+                        @endforeach
+                    </select>
                     <span class="text-sm text-slate-500">
                         @foreach (AutoAuditResult::LABELS as $outcome => $label)
                             {{ $label }}: {{ $counts[$outcome] ?? 0 }}{{ $loop->last ? '' : ';' }}
