@@ -5,14 +5,15 @@
 @section('content')
 @php
     use App\Models\AutoAuditResult;
+    use App\Services\AutoAudit\AutoAuditRunner;
 
     $statusClasses = [
-        AutoAuditResult::MATCHED        => 'bg-emerald-50 text-emerald-700',
-        AutoAuditResult::MISMATCH       => 'bg-red-50 text-red-700',
-        AutoAuditResult::MISSING_SHEET  => 'bg-amber-50 text-amber-700',
-        AutoAuditResult::WRONG_DOCUMENT => 'bg-amber-50 text-amber-700',
-        AutoAuditResult::SCAN           => 'bg-slate-100 text-slate-600',
-        AutoAuditResult::UNREADABLE     => 'bg-slate-100 text-slate-600',
+        AutoAuditResult::MATCHED          => 'bg-emerald-50 text-emerald-700',
+        AutoAuditResult::MISMATCH         => 'bg-red-50 text-red-700',
+        AutoAuditResult::MISSING_DOCUMENT => 'bg-amber-50 text-amber-700',
+        AutoAuditResult::WRONG_DOCUMENT   => 'bg-amber-50 text-amber-700',
+        AutoAuditResult::SCAN             => 'bg-slate-100 text-slate-600',
+        AutoAuditResult::UNREADABLE       => 'bg-slate-100 text-slate-600',
     ];
 
     $money = fn ($value) => $value === null ? '' : number_format((float) $value, 2, ',', ' ');
@@ -65,7 +66,7 @@
                 </form>
                 <p class="text-xs text-slate-400 mt-2">
                     Период, за который составлены документы, а не месяц задачи: отчёт за июль сдают в августе, и он здесь в июле.
-                    Если документ прочитать не удалось (не тот, скан или не открылся), период взят как месяц перед задачей.
+                    Если файла нет или его не прочитать, период взят по задаче: месяц перед ней.
                 </p>
             </div>
         @endif
@@ -93,12 +94,17 @@
                 <tbody class="divide-y divide-slate-100">
                     @foreach ($results as $result)
                         <tr class="align-top">
-                            <td class="px-4 py-3 text-slate-700">№{{ $result->rule }} {{ $result->ruleName() }}</td>
+                            {{-- У «нет документа» строка общая для всех проверок клиента: номера столбиком. --}}
+                            <td class="px-4 py-3 text-slate-700 space-y-1">
+                                @foreach ($result->ruleNumbers() as $number)
+                                    <div>№{{ $number }} {{ AutoAuditRunner::RULES[$number]['name'] ?? '' }}</div>
+                                @endforeach
+                            </td>
                             <td class="px-4 py-3 font-medium text-slate-800">{{ $result->client?->name ?? 'клиент удалён' }}</td>
                             <td class="px-4 py-3 text-slate-700 whitespace-nowrap">
                                 {{ $result->periodLabel() }}
-                                {{-- Из непрочитанного файла период не узнать: он взят по задаче, и это надо видеть. --}}
-                                @if (in_array($result->outcome, AutoAuditResult::DOCUMENT_PROBLEMS, true))
+                                {{-- Период не из документа, а по задаче: это надо видеть. --}}
+                                @if ($result->periodFromTask())
                                     <p class="text-xs text-slate-400">по месяцу задачи</p>
                                 @endif
                             </td>

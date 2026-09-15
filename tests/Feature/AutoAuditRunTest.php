@@ -185,15 +185,94 @@ class AutoAuditRunTest extends TestCase
         $this->assertCount(1, $results);
 
         $row = $results->first();
-        $this->assertSame(AutoAuditResult::MISSING_SHEET, $row->outcome);
+        $this->assertSame(AutoAuditResult::MISSING_DOCUMENT, $row->outcome);
+        $this->assertSame('3', $row->rule);
         $this->assertSame('Нет ведомости за май 2026', $row->reason);
         $this->assertNull($row->left_value);
-        $this->assertNull($row->difference);
-        $this->assertSame('24.00', $row->right_value);
+        $this->assertNull($row->right_value);
         $this->assertSame('2 квартал 2026', $row->periodLabel());
+        $this->assertFalse($row->periodFromTask());
+        $this->assertCount(3, $row->sources);
 
         $this->asVendor()->get(route('auto-audit.index'))
-            ->assertSeeInOrder([$client->name, '2 квартал 2026', 'отчёт-2кв.pdf', 'Нет ОСВ', 'Нет ведомости за май 2026']);
+            ->assertSeeInOrder([$client->name, '2 квартал 2026', 'отчёт-2кв.pdf', 'Нет документа', 'Нет ведомости за май 2026']);
+    }
+
+    /**
+     * Задача по ОСВ закрыта без файла: одна строка на клиента сразу для обеих проверок, с
+     * исполнителем. Отчёт за тот же период виден рядом.
+     */
+    public function test_task_closed_without_file_is_one_row_for_all_checks(): void
+    {
+        $client = $this->client(['name' => 'ООО Без ОСВ ' . uniqid()]);
+        $this->closeWithoutFile($client, $this->osvService);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $results = $this->runAudit();
+
+        $this->assertCount(1, $results);
+
+        $row = $results->first();
+        $this->assertSame(AutoAuditResult::MISSING_DOCUMENT, $row->outcome);
+        $this->assertSame([1, 3], $row->ruleNumbers());
+        $this->assertSame('июль 2026', $row->periodLabel());
+        $this->assertTrue($row->periodFromTask());
+        $this->assertStringContainsString('за 08.2026: исполнитель Админ автоаудита, закрыта 05.08.2026 без файла', $row->reason);
+        $this->assertSame(['отчёт.pdf'], array_column($row->sources, 'name'));
+        $this->assertNull($row->sources[0]['value']);
+
+        $this->asVendor()->get(route('auto-audit.index'))
+            ->assertSeeInOrder([
+                '№1 Налоговая база сходится с учётом',
+                '№3 Начисленный единый налог сходится с учётом',
+                $client->name,
+                'по месяцу задачи',
+                'отчёт.pdf',
+                'Нет документа',
+            ]);
+    }
+
+    /** Обе задачи закрыты без файлов: всё равно одна строка, в причине обе задачи. */
+    public function test_both_tasks_without_files_make_one_row(): void
+    {
+        $client = $this->client();
+        $this->closeWithoutFile($client, $this->osvService);
+        $this->closeWithoutFile($client, $this->taxService);
+
+        $results = $this->runAudit();
+
+        $this->assertCount(1, $results);
+        $this->assertStringContainsString($this->osvService->name, $results->first()->reason);
+        $this->assertStringContainsString($this->taxService->name, $results->first()->reason);
+    }
+
+    /** Незакрытая задача без файла это обычная работа, её показывает БухЗадачник. */
+    public function test_unfinished_task_without_file_is_not_shown(): void
+    {
+        $client = $this->client();
+        $this->closeWithoutFile($client, $this->osvService, status: 'running');
+
+        $this->assertCount(0, $this->runAudit());
+    }
+
+    /** Клиенту не подходит ни одна проверка: и строки «нет документа» у него нет. */
+    public function test_task_without_file_is_ignored_where_no_check_applies(): void
+    {
+        $client = $this->client(['serves_accounting' => false, 'serves_payroll' => false]);
+        $this->closeWithoutFile($client, $this->osvService);
+
+        $this->assertCount(0, $this->runAudit());
+    }
+
+    /** Задача за август закрыта, а файла в ней нет вовсе. */
+    private function closeWithoutFile(Client $client, Service $service, string $status = 'completed'): BuhTaskLog
+    {
+        return BuhTaskLog::create([
+            'employee_id' => $this->admin->id, 'client_id' => $client->id,
+            'estimate_item_id' => $this->item($client, $service)->id,
+            'year' => 2026, 'month' => 8, 'status' => $status,
+            'completed_at' => $status === 'completed' ? '2026-08-05 10:00:00' : null,
+        ]);
     }
 
     /** Ни одной ведомости за квартал: пары нет вовсе, как и у помесячного отчёта. */

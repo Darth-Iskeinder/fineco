@@ -30,10 +30,11 @@ use Throwable;
  *      помесячная, а отчёт бывает квартальным: тогда складываем ведомости трёх месяцев;
  *   4. отчёты филиалов за период складываем и сравниваем с ведомостью до копейки.
  *
- * Каждая строка относится к одной из проверок:
+ * Какие строки пишем:
  *   - совпало или не совпало, когда пару удалось сравнить. Пары нет вовсе или отчёта
  *     одного из филиалов не хватает: такую строку не пишем, чтобы не засорять страницу;
- *   - нет ОСВ: отчёт квартальный, а ведомости за какой-то месяц квартала нет;
+ *   - нет документа: задача закрыта без файла, или у квартального отчёта нет ведомости за
+ *     какой-то месяц. Одна строка на клиента и период сразу для всех его проверок;
  *   - беда с документом: не тот документ, скан или файл не открылся. Стоит под каждой
  *     проверкой клиента, которая берёт числа из этого документа.
  *
@@ -144,11 +145,22 @@ class AutoAuditRunner
             return [];
         }
 
+        $numbers = array_keys(array_filter(
+            self::RULES,
+            fn (array $rule) => !$rule['cash_only'] || $client->accounting_method === Client::ACCOUNTING_CASH,
+        ));
+
         $osvDocuments = $this->documents($client, $osvService);
         $taxDocuments = $this->documents($client, $taxService);
 
+        // «Нет документа» одинаково для всех проверок клиента: одна строка, в ней все номера.
+        $rows = array_map(
+            fn (array $row) => array_merge($row, ['rule' => implode(',', $numbers)]),
+            $this->missingDocuments($client, $osvService, $taxService, $osvDocuments, $taxDocuments),
+        );
+
         if ($osvDocuments->isEmpty() && $taxDocuments->isEmpty()) {
-            return [];
+            return $rows;
         }
 
         // Беда с документом ломает каждую проверку, которая берёт из него число, поэтому и
@@ -159,21 +171,149 @@ class AutoAuditRunner
         );
 
         $taxItems = $this->estimateItems($client, $taxService);
-        $rows     = [];
 
-        foreach (self::RULES as $number => $rule) {
-            if ($rule['cash_only'] && $client->accounting_method !== Client::ACCOUNTING_CASH) {
-                continue;
-            }
-
+        foreach ($numbers as $number) {
             foreach ($problems as $row) {
                 $rows[] = array_merge($row, ['rule' => (string) $number]);
             }
 
-            array_push($rows, ...$this->checkRule($client, $number, $rule, $osvDocuments, $taxDocuments, $taxItems));
+            array_push($rows, ...$this->checkRule($client, $number, self::RULES[$number], $osvDocuments, $taxDocuments, $taxItems));
         }
 
         return $rows;
+    }
+
+    /**
+     * Нет документа: одна строка на период, сразу для всех проверок клиента.
+     *
+     * Два случая:
+     *   - задача по ОСВ или отчёту закрыта (или сдана на проверку), а файла в ней нет. Работу
+     *     отметили сделанной, а подтверждения нет. Незакрытые задачи не трогаем: это обычная
+     *     работа или просрочка, её уже показывает БухЗадачник. Период берём месяцем перед
+     *     задачей, как у беды с документом;
+     *   - отчёт квартальный, а ведомости за какой-то месяц квартала нет. Нет ни одной
+     *     ведомости за квартал: пары нет вовсе, строку не пишем. Период берём из отчёта.
+     *
+     * Числа в такой строке не показываем: строка общая для проверок, а числа у них разные.
+     */
+    private function missingDocuments(
+        Client $client,
+        Service $osvService,
+        Service $taxService,
+        Collection $osvDocuments,
+        Collection $taxDocuments,
+    ): array {
+        // Опознанные документы по периодам: сторона => подпись периода => период и источники.
+        $recognized = ['osv' => [], 'tax' => []];
+
+        foreach (['osv' => $osvDocuments, 'tax' => $taxDocuments] as $side => $documents) {
+            foreach ($documents as [$log, $document]) {
+                $value = $this->read($side, self::PROBE[$side], $document);
+
+                if (!$value->period) {
+                    continue;
+                }
+
+                $label = $value->period->label();
+                $recognized[$side][$label]['period']    = $value->period;
+                $recognized[$side][$label]['sources'][] = array_merge($this->source($side, $log, $document, $value), ['value' => null]);
+            }
+        }
+
+        $rows = [];   // подпись периода => ['period' => DocumentPeriod, 'notes' => [...], 'sources' => [...]]
+
+        foreach (['osv' => $osvService, 'tax' => $taxService] as $service) {
+            foreach ($this->closedWithoutFiles($client, $service) as $log) {
+                // С первого числа, иначе «31 августа минус месяц» перельётся мимо июля.
+                $month  = CarbonImmutable::create($log->year, $log->month, 1)->subMonth();
+                $period = DocumentPeriod::of($month->year, $month->month);
+                $label  = $period->label();
+
+                // Документы второй стороны за тот же период видны рядом: понятно, что уже есть.
+                $rows[$label] ??= [
+                    'period'  => $period,
+                    'notes'   => [],
+                    'sources' => array_merge(
+                        $recognized['osv'][$label]['sources'] ?? [],
+                        $recognized['tax'][$label]['sources'] ?? [],
+                    ),
+                ];
+
+                $rows[$label]['notes'][] = $this->closedWithoutFileNote($log, $service);
+            }
+        }
+
+        foreach ($recognized['tax'] as $label => $report) {
+            // Отчёт месячный, или ведомость ровно за его период есть: сверка идёт обычным путём.
+            if (count($report['period']->months()) === 1 || isset($recognized['osv'][$label])) {
+                continue;
+            }
+
+            $present = [];
+            $missing = [];
+
+            foreach ($report['period']->months() as [$year, $month]) {
+                $monthPeriod = DocumentPeriod::of($year, $month);
+
+                if (isset($recognized['osv'][$monthPeriod->label()])) {
+                    array_push($present, ...$recognized['osv'][$monthPeriod->label()]['sources']);
+                } else {
+                    $missing[] = $monthPeriod->title();
+                }
+            }
+
+            if (!$missing || !$present) {
+                continue;
+            }
+
+            $rows[$label] ??= ['period' => $report['period'], 'notes' => [], 'sources' => array_merge($present, $report['sources'])];
+            $rows[$label]['notes'][] = 'Нет ведомости за ' . implode(', ', $missing);
+        }
+
+        return array_map(fn (array $row) => [
+            'client_id'   => $client->id,
+            'rule'        => null,
+            'period_from' => $row['period']->from->toDateString(),
+            'period_to'   => $row['period']->to->toDateString(),
+            'outcome'     => AutoAuditResult::MISSING_DOCUMENT,
+            'left_value'  => null,
+            'right_value' => null,
+            'difference'  => null,
+            'reason'      => implode('. ', $row['notes']),
+            'sources'     => $row['sources'],
+        ], array_values($rows));
+    }
+
+    /** Закрытые или сданные на проверку задачи клиента по БП, где нет ни одного файла. */
+    private function closedWithoutFiles(Client $client, Service $service): Collection
+    {
+        return BuhTaskLog::where('client_id', $client->id)
+            ->whereIn('status', self::DONE_STATUSES)
+            ->whereHas('estimateItem', fn ($q) => $q->where('service_id', $service->id))
+            ->whereDoesntHave('documents')
+            ->with('employee:id,full_name')
+            ->orderBy('year')->orderBy('month')
+            ->get();
+    }
+
+    /** «Задача «Закрытие месяца и ОСВ» за 08.2026: исполнитель Иванова А., закрыта 05.08.2026 без файла». */
+    private function closedWithoutFileNote(BuhTaskLog $log, Service $service): string
+    {
+        $parts = [];
+
+        if ($log->employee) {
+            $parts[] = 'исполнитель ' . $log->employee->full_name;
+        }
+
+        $parts[] = $log->status === 'review'
+            ? 'сдана на проверку без файла'
+            : trim('закрыта ' . ($log->completed_at?->format('d.m.Y') ?? '')) . ' без файла';
+
+        if ($log->force_closed) {
+            $parts[] = 'закрыта принудительно' . ($log->force_close_comment ? ' («' . $log->force_close_comment . '»)' : '');
+        }
+
+        return sprintf('Задача «%s» за %02d.%d: %s', $service->name, $log->month, $log->year, implode(', ', $parts));
     }
 
     /**
@@ -333,6 +473,12 @@ class AutoAuditRunner
             return null;
         }
 
+        // Квартал без ведомости за какой-то месяц: сумма двух месяцев дала бы ложное красное.
+        // Строку «нет документа» об этом пишет missingDocuments().
+        if (count(array_filter($sheets)) < count($sheets)) {
+            return null;
+        }
+
         $expected = $this->expectedReports($taxItems, $period);
 
         // Без отчёта одного из филиалов сумма заведомо меньше, и красное было бы ложным.
@@ -350,10 +496,6 @@ class AutoAuditRunner
         $sources = [];
 
         foreach ($sheets as $month => $osv) {
-            if (!$osv) {
-                continue;
-            }
-
             // Ведомость за месяц одна. Приложили несколько, берём последнюю загруженную.
             if (count($osv) > 1) {
                 $notes[] = sprintf('Ведомостей за %s: %d, взята последняя', $month, count($osv));
@@ -368,53 +510,20 @@ class AutoAuditRunner
             array_push($sources, ...$osv);
         }
 
-        $right   = round((float) array_sum(array_column($tax, 'value')), 2);
-        $sources = array_merge($sources, $tax);
-        $missing = array_keys(array_filter($sheets, fn (array $osv) => !$osv));
+        $left  = round($left, 2);
+        $right = round((float) array_sum(array_column($tax, 'value')), 2);
 
-        // Квартал без ведомости за какой-то месяц: оборот не сложить, и сумма двух месяцев
-        // дала бы ложное красное. Но это конкретная дыра, которую бухгалтер закроет.
-        if ($missing) {
-            array_unshift($notes, 'Нет ведомости за ' . implode(', ', $missing));
-
-            return $this->result($client, $number, $period, AutoAuditResult::MISSING_SHEET, null, $right, $notes, $sources);
-        }
-
-        $left = round($left, 2);
-
-        return $this->result(
-            $client,
-            $number,
-            $period,
-            abs($left - $right) < self::EPSILON ? AutoAuditResult::MATCHED : AutoAuditResult::MISMATCH,
-            $left,
-            $right,
-            $notes,
-            $sources,
-        );
-    }
-
-    private function result(
-        Client $client,
-        int $number,
-        DocumentPeriod $period,
-        string $outcome,
-        ?float $left,
-        ?float $right,
-        array $notes,
-        array $sources,
-    ): array {
         return [
             'client_id'   => $client->id,
             'rule'        => (string) $number,
             'period_from' => $period->from->toDateString(),
             'period_to'   => $period->to->toDateString(),
-            'outcome'     => $outcome,
+            'outcome'     => abs($left - $right) < self::EPSILON ? AutoAuditResult::MATCHED : AutoAuditResult::MISMATCH,
             'left_value'  => $left,
             'right_value' => $right,
-            'difference'  => $left === null || $right === null ? null : round($left - $right, 2),
+            'difference'  => round($left - $right, 2),
             'reason'      => $notes ? implode('. ', $notes) : null,
-            'sources'     => $sources,
+            'sources'     => array_merge($sources, $tax),
         ];
     }
 
