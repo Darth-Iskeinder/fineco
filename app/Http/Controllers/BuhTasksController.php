@@ -1884,6 +1884,10 @@ class BuhTasksController extends Controller
      * тут ничего не происходит, и триггер сработает позже, на приёмке главбухом.
      * Сам EventTriggeredTasks гасит любые свои ошибки: закрытие задачи из-за него
      * упасть не может.
+     *
+     * Принудительно закрытая задача дочернюю не рождает — это решает сам
+     * EventTriggeredTasks по отметке force_closed, в том числе когда сюда пришли
+     * из приёмки главбухом.
      */
     private function fireEventTrigger(BuhTaskLog|BuhAdhocTask $task): ?BuhAdhocTask
     {

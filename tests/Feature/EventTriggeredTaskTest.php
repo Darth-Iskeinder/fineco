@@ -139,6 +139,14 @@ class EventTriggeredTaskTest extends TestCase
         ]);
     }
 
+    /** Плановая задача по БП-родителю, ежемесячному: у него расписание, а не «по запросу». */
+    private function plannedParentLog(Service $child, array $extra = []): BuhTaskLog
+    {
+        return $this->plannedLog($this->parentService($child, array_merge([
+            'periodicity' => 'Ежемесячно', 'start_day' => [5], 'deadline_days' => null,
+        ], $extra)));
+    }
+
     private function spawnedFor(BuhAdhocTask|BuhTaskLog $source): ?BuhAdhocTask
     {
         return BuhAdhocTask::where('trigger_source_type', $source::class)
@@ -339,5 +347,128 @@ class EventTriggeredTaskTest extends TestCase
         $this->assertCount(2, $spawned->checklist);
         $this->assertSame('Собрать документы', $spawned->checklist[0]['name']);
         $this->assertFalse($spawned->checklist[0]['done']);
+    }
+
+    // =============================================
+    // ПРИНУДИТЕЛЬНОЕ ЗАКРЫТИЕ: не выполнение, дочерней нет
+    // =============================================
+
+    /**
+     * Плановая задача с проверкой: главбух принял — дочерняя создалась.
+     *
+     * Пара к тесту про принудительное закрытие через приёмку: показывает, что
+     * молчит там именно отметка, а не сам путь через «Принять».
+     */
+    public function test_planned_parent_with_review_spawns_child_after_approve(): void
+    {
+        $child = $this->childService();
+        $log   = $this->plannedParentLog($child, ['requires_review' => true]);
+
+        $this->actingAs($this->accountant, 'employee')
+            ->postJson(route('buhtasks.logs.complete', $log))
+            ->assertOk()
+            ->assertJsonPath('log.status', 'review');
+
+        $this->assertNull($this->spawnedFor($log), 'На проверке дочерней быть не должно');
+
+        $this->actingAs($this->head, 'employee')
+            ->postJson(route('buhtasks.logs.review-approve', $log))->assertOk();
+
+        $spawned = $this->spawnedFor($log);
+        $this->assertNotNull($spawned);
+        $this->assertSame($this->accountant->id, $spawned->employee_id);
+    }
+
+    /** Принудительное закрытие: работы не было, значит и следующей работы нет. */
+    public function test_force_closed_parent_spawns_nothing(): void
+    {
+        $log = $this->plannedParentLog($this->childService());
+
+        $this->actingAs($this->accountant, 'employee')
+            ->postJson(route('buhtasks.logs.force-complete', $log), ['comment' => 'Операций не было'])
+            ->assertOk()
+            ->assertJsonPath('log.status', 'completed')
+            ->assertJsonPath('log.force_closed', true)
+            ->assertJsonMissingPath('spawned_name');
+
+        $this->assertNull($this->spawnedFor($log), 'У принудительно закрытой дочерней быть не должно');
+    }
+
+    /**
+     * Принудительное закрытие с обязательной проверкой: отметка живёт до приёмки,
+     * поэтому и после «Принять» дочерней нет.
+     */
+    public function test_force_closed_parent_spawns_nothing_after_review_approved(): void
+    {
+        $log = $this->plannedParentLog($this->childService(), ['requires_review' => true]);
+
+        $this->actingAs($this->accountant, 'employee')
+            ->postJson(route('buhtasks.logs.force-complete', $log), ['comment' => 'Документа не будет'])
+            ->assertOk()
+            ->assertJsonPath('log.status', 'review');
+
+        $this->actingAs($this->head, 'employee')
+            ->postJson(route('buhtasks.logs.review-approve', $log))
+            ->assertOk()
+            ->assertJsonMissingPath('spawned_name');
+
+        $this->assertSame('completed', $log->fresh()->status);
+        $this->assertTrue((bool) $log->fresh()->force_closed, 'Отметка остаётся на задаче');
+        $this->assertNull($this->spawnedFor($log), 'Приёмка принудительно закрытой дочернюю не рождает');
+    }
+
+    /**
+     * Перезапуск после принудительного закрытия: сбросили, сделали по-настоящему —
+     * дочерняя появилась, и ровно одна.
+     */
+    public function test_properly_finished_after_force_close_spawns_child(): void
+    {
+        $log = $this->plannedParentLog($this->childService());
+
+        $this->actingAs($this->accountant, 'employee')
+            ->postJson(route('buhtasks.logs.force-complete', $log), ['comment' => 'Поспешил'])->assertOk();
+        $this->assertNull($this->spawnedFor($log));
+
+        $this->actingAs($this->accountant, 'employee')
+            ->postJson(route('buhtasks.logs.reset', $log))->assertOk();
+        $this->actingAs($this->accountant, 'employee')
+            ->postJson(route('buhtasks.logs.complete', $log))->assertOk();
+
+        $this->assertNotNull($this->spawnedFor($log), 'Честно закрытая задача дочернюю рождает');
+        $this->assertSame(1, BuhAdhocTask::where('trigger_source_type', BuhTaskLog::class)
+            ->where('trigger_source_id', $log->id)->count());
+    }
+
+    /**
+     * Доработка после принудительного закрытия: главбух вернул, бухгалтер сдал как
+     * положено. Обычное закрытие снимает отметку, поэтому на приёмке дочерняя рождается.
+     */
+    public function test_child_appears_when_force_closed_task_is_reworked_and_accepted(): void
+    {
+        $log = $this->plannedParentLog($this->childService(), ['requires_review' => true]);
+
+        $this->actingAs($this->accountant, 'employee')
+            ->postJson(route('buhtasks.logs.force-complete', $log), ['comment' => 'Нет документа'])->assertOk();
+
+        $this->actingAs($this->head, 'employee')
+            ->postJson(route('buhtasks.logs.review-reject', $log), ['comment' => 'Документ всё-таки нужен'])
+            ->assertOk();
+        $this->assertSame('rework', $log->fresh()->status);
+
+        // Сдаёт обычным «Выполнено» — оно и снимает след принудительного закрытия
+        $this->actingAs($this->accountant, 'employee')
+            ->postJson(route('buhtasks.logs.complete', $log))
+            ->assertOk()
+            ->assertJsonPath('log.status', 'review')
+            ->assertJsonPath('log.force_closed', false);
+
+        $this->assertNull($this->spawnedFor($log), 'Пока задача на проверке, дочерней нет');
+
+        $this->actingAs($this->head, 'employee')
+            ->postJson(route('buhtasks.logs.review-approve', $log))->assertOk();
+
+        $this->assertNotNull($this->spawnedFor($log));
+        $this->assertSame(1, BuhAdhocTask::where('trigger_source_type', BuhTaskLog::class)
+            ->where('trigger_source_id', $log->id)->count());
     }
 }
