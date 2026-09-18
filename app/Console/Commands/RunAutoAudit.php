@@ -2,9 +2,9 @@
 
 namespace App\Console\Commands;
 
+use App\Jobs\RunAutoAuditJob;
 use App\Models\AutoAuditResult;
 use App\Services\AutoAudit\AutoAuditRunner;
-use App\Support\TenantContext;
 use Illuminate\Console\Command;
 
 /**
@@ -13,6 +13,10 @@ use Illuminate\Console\Command;
  * Делает ровно то же, что кнопка «Проверить сейчас» на странице автоаудита: стирает
  * прошлые результаты фирмы и пишет новые. По крону пока не запускается намеренно:
  * сначала смотрим результат руками.
+ *
+ * Прогон идёт через тот же RunAutoAuditJob::perform, что и кнопка, поэтому у команды тот же
+ * замок и то же состояние в кеше. Раньше она не знала ни про то, ни про другое: её можно
+ * было запустить поверх идущего прогона, а страница в это время показывала время прошлого.
  */
 class RunAutoAudit extends Command
 {
@@ -31,7 +35,13 @@ class RunAutoAudit extends Command
         }
 
         $started = microtime(true);
-        $counts  = TenantContext::for($tenant, fn () => $runner->run());
+        $counts  = RunAutoAuditJob::perform($tenant, $runner);
+
+        if ($counts === null) {
+            $this->error('По этой фирме уже идёт проверка: второй прогон не начат');
+
+            return self::FAILURE;
+        }
 
         foreach (AutoAuditResult::LABELS as $outcome => $label) {
             // str_pad считает байты, а не буквы: с кириллицей столбцы разъезжаются.

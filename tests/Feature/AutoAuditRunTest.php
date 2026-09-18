@@ -20,6 +20,8 @@ use App\Services\AutoAudit\SingleTaxReportReader;
 use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use App\Jobs\RunAutoAuditJob;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -1390,6 +1392,129 @@ class AutoAuditRunTest extends TestCase
         $this->assertSame(\App\Jobs\RunAutoAuditJob::FAILED, $state['status']);
         $this->assertSame('разметка потерялась', $state['error']);
         $this->assertSame($before, AutoAuditResult::count());
+    }
+
+    /**
+     * Замок занят: второй прогон по этой же фирме не начинается.
+     *
+     * Раньше защита была только в контроллере, между «посмотрел состояние» и «отметил, что
+     * идёт». Двойной клик, две вкладки или команда из терминала проскакивали этот зазор, и
+     * по одной фирме шли два прогона сразу.
+     */
+    public function test_second_run_does_not_start_while_the_lock_is_held(): void
+    {
+        $lock = Cache::lock(RunAutoAuditJob::lockKey($this->tenant->id), 60);
+        $this->assertTrue($lock->get());
+
+        $runner = new class extends AutoAuditRunner {
+            public int $calls = 0;
+
+            public function __construct() {}
+
+            public function run(): array
+            {
+                $this->calls++;
+
+                return [];
+            }
+        };
+
+        (new RunAutoAuditJob($this->tenant->id))->handle($runner);
+
+        $this->assertSame(0, $runner->calls, 'прогон пошёл поверх занятого замка');
+
+        $lock->release();
+    }
+
+    /** Команда из терминала берёт тот же замок, что и кнопка, и поверх прогона не запускается. */
+    public function test_command_does_not_run_while_the_lock_is_held(): void
+    {
+        $lock = Cache::lock(RunAutoAuditJob::lockKey($this->tenant->id), 60);
+        $this->assertTrue($lock->get());
+
+        $this->artisan('autoaudit:run', ['--tenant' => $this->tenant->id])
+            ->expectsOutputToContain('уже идёт проверка')
+            ->assertFailed();
+
+        $lock->release();
+    }
+
+    /** Упавший прогон освобождает замок: следующий запуск не должен ждать протухания. */
+    public function test_failed_run_releases_the_lock(): void
+    {
+        $runner = new class extends AutoAuditRunner {
+            public function __construct() {}
+
+            public function run(): array
+            {
+                throw new \RuntimeException('упал');
+            }
+        };
+
+        (new RunAutoAuditJob($this->tenant->id))->handle($runner);
+
+        $lock = Cache::lock(RunAutoAuditJob::lockKey($this->tenant->id), 60);
+
+        $this->assertTrue($lock->get(), 'замок остался занятым после падения');
+
+        $lock->release();
+    }
+
+    /** Пока прогон идёт, состояние так и говорит: это видит и страница, и второй запуск. */
+    public function test_state_says_running_while_the_audit_works(): void
+    {
+        $key = RunAutoAuditJob::stateKey($this->tenant->id);
+        Cache::forget($key);
+
+        $runner = new class($key) extends AutoAuditRunner {
+            public ?string $seen = null;
+
+            public function __construct(private string $key) {}
+
+            public function run(): array
+            {
+                $this->seen = Cache::get($this->key)['status'] ?? null;
+
+                return [];
+            }
+        };
+
+        (new RunAutoAuditJob($this->tenant->id))->handle($runner);
+
+        $this->assertSame(RunAutoAuditJob::RUNNING, $runner->seen);
+        $this->assertSame(RunAutoAuditJob::DONE, Cache::get($key)['status']);
+    }
+
+    /** Замок на фирму: прогон одной фирмы не мешает прогону другой. */
+    public function test_lock_of_one_firm_does_not_block_another(): void
+    {
+        $other = Tenant::create([
+            'name'   => 'Соседняя фирма ' . uniqid(),
+            'slug'   => 'neighbour-' . uniqid(),
+            'status' => Tenant::STATUS_ACTIVE,
+        ]);
+
+        $lock = Cache::lock(RunAutoAuditJob::lockKey($other->id), 60);
+        $this->assertTrue($lock->get());
+
+        $runner = new class extends AutoAuditRunner {
+            public int $calls = 0;
+
+            public function __construct() {}
+
+            public function run(): array
+            {
+                $this->calls++;
+
+                return [];
+            }
+        };
+
+        (new RunAutoAuditJob($this->tenant->id))->handle($runner);
+
+        $this->assertSame(1, $runner->calls, 'чужой замок заблокировал прогон');
+
+        $lock->release();
     }
 
     /** Имя файла открывает окно просмотра прямо на странице, а не скачивание. */
