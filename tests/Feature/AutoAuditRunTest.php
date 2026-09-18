@@ -41,6 +41,9 @@ class AutoAuditRunTest extends TestCase
     private Service $osvService;
     private Service $taxService;
 
+    /** Чтобы у клиентов одного теста ИНН были разные. */
+    private static int $innCounter = 0;
+
     /** Имя файла => ['month' => [год, месяц], 'accounts' => [счёт => оборот]]. */
     private array $sheets = [];
 
@@ -161,7 +164,10 @@ class AutoAuditRunTest extends TestCase
             return DocumentValue::wrongDocument('Это не отчёт по единому налогу');
         }
 
-        return DocumentValue::found($report[$field], [], $report['period'] ?? DocumentPeriod::of(...$report['month']));
+        $period = $report['period'] ?? DocumentPeriod::of(...$report['month']);
+
+        // null в тесте: ИНН из шапки прочитать не удалось.
+        return DocumentValue::found($report[$field], [], $period, $report['inn'] ?? null);
     }
 
     /** Квартальный отчёт сравниваем с суммой трёх помесячных ведомостей. */
@@ -329,7 +335,7 @@ class AutoAuditRunTest extends TestCase
         $this->attachSheet($client, 'осв.xls', ['3520' => 214400.00, '3420' => 19907.20, '3531' => 21976.00, '3534' => 4000.00]);
 
         $this->forms['форма-161.pdf'] = [
-            'month' => [2026, 7], 'inn' => null,
+            'month' => [2026, 7], 'inn' => $client->inn,
             'income' => 214400.00, 'income_tax' => 19907.20, 'contributions' => 21976.00, 'pension' => 4288.00,
         ];
         $this->attachLog($client, $this->item($client, $f161), 'форма-161.pdf');
@@ -409,23 +415,25 @@ class AutoAuditRunTest extends TestCase
         $this->assertSame(['4', '5', '6', '7'], $results->pluck('rule')->sort()->values()->all());
         $this->assertSame([AutoAuditResult::WRONG_DOCUMENT], $results->pluck('outcome')->unique()->values()->all());
 
+        // Раньше в строке писалось «Среди файлов задачи нет формы 161», и человек шёл искать
+        // файл, который лежит на месте. Настоящая причина была спрятана внутри источника.
         $row = $results->firstWhere('rule', '4');
-        $this->assertSame('Среди файлов задачи нет формы 161', $row->reason);
-        $this->assertSame(
-            'ИНН не совпадает: в документе 02101202510267, в карточке клиента 00907202510583. Документ чужой или ошибка в карточке',
-            $row->sources[0]['reason'],
-        );
+        $expected = 'ИНН не совпадает: в документе 02101202510267, в карточке клиента 00907202510583. Документ чужой или ошибка в карточке';
+        $this->assertSame($expected, $row->reason);
+        $this->assertSame($expected, $row->sources[0]['reason']);
     }
 
     /**
-     * В карточке нет настоящего ИНН: сверять не с чем, документ идёт в сверку как есть.
-     * Заглушка «00000000000003» из импорта тоже не ИНН, иначе свой отчёт назвался бы чужим.
+     * В карточке нет настоящего ИНН: сверить документ с клиентом не с чем.
+     *
+     * Раньше сверка тут молча выключалась, и чужой документ проходил как свой. Заглушка
+     * «00000000000003» из импорта тоже не ИНН: клиентов заводили, пока ИНН не знали.
      */
-    public function test_inn_is_not_checked_when_client_card_has_none(): void
+    public function test_client_card_without_a_real_inn_is_not_verified(): void
     {
         $f161 = $this->service('Форма 161 и зарплатные налоги', AutoAuditRunner::REF_FORM_161);
 
-        $empty = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL]);
+        $empty = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL, 'inn' => '']);
         $this->attachSheet($empty, 'осв-пустой.xls', ['3520' => 25000.00]);
         $this->attachForm($empty, $f161, 'форма-пустой.pdf', income: 25000.00, inn: '02101202510267');
 
@@ -435,13 +443,57 @@ class AutoAuditRunTest extends TestCase
 
         $results = $this->runAudit();
 
-        // Проверка №4 сверяет оборот 3520 с доходом: числа настоящие с обеих сторон и они
-        // сошлись, значит документ не объявили чужим. Это здесь и проверяется.
+        // Числа сошлись бы, но проверить, что документ этого клиента, нечем.
         $this->assertSame(
-            [AutoAuditResult::MATCHED, AutoAuditResult::MATCHED],
+            [AutoAuditResult::UNVERIFIED, AutoAuditResult::UNVERIFIED],
             $results->where('rule', '4')->pluck('outcome')->values()->all(),
         );
+        $this->assertStringContainsString(
+            'В карточке клиента нет ИНН из 14 цифр',
+            $results->firstWhere('rule', '4')->reason,
+        );
+        // Чужим документ при этом не называем: мы не знаем, чей он.
         $this->assertCount(0, $results->where('outcome', AutoAuditResult::WRONG_DOCUMENT));
+    }
+
+    /**
+     * ИНН в документе не прочитался: защиты от чужого файла в этот раз не было.
+     *
+     * Раньше сверка тут молча выключалась, и документ шёл в дело как свой. Форма при этом
+     * опознана, период прочитан, число на месте, а вот чей это документ, мы не знаем.
+     */
+    public function test_unread_inn_in_the_document_is_not_verified(): void
+    {
+        $f161   = $this->service('Форма 161 и зарплатные налоги', AutoAuditRunner::REF_FORM_161);
+        $client = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL]);
+        $this->attachSheet($client, 'осв.xls', ['3520' => 25000.00]);
+
+        // Шапку прочитали, а ИНН из неё вытащить не смогли.
+        $this->forms['форма.pdf'] = ['month' => [2026, 7], 'inn' => null, 'income' => 25000.00];
+        $this->attachLog($client, $this->item($client, $f161), 'форма.pdf');
+
+        $row = $this->runAudit()->firstWhere('rule', '4');
+
+        $this->assertSame(AutoAuditResult::UNVERIFIED, $row->outcome);
+        $this->assertStringContainsString('ИНН в документе не прочитан', $row->reason);
+        $this->assertNull($row->left_value);
+    }
+
+    /** В карточке ИНН короче четырнадцати цифр: это опечатка, а не ИНН. */
+    public function test_short_inn_in_the_card_is_not_verified(): void
+    {
+        $f161 = $this->service('Форма 161 и зарплатные налоги', AutoAuditRunner::REF_FORM_161);
+
+        // Ровно случай ИП Ермакова с боевого сервера: в карточке потеряна последняя цифра,
+        // и сверка ИНН у него молча не работала.
+        $client = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL, 'inn' => '2011019870120']);
+        $this->attachSheet($client, 'осв.xls', ['3520' => 25000.00]);
+        $this->attachForm($client, $f161, 'форма.pdf', income: 25000.00, inn: '20110198701209');
+
+        $row = $this->runAudit()->firstWhere('rule', '4');
+
+        $this->assertSame(AutoAuditResult::UNVERIFIED, $row->outcome);
+        $this->assertStringContainsString('2011019870120', $row->reason);
     }
 
     /** Нет формы 161: ломаются проверки №4-№7, а №1 и №3 сверяются как обычно. */
@@ -479,7 +531,7 @@ class AutoAuditRunTest extends TestCase
     /** Форма 161 на августовской задаче, по умолчанию за июль. */
     private function attachForm(Client $client, Service $service, string $file, float $income, ?string $inn = null, int $month = 7): void
     {
-        $this->forms[$file] = ['month' => [2026, $month], 'income' => $income, 'inn' => $inn];
+        $this->forms[$file] = ['month' => [2026, $month], 'income' => $income, 'inn' => $inn ?? $client->inn];
         $this->attachLog($client, $this->item($client, $service), $file);
     }
 
@@ -490,6 +542,7 @@ class AutoAuditRunTest extends TestCase
             'period' => new DocumentPeriod(DocumentPeriod::of(2026, 4)->from, DocumentPeriod::of(2026, 6)->to),
             'base'   => $base,
             'tax'    => $tax,
+            'inn'    => $client->inn,
         ];
 
         $this->attachLog($client, $this->item($client, $this->taxService), $file);
@@ -816,7 +869,7 @@ class AutoAuditRunTest extends TestCase
 
         $this->forms['форма-161.pdf'] = [
             'month'      => [2026, 7],
-            'inn'        => null,
+            'inn'        => $client->inn,
             'income'     => 214400.00,
             'income_tax' => null,
         ];
@@ -1187,7 +1240,9 @@ class AutoAuditRunTest extends TestCase
     {
         return Client::create(array_merge([
             'name' => 'ООО Сверка ' . uniqid(),
-            'inn' => strtoupper(substr(md5(uniqid()), 0, 12)),
+            // Настоящий по виду ИНН из 14 цифр. С прежней заглушкой из 12 знаков сверка ИНН
+            // молча выключалась, и весь набор шёл мимо этой ветки.
+            'inn' => '0210120251' . str_pad((string) (++self::$innCounter), 4, '0', STR_PAD_LEFT),
             'responsible_employee_id' => $this->admin->id,
             'accounting_method' => Client::ACCOUNTING_CASH,
             'serves_accounting' => true, 'serves_tax' => true, 'serves_payroll' => true,
@@ -1220,8 +1275,15 @@ class AutoAuditRunTest extends TestCase
         int $month = 7,
         string $status = 'completed',
         ?EstimateItem $item = null,
+        ?string $inn = null,
     ): void {
-        $this->reports[$file] = ['month' => [2026, $month], 'base' => $base, 'tax' => $tax];
+        // По умолчанию документ свой: ИНН тот же, что в карточке. Чужой передают явно.
+        $this->reports[$file] = [
+            'month' => [2026, $month],
+            'base'  => $base,
+            'tax'   => $tax,
+            'inn'   => $inn ?? $client->inn,
+        ];
         $this->attachLog($client, $item ?? $this->item($client, $this->taxService), $file, $status);
     }
 

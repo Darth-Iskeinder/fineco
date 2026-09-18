@@ -56,13 +56,18 @@ class AutoAuditRunner
      * label:    как подписать файл на странице;
      * genitive: «нет …» в причине;
      * probe:    чем проверить, что файл вообще нужная форма. Форму и период читалка
-     *           проверяет до того, как искать число, поэтому годится любое поле.
+     *           проверяет до того, как искать число, поэтому годится любое поле;
+     * has_inn:  есть ли в шапке формы ИНН организации. У ведомости его нет по природе, и без
+     *           этого признака требование «сверь ИНН» выключило бы автоаудит целиком.
      */
     private const SIDES = [
-        'osv'  => ['ref' => self::REF_BALANCE_SHEET, 'label' => 'ОСВ',         'genitive' => 'оборотно-сальдовой ведомости', 'probe' => '3210'],
-        'tax'  => ['ref' => self::REF_TAX_REPORT,    'label' => 'Отчёт по ЕН', 'genitive' => 'отчёта по единому налогу',     'probe' => 'base'],
-        'f161' => ['ref' => self::REF_FORM_161,      'label' => 'Форма 161',   'genitive' => 'формы 161',                    'probe' => 'income'],
+        'osv'  => ['ref' => self::REF_BALANCE_SHEET, 'label' => 'ОСВ',         'genitive' => 'оборотно-сальдовой ведомости', 'probe' => '3210',  'has_inn' => false],
+        'tax'  => ['ref' => self::REF_TAX_REPORT,    'label' => 'Отчёт по ЕН', 'genitive' => 'отчёта по единому налогу',     'probe' => 'base',  'has_inn' => true],
+        'f161' => ['ref' => self::REF_FORM_161,      'label' => 'Форма 161',   'genitive' => 'формы 161',                    'probe' => 'income', 'has_inn' => true],
     ];
+
+    /** Начало причины «документ чужой». Собираем и узнаём её в одном месте, чтобы не разошлись. */
+    private const INN_MISMATCH = 'ИНН не совпадает';
 
     /**
      * Проверки.
@@ -460,7 +465,9 @@ class AutoAuditRunner
                 ],
                 default => [
                     AutoAuditResult::WRONG_DOCUMENT,
-                    'Среди файлов задачи нет ' . self::SIDES[$side]['genitive'],
+                    // Чужой документ мы узнали по ИНН: так и напишем. Иначе человек читает
+                    // «нет формы 161» и идёт искать файл, который лежит на месте.
+                    $this->innMismatchReason($sources) ?? 'Среди файлов задачи нет ' . self::SIDES[$side]['genitive'],
                 ],
             };
 
@@ -483,6 +490,18 @@ class AutoAuditRunner
         }
 
         return $rows;
+    }
+
+    /** Причина про чужой ИНН среди файлов задачи, если она там есть. */
+    private function innMismatchReason(array $sources): ?string
+    {
+        foreach ($sources as $source) {
+            if (str_starts_with((string) ($source['reason'] ?? ''), self::INN_MISMATCH)) {
+                return $source['reason'];
+            }
+        }
+
+        return null;
     }
 
     private function checkRule(
@@ -735,34 +754,60 @@ class AutoAuditRunner
      */
     private function read(Client $client, string $side, string $field, BuhTaskDocument $document): DocumentValue
     {
-        return $this->cache["{$side}:{$field}:{$document->id}"] ??= $this->checkInn($client, $this->readFile($side, $field, $document));
+        return $this->cache["{$side}:{$field}:{$document->id}"] ??= $this->checkInn($client, $side, $this->readFile($side, $field, $document));
     }
 
     /**
-     * ИНН в шапке документа не тот, что в карточке клиента.
+     * ИНН в шапке документа против ИНН в карточке клиента.
      *
      * Без этой проверки чужая форма дала бы «не совпало» по числам, и расхождение искали бы
      * в учёте, хотя перепутан файл. Так нашлась форма 161 «Нова Трек» у «Нова трек плюс».
-     * Сверяем, только когда ИНН есть и в документе, и в карточке. В ОСВ ИНН нет.
      *
      * Кто ошибся, документ или карточка, мы не знаем: у ИНАМ отчёт и форма 161 показывают
      * один и тот же ИНН, а в карточке записан другой. Поэтому причину пишем без обвинения.
      *
-     * В части карточек вместо ИНН стоит заглушка вроде «00000000000003»: клиентов заводили,
-     * пока ИНН не знали. Настоящий ИНН не начинается с пяти нулей (у организации там ноль
-     * и дата регистрации, у человека единица или двойка), поэтому такую карточку пропускаем.
-     * Иначе свой документ клиента назывался бы чужим.
+     * Раньше сверка молча выключалась в трёх случаях: ИНН не прочитался из документа, в
+     * карточке не 14 цифр, в карточке заглушка вроде «00000000000003» (клиентов заводили,
+     * пока ИНН не знали). Во всех трёх чужой документ проходил как свой, а строка выглядела
+     * проверенной. Теперь это «не удалось проверить»: защиты не было, и делать вид, что она
+     * сработала, нельзя. Настоящий ИНН не начинается с пяти нулей: у организации там ноль и
+     * дата регистрации, у человека единица или двойка.
+     *
+     * В ведомости ИНН нет вовсе, а у скана, чужого бланка и битого файла есть свой, более
+     * точный исход. И то, и другое проходит мимо сверки нетронутым.
      */
-    private function checkInn(Client $client, DocumentValue $value): DocumentValue
+    private function checkInn(Client $client, string $side, DocumentValue $value): DocumentValue
     {
-        $clientInn = preg_replace('/\D+/', '', (string) $client->inn);
-
-        if ($value->inn === null || strlen($clientInn) !== 14 || str_starts_with($clientInn, '00000') || $value->inn === $clientInn) {
+        // Период читалка отдаёт, только когда форма опознана: это и есть признак, что перед
+        // нами нужный бланк и разговор про его ИНН вообще имеет смысл.
+        if (!self::SIDES[$side]['has_inn'] || $value->period === null) {
             return $value;
         }
 
-        return DocumentValue::wrongDocument(
-            "ИНН не совпадает: в документе {$value->inn}, в карточке клиента {$clientInn}. Документ чужой или ошибка в карточке",
+        $clientInn = preg_replace('/\D+/', '', (string) $client->inn);
+        $cardIsOk  = strlen($clientInn) === 14 && !str_starts_with($clientInn, '00000');
+
+        if ($value->inn !== null && $cardIsOk) {
+            return $value->inn === $clientInn ? $value : DocumentValue::wrongDocument(sprintf(
+                '%s: в документе %s, в карточке клиента %s. Документ чужой или ошибка в карточке',
+                self::INN_MISMATCH,
+                $value->inn,
+                $clientInn,
+            ));
+        }
+
+        // Число и так не прочитано: своя причина у строки точнее нашей.
+        if ($value->status === DocumentValue::UNCERTAIN) {
+            return $value;
+        }
+
+        return DocumentValue::uncertain(
+            $value->inn === null
+                ? 'ИНН в документе не прочитан: проверить, что документ принадлежит этому клиенту, нельзя'
+                : "В карточке клиента нет ИНН из 14 цифр (записано «{$client->inn}»): сверить документ с клиентом не с чем",
+            $value->trace,
+            $value->period,
+            $value->inn,
         );
     }
 
