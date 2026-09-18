@@ -108,16 +108,40 @@ class BalanceSheetReader
             return DocumentValue::notFound("В ведомости нет счёта {$account}", [], $period);
         }
 
-        $raw = $rows[$row][$column] ?? null;
-
-        return DocumentValue::found($this->toNumber($raw), [
+        $raw   = $rows[$row][$column] ?? null;
+        $cell  = $this->columnLetter($column) . ($row + 1);
+        $trace = [
             'период'  => $period->label(),
             'счёт'    => $account,
             'колонка' => 'Обороты за период / ' . $this->sideLabel($side),
             'строка'  => $row + 1,
-            'ячейка'  => $this->columnLetter($column) . ($row + 1),
+            'ячейка'  => $cell,
             'сырое'   => (string) $raw,
-        ], $period);
+        ];
+
+        // Ячейка пустая: оборот не напечатан. Нулевые обороты 1С не печатает, поэтому это то
+        // же самое, что отсутствующая строка счёта, и решает это один и тот же код сверки.
+        if ($raw === null || trim((string) $raw) === '') {
+            return DocumentValue::notFound(
+                "Оборот по счёту {$account} не напечатан: ячейка {$cell} пустая",
+                $trace,
+                $period,
+            );
+        }
+
+        $number = $this->toNumber($raw);
+
+        // Содержимое есть, а числа из него не вышло. Про оборот мы не знаем ничего, и ноль
+        // тут был бы выдумкой: сверка выписала бы по нему вердикт.
+        if ($number === null) {
+            return DocumentValue::uncertain(
+                "Не разобрали оборот по счёту {$account}: в ячейке {$cell} «" . trim((string) $raw) . '»',
+                $trace,
+                $period,
+            );
+        }
+
+        return DocumentValue::found($number, $trace, $period);
     }
 
     /**
@@ -376,17 +400,41 @@ class BalanceSheetReader
         return null;
     }
 
-    /** Пустая ячейка — это ноль: в ОСВ нулевые обороты просто не печатают. */
-    private function toNumber(mixed $raw): float
+    /**
+     * Число из ячейки, или null, если это не число.
+     *
+     * Раньше здесь стояло приведение к float, а оно в PHP не умеет отказать: обрезает строку
+     * по первому непонятному знаку и молча отдаёт результат. «87 513,60» с узким неразрывным
+     * пробелом превращалось в 87, сумма в скобках и слово «нет данных» в ноль. Ноль потом
+     * встречался с нулём справа и давал зелёное «Совпало» из двух непрочитанных чисел.
+     *
+     * Поэтому разделители сначала убираем все, какие бывают в выгрузках, а потом проверяем
+     * формат. Не подошло, значит отказ: скобки вокруг суммы, прочерк, «нет данных» и точка
+     * как разделитель разрядов сюда не проходят намеренно. Догадка о значении хуже отказа.
+     */
+    private function toNumber(mixed $raw): ?float
     {
-        if ($raw === null || trim((string) $raw) === '') {
-            return 0.0;
+        // Excel отдаёт числа числами, разбирать нечего.
+        if (is_int($raw) || is_float($raw)) {
+            return (float) $raw;
         }
 
-        // Пробелы-разделители разрядов и запятая как десятичный знак.
-        $clean = str_replace([' ', "\u{00A0}", ','], ['', '', '.'], (string) $raw);
+        $clean = str_replace(
+            [
+                ' ',          // обычный пробел
+                "\u{00A0}",   // неразрывный
+                "\u{202F}",   // узкий неразрывный
+                "\u{2009}",   // тонкий
+                "\u{2007}",   // цифровой
+                "\r", "\n", "\t",   // перенос строки внутри ячейки рвал копейки
+                ',',          // десятичный знак у 1С
+                "\u{2212}",   // настоящий знак «минус» вместо дефиса
+            ],
+            ['', '', '', '', '', '', '', '', '.', '-'],
+            trim((string) $raw),
+        );
 
-        return (float) $clean;
+        return preg_match('/^-?\d+(\.\d+)?$/', $clean) === 1 ? (float) $clean : null;
     }
 
     private function sideLabel(string $side): string

@@ -19,6 +19,7 @@ class AutoAuditResult extends Model
 
     public const MATCHED          = 'matched';           // числа совпали
     public const MISMATCH         = 'mismatch';          // числа разные
+    public const UNVERIFIED       = 'unverified';        // одно из чисел прочитать не удалось: вердикта нет
     public const MISSING_DOCUMENT = 'missing_document';  // задача закрыта без файла, или у квартала нет ведомости за месяц
     public const WRONG_DOCUMENT   = 'wrong_document';    // все файлы задачи прочитаны, но нужной формы среди них нет
     public const SCAN             = 'scan';              // среди файлов скан или фото, нужную форму не прочитать
@@ -28,6 +29,7 @@ class AutoAuditResult extends Model
     public const LABELS = [
         self::MATCHED          => 'Совпало',
         self::MISMATCH         => 'Не совпало',
+        self::UNVERIFIED       => 'Не удалось проверить',
         self::MISSING_DOCUMENT => 'Нет документа',
         self::WRONG_DOCUMENT   => 'Не тот документ',
         self::SCAN             => 'Скан, не прочитать',

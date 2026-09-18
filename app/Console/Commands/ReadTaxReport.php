@@ -44,6 +44,9 @@ class ReadTaxReport extends Command
             DocumentValue::NOT_FOUND  => $this->warn('  Не нашли: ' . $result->reason),
             DocumentValue::WRONG_DOC  => $this->error('  Документ не тот: ' . $result->reason),
             DocumentValue::UNREADABLE => $this->error('  Не прочитали: ' . $result->reason),
+            DocumentValue::SCAN       => $this->warn('  Скан или фото: ' . $result->reason),
+            DocumentValue::UNCERTAIN  => $this->warn('  Не удалось проверить: ' . $result->reason),
+            default                   => $this->error('  Неизвестный исход: ' . $result->status),
         };
 
         // str_pad считает байты, а не буквы: с кириллицей столбцы разъезжаются.

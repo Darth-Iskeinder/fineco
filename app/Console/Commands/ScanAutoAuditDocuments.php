@@ -152,6 +152,8 @@ class ScanAutoAuditDocuments extends Command
             DocumentValue::NOT_FOUND  => 'нет такого счёта',
             DocumentValue::WRONG_DOC  => 'документ не тот',
             DocumentValue::UNREADABLE => 'не открылся',
+            DocumentValue::SCAN       => 'скан или фото',
+            DocumentValue::UNCERTAIN  => 'не удалось проверить',
             default                   => $status,
         };
     }

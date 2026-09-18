@@ -31,6 +31,7 @@ class DocumentValue
     public const WRONG_DOC    = 'wrong_doc';     // не та форма или не тот период
     public const UNREADABLE   = 'unreadable';    // файл не открылся
     public const SCAN         = 'scan';          // текста нет: скан или фото, прочитать нечем
+    public const UNCERTAIN    = 'uncertain';     // форма та, а число из неё прочитать не удалось
 
     public static function found(float $value, array $trace = [], ?DocumentPeriod $period = null, ?string $inn = null): self
     {
@@ -59,6 +60,21 @@ class DocumentValue
     public static function scan(string $reason): self
     {
         return new self(null, self::SCAN, $reason);
+    }
+
+    /**
+     * Форма опознана, а числа мы не знаем: в ячейке не число, колонку в бланке не нашли.
+     *
+     * От notFound отличается тем, что там показателя в документе нет вовсе (у клиента просто
+     * нет таких операций, и ноль честен), а здесь он есть, но какой именно, непонятно.
+     * Подставить ноль тут нельзя: по нему был бы выписан вердикт.
+     *
+     * Период передаём всегда, когда он известен. Без него строка не встанет в пару, и клиент
+     * пропадёт со страницы молча, а нужно ровно обратное: пусть его проверят руками.
+     */
+    public static function uncertain(string $reason, array $trace = [], ?DocumentPeriod $period = null, ?string $inn = null): self
+    {
+        return new self(null, self::UNCERTAIN, $reason, $trace, $period, $inn);
     }
 
     public function isFound(): bool

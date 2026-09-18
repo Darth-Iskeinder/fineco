@@ -57,7 +57,7 @@ class Form161ReaderTest extends TestCase
     private function firstPage(
         string $employees,
         string $income,
-        string $incomeTax = '0',
+        ?string $incomeTax = '0',
         string $contributions = '0',
         string $pension = '0',
         string $inn = '02101202510267',
@@ -68,6 +68,12 @@ class Form161ReaderTest extends TestCase
         $totals = [];
 
         foreach (compact('employees', 'income', 'incomeTax', 'contributions', 'pension') as $name => $text) {
+            // null: клетку в бланке не заполнили или она уехала из своей колонки. Так
+            // проверяем, что читалка отказывается, а не подставляет ноль.
+            if ($text === null) {
+                continue;
+            }
+
             $column   = ['incomeTax' => 'income_tax'][$name] ?? $name;
             $totals[] = new PdfWord(self::CENTER[$column] - mb_strlen($text) * 1.5, self::TOTALS_TOP, $text);
         }
@@ -311,5 +317,53 @@ class Form161ReaderTest extends TestCase
         }
 
         $this->assertSame(1, $layer->calls);
+    }
+
+    /**
+     * Клетку подоходного налога в итоговой строке не нашли.
+     *
+     * Раньше вместо неё подставлялся ноль со статусом «прочитано». Налог к уплате это
+     * единственное поле формы, которое не сверяется со списком сотрудников, поэтому
+     * проверить этот ноль было нечем: рядом с ненапечатанным оборотом 3420 в ведомости он
+     * давал зелёное «Совпало» из двух чисел, которых в документах нет.
+     */
+    public function test_income_tax_column_not_found_is_refused(): void
+    {
+        $pages    = $this->metaCom();
+        $pages[1] = $this->firstPage('6', '214400', null, '21976,00', '4288');
+
+        $result = $this->reader($pages)->read('форма.pdf', 'income_tax');
+
+        $this->assertSame(DocumentValue::UNCERTAIN, $result->status);
+        $this->assertNull($result->value);
+        $this->assertStringContainsString('подоходный налог к уплате', $result->reason);
+        // Форма опознана: период и ИНН на месте, значит строка встанет в пару и будет видна.
+        $this->assertSame('01.07.2026 – 31.07.2026', $result->period?->label());
+        $this->assertSame('02101202510267', $result->inn);
+    }
+
+    /** Колонка налога уехала за свои границы: тот же отказ, а не число из соседней клетки. */
+    public function test_income_tax_outside_its_column_is_refused(): void
+    {
+        $pages    = $this->metaCom();
+        $pages[1] = array_merge(
+            $this->firstPage('6', '214400', null, '21976,00', '4288'),
+            [new PdfWord(820.0, self::TOTALS_TOP, '19907,2')],
+        );
+
+        $this->assertSame(DocumentValue::UNCERTAIN, $this->reader($pages)->read('форма.pdf', 'income_tax')->status);
+    }
+
+    /** Непрочитанный налог не мешает остальным полям: они сверены со списком сотрудников. */
+    public function test_other_fields_are_still_read_when_income_tax_is_missing(): void
+    {
+        $pages    = $this->metaCom();
+        $pages[1] = $this->firstPage('6', '214400', null, '21976,00', '4288');
+
+        $reader = $this->reader($pages);
+
+        $this->assertSame(214400.0, $reader->read('форма.pdf', 'income')->value);
+        $this->assertSame(21976.0, $reader->read('форма.pdf', 'contributions')->value);
+        $this->assertSame(4288.0, $reader->read('форма.pdf', 'pension')->value);
     }
 }

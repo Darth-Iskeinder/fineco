@@ -141,9 +141,16 @@ class AutoAuditRunTest extends TestCase
 
         $period = DocumentPeriod::of(...$sheet['month']);
 
-        return array_key_exists($account, $sheet['accounts'])
-            ? DocumentValue::found($sheet['accounts'][$account], [], $period)
-            : DocumentValue::notFound("В ведомости нет счёта {$account}", [], $period);
+        if (!array_key_exists($account, $sheet['accounts'])) {
+            return DocumentValue::notFound("В ведомости нет счёта {$account}", [], $period);
+        }
+
+        // null в тесте: строка счёта есть, а число из ячейки прочитать не удалось.
+        if ($sheet['accounts'][$account] === null) {
+            return DocumentValue::uncertain("Не разобрали оборот по счёту {$account}", [], $period);
+        }
+
+        return DocumentValue::found($sheet['accounts'][$account], [], $period);
     }
 
     public function fakeReport(string $file, string $field): DocumentValue
@@ -304,7 +311,14 @@ class AutoAuditRunTest extends TestCase
             return DocumentValue::wrongDocument('Это не форма 161');
         }
 
-        return DocumentValue::found($form[$field] ?? 0.0, [], DocumentPeriod::of(...$form['month']), $form['inn']);
+        $period = DocumentPeriod::of(...$form['month']);
+
+        // null в тесте: клетку в итоговой строке не нашли.
+        if (array_key_exists($field, $form) && $form[$field] === null) {
+            return DocumentValue::uncertain("В форме 161 не нашли колонку «{$field}»", [], $period, $form['inn']);
+        }
+
+        return DocumentValue::found($form[$field] ?? 0.0, [], $period, $form['inn']);
     }
 
     /** Проверки №5-№7: налог к уплате, взносы и НПФ из той же формы 161 против своих счетов. */
@@ -421,9 +435,13 @@ class AutoAuditRunTest extends TestCase
 
         $results = $this->runAudit();
 
-        // По четыре проверки формы 161 у каждого из двух клиентов, и все сошлись.
-        $this->assertCount(8, $results);
-        $this->assertSame([AutoAuditResult::MATCHED], $results->pluck('outcome')->unique()->values()->all());
+        // Проверка №4 сверяет оборот 3520 с доходом: числа настоящие с обеих сторон и они
+        // сошлись, значит документ не объявили чужим. Это здесь и проверяется.
+        $this->assertSame(
+            [AutoAuditResult::MATCHED, AutoAuditResult::MATCHED],
+            $results->where('rule', '4')->pluck('outcome')->values()->all(),
+        );
+        $this->assertCount(0, $results->where('outcome', AutoAuditResult::WRONG_DOCUMENT));
     }
 
     /** Нет формы 161: ломаются проверки №4-№7, а №1 и №3 сверяются как обычно. */
@@ -722,17 +740,97 @@ class AutoAuditRunTest extends TestCase
         $this->assertSame('Файла нет на диске', $issue->sources[0]['reason']);
     }
 
-    /** 1С не печатает счёт без оборотов: нет строки в ведомости, значит оборот нулевой. */
-    public function test_account_missing_from_the_sheet_counts_as_zero(): void
+    /**
+     * Оборота в ведомости нет, и в документе тоже ноль.
+     *
+     * Раньше это было «Совпало»: 1С не печатает счёт без оборотов, и ноль слева считался
+     * честным. Но справа ноль мог быть и непрочитанным числом, а зелёная плашка говорила,
+     * что всё сверено. Так собиралось ложное «Совпало» из двух чисел, которых никто не
+     * печатал, и ради этого случая исход «Не удалось проверить» и появился.
+     */
+    public function test_two_zeros_do_not_make_a_match(): void
     {
         $client = $this->client();
         $this->attachSheet($client, 'осв.xls', ['3210' => 100.00]);
         $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 0.00);
 
+        $results = $this->runAudit();
+
+        // Проверка №1 сверяет настоящие числа с обеих сторон и проходит как раньше.
+        $this->assertSame(AutoAuditResult::MATCHED, $results->firstWhere('rule', '1')->outcome);
+
+        $tax = $results->firstWhere('rule', '3');
+        $this->assertSame(AutoAuditResult::UNVERIFIED, $tax->outcome);
+        $this->assertNull($tax->left_value);
+        $this->assertNull($tax->right_value);
+        $this->assertNull($tax->difference);
+        $this->assertStringContainsString('нет оборота по счёту 3410', $tax->reason);
+        // Документы видны рядом: человек откроет их и проверит сам.
+        $this->assertSame(['осв.xls', 'отчёт.pdf'], array_column($tax->sources, 'name'));
+    }
+
+    /**
+     * Оборота в ведомости нет, а в документе число есть: это по-прежнему расхождение.
+     *
+     * Ненапечатанный оборот почти наверняка нулевой, и красное по ненулевому документу это
+     * настоящая находка. Терять её из-за осторожности нельзя.
+     */
+    public function test_missing_turnover_against_a_nonzero_report_is_still_a_mismatch(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
         $tax = $this->runAudit()->firstWhere('rule', '3');
 
-        $this->assertSame(AutoAuditResult::MATCHED, $tax->outcome);
-        $this->assertStringContainsString('нет счёта 3410', $tax->reason);
+        $this->assertSame(AutoAuditResult::MISMATCH, $tax->outcome);
+        $this->assertSame('0.00', $tax->left_value);
+        $this->assertSame('4.00', $tax->right_value);
+        $this->assertStringContainsString('нет оборота по счёту 3410, считаем его нулевым', $tax->reason);
+    }
+
+    /** Число в ведомости не разобралось: сколько там на самом деле, мы не знаем. */
+    public function test_unreadable_turnover_is_not_verified(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => null, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $results = $this->runAudit();
+
+        $base = $results->firstWhere('rule', '1');
+        $this->assertSame(AutoAuditResult::UNVERIFIED, $base->outcome);
+        $this->assertStringContainsString('Не удалось проверить', $base->reason);
+        $this->assertStringContainsString('Не разобрали оборот по счёту 3210', $base->reason);
+
+        // Соседняя проверка по той же ведомости сверяется как обычно.
+        $this->assertSame(AutoAuditResult::MATCHED, $results->firstWhere('rule', '3')->outcome);
+    }
+
+    /** То же с правой стороны: колонку в форме 161 не нашли, вердикта нет. */
+    public function test_unreadable_number_in_the_form_is_not_verified(): void
+    {
+        $f161   = $this->service('Форма 161 и зарплатные налоги', AutoAuditRunner::REF_FORM_161);
+        $client = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL]);
+        $this->attachSheet($client, 'осв.xls', ['3520' => 214400.00, '3420' => 19907.20]);
+
+        $this->forms['форма-161.pdf'] = [
+            'month'      => [2026, 7],
+            'inn'        => null,
+            'income'     => 214400.00,
+            'income_tax' => null,
+        ];
+        $this->attachLog($client, $this->item($client, $f161), 'форма-161.pdf');
+
+        $results = $this->runAudit();
+
+        // Доход прочитан и сошёлся: непрочитанный налог ломает только свою проверку.
+        $this->assertSame(AutoAuditResult::MATCHED, $results->firstWhere('rule', '4')->outcome);
+
+        $tax = $results->firstWhere('rule', '5');
+        $this->assertSame(AutoAuditResult::UNVERIFIED, $tax->outcome);
+        $this->assertNull($tax->left_value);
+        $this->assertStringContainsString('income_tax', $tax->reason);
     }
 
     /** Налоговая база и оборот 3210 сходятся только при кассовом методе. */
@@ -946,6 +1044,30 @@ class AutoAuditRunTest extends TestCase
             ->assertOk()
             ->assertSee($mismatch->name)
             ->assertSee($matched->name);
+    }
+
+    /** Новый исход виден на странице: своя подпись, свой счётчик и свой фильтр. */
+    public function test_unverified_is_shown_and_filtered_on_the_page(): void
+    {
+        $unclear = $this->client(['name' => 'ООО Непонятно ' . uniqid()]);
+        $this->attachSheet($unclear, 'осв-непонятно.xls', ['3210' => 100.00]);
+        $this->attachReport($unclear, 'отчёт-непонятно.pdf', base: 100.00, tax: 0.00);
+
+        $matched = $this->client(['name' => 'ООО Сошлось ' . uniqid()]);
+        $this->attachSheet($matched, 'осв-сошлось.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachReport($matched, 'отчёт-сошлось.pdf', base: 100.00, tax: 4.00);
+
+        $this->runAudit();
+
+        $this->asVendor()->get(route('auto-audit.index'))
+            ->assertOk()
+            ->assertSee('Не удалось проверить: 1;');
+
+        // Фильтр по новому статусу оставляет только его строку.
+        $this->asVendor()->get(route('auto-audit.index', ['status' => AutoAuditResult::UNVERIFIED]))
+            ->assertOk()
+            ->assertSee($unclear->name)
+            ->assertDontSee($matched->name);
     }
 
     /** Кнопка не ждёт прогона: он идёт после ответа и записывает итог и длительность. */

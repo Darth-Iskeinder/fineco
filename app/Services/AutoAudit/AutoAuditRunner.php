@@ -594,8 +594,10 @@ class AutoAuditRunner
             );
         }
 
-        $left    = 0.0;
-        $sources = [];
+        $left        = 0.0;
+        $sources     = [];
+        $unknown     = [];   // числа, которые прочитать не удалось
+        $assumedZero = [];   // обороты, которых в ведомости нет и которые взяты нулём
 
         foreach ($sheets as $month => $osv) {
             // Ведомость за месяц одна. Приложили несколько, берём последнюю загруженную.
@@ -603,29 +605,75 @@ class AutoAuditRunner
                 $notes[] = sprintf('Ведомостей за %s: %d, взята последняя', $month, count($osv));
             }
 
-            // В ОСВ 1С не печатает счета без оборотов и сальдо: нет строки, значит ноль.
-            if ($osv[0]['status'] === DocumentValue::NOT_FOUND) {
-                $notes[] = "В ведомости за {$month} нет счёта {$rule['account']}, оборот считаем нулевым";
+            if ($osv[0]['status'] === DocumentValue::UNCERTAIN) {
+                $unknown[] = $osv[0]['reason'];
+            } elseif ($osv[0]['status'] === DocumentValue::NOT_FOUND) {
+                // В ОСВ 1С не печатает счета без оборотов и сальдо: нет строки, значит ноль.
+                $assumedZero[] = "в ведомости за {$month} нет оборота по счёту {$rule['account']}";
             }
 
             $left += (float) ($osv[0]['value'] ?? 0);
             array_push($sources, ...$osv);
         }
 
+        foreach ($reports as $report) {
+            if ($report['status'] === DocumentValue::UNCERTAIN) {
+                $unknown[] = $report['reason'];
+            } elseif ($report['status'] === DocumentValue::NOT_FOUND) {
+                $assumedZero[] = sprintf('в документе «%s» нет показателя', $report['name']);
+            }
+        }
+
         $left  = round($left, 2);
         $right = round((float) array_sum(array_column($reports, 'value')), 2);
 
-        return [
+        $row = [
             'client_id'   => $client->id,
             'rule'        => (string) $number,
             'period_from' => $period->from->toDateString(),
             'period_to'   => $period->to->toDateString(),
-            'outcome'     => abs($left - $right) < self::EPSILON ? AutoAuditResult::MATCHED : AutoAuditResult::MISMATCH,
+            'sources'     => array_merge($sources, $reports),
+        ];
+
+        // Числа нет: вердикт не выносим ни в какую сторону. Строку всё равно пишем, иначе
+        // клиент пропал бы со страницы, а это выглядит как «у него всё в порядке».
+        if ($unknown) {
+            return $row + [
+                'outcome'     => AutoAuditResult::UNVERIFIED,
+                'left_value'  => null,
+                'right_value' => null,
+                'difference'  => null,
+                'reason'      => 'Не удалось проверить: ' . implode('. ', array_unique(array_filter($unknown))),
+            ];
+        }
+
+        $matched = abs($left - $right) < self::EPSILON;
+
+        // Сошлось, но одна из сторон не прочитана, а взята нулём: «Совпало» тут собралось бы
+        // из двух нулей, а не из проверенных чисел. Расхождение при этом остаётся
+        // расхождением и показывается как раньше: если оборот не напечатан, он почти
+        // наверняка нулевой, и красное по ненулевому документу это настоящая находка.
+        if ($matched && $assumedZero) {
+            return $row + [
+                'outcome'     => AutoAuditResult::UNVERIFIED,
+                'left_value'  => null,
+                'right_value' => null,
+                'difference'  => null,
+                'reason'      => 'Не удалось проверить: числа сошлись только потому, что '
+                    . implode(', ', array_unique($assumedZero)) . ', а второе число тоже нулевое',
+            ];
+        }
+
+        foreach (array_unique($assumedZero) as $note) {
+            $notes[] = mb_strtoupper(mb_substr($note, 0, 1)) . mb_substr($note, 1) . ', считаем его нулевым';
+        }
+
+        return $row + [
+            'outcome'     => $matched ? AutoAuditResult::MATCHED : AutoAuditResult::MISMATCH,
             'left_value'  => $left,
             'right_value' => $right,
             'difference'  => round($left - $right, 2),
             'reason'      => $notes ? implode('. ', $notes) : null,
-            'sources'     => array_merge($sources, $reports),
         ];
     }
 

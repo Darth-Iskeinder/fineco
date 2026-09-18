@@ -60,8 +60,10 @@ class BalanceSheetReaderTest extends TestCase
      *
      * @param string $title заголовок во второй строке — им подменяем форму и период
      */
-    private function writeBalanceSheet(string $title = 'Оборотно-сальдовая ведомость за Июль 2026 г.'): string
-    {
+    private function writeBalanceSheet(
+        string $title = 'Оборотно-сальдовая ведомость за Июль 2026 г.',
+        mixed $rawTurnover = null,
+    ): string {
         $book  = new Spreadsheet();
         $sheet = $book->getActiveSheet();
 
@@ -96,7 +98,9 @@ class BalanceSheetReaderTest extends TestCase
         $sheet->setCellValue('B7', 'БУ');
         $sheet->setCellValue('D7', 1676987.22);   // сальдо на начало по кредиту — не оно
         $sheet->setCellValue('E7', 419652.47);    // оборот по дебету
-        $sheet->setCellValue('F7', 87513.60);     // оборот по кредиту — вот он
+        // Оборот по кредиту, тот самый. $rawTurnover подменяет его строкой из выгрузки:
+        // так проверяем, что читалка делает с разделителями разрядов и с нечислами.
+        $sheet->setCellValue('F7', $rawTurnover ?? 87513.60);
         $sheet->setCellValue('I7', 1344848.35);   // сальдо на конец по кредиту — не оно
 
         // Валютная подстрока и «Вал.» под ней: обе не должны попасться.
@@ -156,13 +160,81 @@ class BalanceSheetReaderTest extends TestCase
         $this->assertNotSame(76800.0, $value, 'взяли строку «Вал.» — это сумма в валюте, а не в сомах');
     }
 
-    /** Пустая ячейка в ОСВ означает ноль: нулевые обороты 1С не печатает. */
-    public function test_empty_cell_is_zero(): void
+    /**
+     * Пустая ячейка означает, что оборот не напечатан: нулевые обороты 1С не печатает.
+     *
+     * Раньше читалка отдавала здесь уверенный 0.0 со статусом «прочитано», и рядом с нулём
+     * в отчёте это давало зелёное «Совпало» из двух чисел, которых никто не видел. Теперь
+     * это то же самое, что отсутствующая строка счёта, и решение принимает сверка.
+     */
+    public function test_empty_cell_means_no_turnover(): void
     {
         $result = $this->reader()->turnover($this->file, '3420', 'credit');
 
-        $this->assertTrue($result->isFound());
-        $this->assertSame(0.0, $result->value);
+        $this->assertSame(DocumentValue::NOT_FOUND, $result->status);
+        $this->assertNull($result->value);
+        $this->assertStringContainsString('F10', $result->reason);
+        // Форма опознана, значит период известен: без него строка не встанет в пару.
+        $this->assertSame('01.07.2026 – 31.07.2026', $result->period?->label());
+    }
+
+    /**
+     * Разделители разрядов, какие встречаются в выгрузках и в печати.
+     *
+     * Раньше тут стояло приведение к float, а оно обрезает строку по первому непонятному
+     * знаку: «87 513,60» с узким неразрывным пробелом превращалось в 87, а перенос строки
+     * внутри ячейки съедал копейки. Число при этом выглядело прочитанным.
+     */
+    public function test_reads_numbers_with_any_thousand_separator(): void
+    {
+        foreach ([
+            'обычный пробел'        => '87 513,60',
+            'неразрывный'           => "87\u{00A0}513,60",
+            'узкий неразрывный'     => "87\u{202F}513,60",
+            'тонкий'                => "87\u{2009}513,60",
+            'перенос внутри ячейки' => "87 513,\n60",
+        ] as $name => $raw) {
+            $result = $this->reader()->turnover($this->writeBalanceSheet(rawTurnover: $raw), '3210', 'credit');
+
+            $this->assertTrue($result->isFound(), "{$name}: " . ($result->reason ?? ''));
+            $this->assertSame(87513.60, $result->value, $name);
+        }
+    }
+
+    /** Настоящий знак «минус» вместо дефиса: раньше давал 0.0 со статусом «прочитано». */
+    public function test_reads_negative_turnover_written_with_a_minus_sign(): void
+    {
+        $result = $this->reader()->turnover($this->writeBalanceSheet(rawTurnover: "\u{2212}87513,60"), '3210', 'credit');
+
+        $this->assertTrue($result->isFound(), $result->reason ?? '');
+        $this->assertSame(-87513.60, $result->value);
+    }
+
+    /**
+     * Всё, что на число не похоже, это отказ, а не догадка.
+     *
+     * Раньше каждая из этих ячеек молча превращалась в число: «1.234.567,89» в 1.234, сумма
+     * в скобках и слово в ноль. По такому числу сверка выносила вердикт.
+     */
+    public function test_refuses_a_cell_that_is_not_a_number(): void
+    {
+        foreach ([
+            'точка как разделитель разрядов' => '1.234.567,89',
+            'минус скобками'                 => '(87 513,60)',
+            'прочерк'                        => '-',
+            'слова вместо суммы'             => 'нет данных',
+            'звёздочки'                      => '***',
+        ] as $name => $raw) {
+            $result = $this->reader()->turnover($this->writeBalanceSheet(rawTurnover: $raw), '3210', 'credit');
+
+            $this->assertSame(DocumentValue::UNCERTAIN, $result->status, $name);
+            $this->assertNull($result->value, $name);
+            // В причине видно саму ячейку и её содержимое: человек откроет файл и посмотрит.
+            $this->assertStringContainsString('F7', $result->reason, $name);
+            $this->assertStringContainsString(trim($raw), $result->reason, $name);
+            // Период есть: строка попадёт на страницу, а не пропадёт молча.
+            $this->assertSame('01.07.2026 – 31.07.2026', $result->period?->label(), $name);
+        }
     }
 
     /** Счёта нет — это не ошибка сверки: у клиента может просто не быть таких операций. */

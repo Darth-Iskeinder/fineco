@@ -102,6 +102,23 @@ class Form161Reader
 
         ['period' => $period, 'inn' => $inn, 'totals' => $totals, 'sums' => $sums] = $form;
 
+        // Клетки в итоговой строке не нашли. Раньше вместо неё подставлялся ноль, и у налога
+        // к уплате, которого нет в списке сотрудников и который поэтому ничем не перепроверен,
+        // это давало уверенный ноль: рядом с нулевым оборотом в ведомости выходило «Совпало»
+        // из двух непрочитанных чисел.
+        if ($totals[$field] === null) {
+            return DocumentValue::uncertain(
+                'В форме 161 не нашли в итоговой строке колонку «' . self::LABELS[$field] . '»',
+                [
+                    'период'      => $period->label(),
+                    'сотрудников' => $totals['employees'],
+                    'поле'        => self::LABELS[$field],
+                ],
+                $period,
+                $inn,
+            );
+        }
+
         // Взносы и НПФ есть и в списке: сверяем и их. Налога к уплате в списке нет.
         if ($field !== 'income' && isset($sums[$field]) && abs($sums[$field] - $totals[$field]) > self::TOLERANCE) {
             return DocumentValue::wrongDocument(sprintf(
@@ -177,9 +194,11 @@ class Form161Reader
 
     /**
      * Итоговая строка: первая ниже строки периода, где есть и число сотрудников, и доход.
-     * Пустая клетка налога или взносов означает ноль.
      *
-     * @return array{employees: int, income: float, income_tax: float, contributions: float, pension: float}|null
+     * Клетку налога или взносов могли не найти: тогда в ней null, а не ноль. Отличить «в
+     * форме напечатан ноль» от «клетку не нашли» можно только так, а разница тут решающая.
+     *
+     * @return array{employees: int, income: float, income_tax: ?float, contributions: ?float, pension: ?float}|null
      */
     private function totals(array $rows, string $periodRow): ?array
     {
@@ -198,9 +217,9 @@ class Form161Reader
             return [
                 'employees'     => (int) $employees,
                 'income'        => $income,
-                'income_tax'    => $this->centered($cells, self::TOTAL_COLUMNS['income_tax']) ?? 0.0,
-                'contributions' => $this->centered($cells, self::TOTAL_COLUMNS['contributions']) ?? 0.0,
-                'pension'       => $this->centered($cells, self::TOTAL_COLUMNS['pension']) ?? 0.0,
+                'income_tax'    => $this->centered($cells, self::TOTAL_COLUMNS['income_tax']),
+                'contributions' => $this->centered($cells, self::TOTAL_COLUMNS['contributions']),
+                'pension'       => $this->centered($cells, self::TOTAL_COLUMNS['pension']),
             ];
         }
 
