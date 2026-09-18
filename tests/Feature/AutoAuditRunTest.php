@@ -535,9 +535,19 @@ class AutoAuditRunTest extends TestCase
         $this->attachLog($client, $this->item($client, $service), $file);
     }
 
-    /** Отчёт за 2 квартал 2026 на июльской задаче. */
-    private function attachQuarterReport(Client $client, string $file, float $base, float $tax): void
-    {
+    /**
+     * Отчёт за 2 квартал 2026. Месяц задачи задаётся: квартал сдают не день в день, и
+     * раньше этот фикстур жёстко ставил август, из-за чего все квартальные тесты шли мимо
+     * настоящего подсчёта филиалов, хотя в комментарии обещалась июльская задача.
+     */
+    private function attachQuarterReport(
+        Client $client,
+        string $file,
+        float $base,
+        float $tax,
+        int $month = 7,
+        ?EstimateItem $item = null,
+    ): void {
         $this->reports[$file] = [
             'period' => new DocumentPeriod(DocumentPeriod::of(2026, 4)->from, DocumentPeriod::of(2026, 6)->to),
             'base'   => $base,
@@ -545,7 +555,7 @@ class AutoAuditRunTest extends TestCase
             'inn'    => $client->inn,
         ];
 
-        $this->attachLog($client, $this->item($client, $this->taxService), $file);
+        $this->attachLog($client, $item ?? $this->item($client, $this->taxService), $file, month: $month);
     }
 
     public function test_equal_numbers_match_for_both_rules(): void
@@ -600,8 +610,13 @@ class AutoAuditRunTest extends TestCase
         $this->assertSame('100.00', $base->right_value);
     }
 
-    /** Без отчёта одного филиала сумма заведомо меньше: сравнивать нечего, строку не пишем. */
-    public function test_missing_branch_report_writes_nothing(): void
+    /**
+     * Отчёт сдал не каждый филиал: сумма заведомо меньше, сравнивать нечего.
+     *
+     * Раньше в этом случае не писалось ничего, и клиент пропадал со страницы: отличить его
+     * от клиента, у которого всё сошлось, было нечем. Теперь это видимая строка.
+     */
+    public function test_missing_branch_report_is_not_verified(): void
     {
         $client = $this->client();
         $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
@@ -616,7 +631,126 @@ class AutoAuditRunTest extends TestCase
             'estimate_item_id' => $second->id, 'year' => 2026, 'month' => 8, 'status' => 'running',
         ]);
 
-        $this->assertCount(0, $this->runAudit());
+        $base = $this->runAudit()->firstWhere('rule', '1');
+
+        $this->assertSame(AutoAuditResult::UNVERIFIED, $base->outcome);
+        $this->assertStringContainsString('отчёт сдали не все филиалы, 1 из 2', $base->reason);
+        $this->assertNull($base->right_value);
+        // Документ сдавшего филиала виден рядом: с него человек и начнёт разбираться.
+        $this->assertContains('отчёт-бишкек.pdf', array_column($base->sources, 'name'));
+    }
+
+    /**
+     * Один филиал приложил свой отчёт дважды, второй не сдал ничего.
+     *
+     * Самое опасное из того, что тут было: файлов два и филиалов два, значит старая проверка
+     * пропускала, суммы складывались и выходило зелёное «Совпало» по одному филиалу вместо
+     * двух. Ни пометки, ни следа.
+     */
+    public function test_one_branch_filing_twice_does_not_cover_for_another(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 120.00, '3410' => 4.80]);
+
+        $first  = $this->item($client, $this->taxService, 'Бишкек');
+        $second = $this->item($client, $this->taxService, 'Ош');
+        $this->attachReport($client, 'отчёт-бишкек.pdf', base: 60.00, tax: 2.40, item: $first);
+        $this->attachReport($client, 'отчёт-бишкек-копия.pdf', base: 60.00, tax: 2.40, item: $first);
+
+        BuhTaskLog::create([
+            'employee_id' => $this->admin->id, 'client_id' => $client->id,
+            'estimate_item_id' => $second->id, 'year' => 2026, 'month' => 8, 'status' => 'running',
+        ]);
+
+        $base = $this->runAudit()->firstWhere('rule', '1');
+
+        $this->assertSame(AutoAuditResult::UNVERIFIED, $base->outcome);
+        $this->assertStringContainsString('отчёт сдали не все филиалы, 1 из 2', $base->reason);
+        $this->assertStringContainsString('несколько документов за период', $base->reason);
+    }
+
+    /** Два документа одного филиала за период не складываем: какой из них настоящий, неясно. */
+    public function test_two_documents_from_one_branch_are_not_summed(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 120.00, '3410' => 4.80]);
+
+        $item = $this->item($client, $this->taxService, 'Бишкек');
+        $this->attachReport($client, 'отчёт.pdf', base: 60.00, tax: 2.40, item: $item);
+        $this->attachReport($client, 'отчёт-исправленный.pdf', base: 60.00, tax: 2.40, item: $item);
+
+        $base = $this->runAudit()->firstWhere('rule', '1');
+
+        $this->assertSame(AutoAuditResult::UNVERIFIED, $base->outcome);
+        $this->assertStringContainsString('отчёт.pdf', $base->reason);
+        $this->assertStringContainsString('отчёт-исправленный.pdf', $base->reason);
+    }
+
+    /**
+     * Квартальный отчёт сдали с задержкой, и один филиал не сдал вовсе.
+     *
+     * Здесь старый счёт филиалов ломался тише всего. Он искал задачи, у которых «месяц
+     * задачи минус один» попадает внутрь квартала; для августовской задачи не находил ни
+     * одной и откатывался на «ждём один документ». Недостающий филиал переставал
+     * замечаться, и выходило зелёное «Совпало» по одному филиалу из двух.
+     */
+    public function test_quarter_filed_late_still_counts_branches(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв-апрель.xls', ['3210' => 100.00, '3410' => 4.00], month: 4);
+        $this->attachSheet($client, 'осв-май.xls', ['3210' => 100.00, '3410' => 4.00], month: 5);
+        $this->attachSheet($client, 'осв-июнь.xls', ['3210' => 100.00, '3410' => 4.00], month: 6);
+
+        $first  = $this->item($client, $this->taxService, 'Бишкек');
+        $second = $this->item($client, $this->taxService, 'Ош');
+        $this->attachQuarterReport($client, 'отчёт-2кв.pdf', base: 300.00, tax: 12.00, month: 8, item: $first);
+
+        BuhTaskLog::create([
+            'employee_id' => $this->admin->id, 'client_id' => $client->id,
+            'estimate_item_id' => $second->id, 'year' => 2026, 'month' => 8, 'status' => 'running',
+        ]);
+
+        $base = $this->runAudit()->firstWhere('rule', '1');
+
+        $this->assertSame(AutoAuditResult::UNVERIFIED, $base->outcome);
+        $this->assertStringContainsString('отчёт сдали не все филиалы, 1 из 2', $base->reason);
+    }
+
+    /** Квартал сдан с задержкой обоими филиалами: окно в три месяца это допускает. */
+    public function test_quarter_filed_late_by_both_branches_is_compared(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв-апрель.xls', ['3210' => 100.00, '3410' => 4.00], month: 4);
+        $this->attachSheet($client, 'осв-май.xls', ['3210' => 100.00, '3410' => 4.00], month: 5);
+        $this->attachSheet($client, 'осв-июнь.xls', ['3210' => 100.00, '3410' => 4.00], month: 6);
+
+        $first  = $this->item($client, $this->taxService, 'Бишкек');
+        $second = $this->item($client, $this->taxService, 'Ош');
+        $this->attachQuarterReport($client, 'отчёт-бишкек.pdf', base: 180.00, tax: 7.20, month: 8, item: $first);
+        $this->attachQuarterReport($client, 'отчёт-ош.pdf', base: 120.00, tax: 4.80, month: 8, item: $second);
+
+        $base = $this->runAudit()->firstWhere('rule', '1');
+
+        $this->assertSame(AutoAuditResult::MATCHED, $base->outcome);
+        $this->assertSame('300.00', $base->right_value);
+    }
+
+    /**
+     * Задачи за этот период нет вовсе: от скольких филиалов ждать документы, неизвестно.
+     *
+     * Раньше тут молча считалось, что филиал один, и вердикт выносился по единственному
+     * найденному документу, каким бы он ни был.
+     */
+    public function test_report_without_a_task_in_the_window_is_not_verified(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00], month: 12);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00, month: 12);
+
+        $base = $this->runAudit()->firstWhere('rule', '1');
+
+        $this->assertSame(AutoAuditResult::UNVERIFIED, $base->outcome);
+        $this->assertStringContainsString('не нашли задачу за этот период', $base->reason);
     }
 
     /** Задача филиала закрыта принудительно («только один район»): его отчёта не ждём. */
@@ -1288,11 +1422,16 @@ class AutoAuditRunTest extends TestCase
     }
 
     /** Задача за август (отчитываются в следующем месяце) с приложенным файлом. */
-    private function attachLog(Client $client, EstimateItem $item, string $file, string $status = 'completed'): void
-    {
+    private function attachLog(
+        Client $client,
+        EstimateItem $item,
+        string $file,
+        string $status = 'completed',
+        int $month = 8,
+    ): void {
         $log = BuhTaskLog::create([
             'employee_id' => $this->admin->id, 'client_id' => $client->id,
-            'estimate_item_id' => $item->id, 'year' => 2026, 'month' => 8, 'status' => $status,
+            'estimate_item_id' => $item->id, 'year' => 2026, 'month' => $month, 'status' => $status,
         ]);
 
         $path = "buh_task_documents/{$log->id}/{$file}";

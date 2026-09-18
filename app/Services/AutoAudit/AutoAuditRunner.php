@@ -595,23 +595,7 @@ class AutoAuditRunner
             return null;
         }
 
-        $expected = $this->expectedReports($reportLogs, $period);
-
-        // Без документа одного из филиалов сумма заведомо меньше, и красное было бы ложным.
-        if (count($reports) < $expected) {
-            return null;
-        }
-
         $notes = [];
-
-        if (count($reports) > $expected) {
-            $notes[] = sprintf(
-                'Документов «%s» за период %d, а филиалов %d: возможно, один приложен дважды',
-                self::SIDES[$rule['document']]['label'],
-                count($reports),
-                $expected,
-            );
-        }
 
         $left        = 0.0;
         $sources     = [];
@@ -641,6 +625,41 @@ class AutoAuditRunner
             } elseif ($report['status'] === DocumentValue::NOT_FOUND) {
                 $assumedZero[] = sprintf('в документе «%s» нет показателя', $report['name']);
             }
+        }
+
+        // Филиалы считаем множествами, а не числами. Раньше сравнивалось количество файлов с
+        // количеством филиалов, и два файла от одного филиала закрывали дыру за второй: суммы
+        // складывались, выходило «Совпало» по половине оборота, и ни одной пометки рядом.
+        $expected = $this->expectedBranches($reportLogs, $period);
+        $filed    = [];
+
+        foreach ($reports as $report) {
+            $filed[(int) $report['branch_id']][] = $report['name'];
+        }
+
+        if (!$expected) {
+            $unknown[] = 'не нашли задачу за этот период, и сколько филиалов должны были сдать, неизвестно';
+        } elseif ($missing = array_diff($expected, array_keys($filed))) {
+            $unknown[] = sprintf(
+                'отчёт сдали не все филиалы, %d из %d',
+                count($expected) - count($missing),
+                count($expected),
+            );
+        }
+
+        foreach ($filed as $files) {
+            if (count($files) > 1) {
+                $unknown[] = sprintf(
+                    'у одного филиала несколько документов за период (%s)',
+                    implode(', ', $files),
+                );
+            }
+        }
+
+        // Документ от филиала, которого мы не ждали: его задачу закрыли принудительно, а файл
+        // всё же приложили. Сумму это не портит, но человеку стоит знать, откуда лишний файл.
+        if ($expected && array_diff(array_keys($filed), $expected)) {
+            $notes[] = 'Среди документов есть отчёт филиала, чья задача закрыта принудительно';
         }
 
         $left  = round($left, 2);
@@ -722,29 +741,41 @@ class AutoAuditRunner
     }
 
     /**
-     * Сколько документов ждём за период: по одному от каждого филиала, у которого есть
-     * задача за этот период. Задача идёт месяцем позже периода: отчёт за июль сдают в
-     * августе. У филиального БП задача своя на каждый налоговый орган.
+     * Филиалы, от которых ждём документ за период: по строке сметы на каждый.
+     *
+     * Задача идёт следом за периодом: отчёт за июль сдают в августовской задаче. У
+     * квартального отчёта окно шире, три месяца после квартала: квартал сдают не день в
+     * день, и привязка к одному месяцу отсекала бы задачу, заведённую позже. Раньше окно
+     * считалось как «месяц задачи минус один внутри периода», и для квартала оно сходилось
+     * только на июльской задаче; на августовской не находилось ни одной, счёт филиалов
+     * откатывался на единицу, и недостающий филиал переставал замечаться.
      *
      * Принудительно закрытую задачу не считаем: человек записал, почему документа не будет
      * («только один район», «ежеквартально»).
+     *
+     * @return int[] номера строк сметы
      */
-    private function expectedReports(Collection $logs, DocumentPeriod $period): int
+    private function expectedBranches(Collection $logs, DocumentPeriod $period): array
     {
-        $months = array_map(fn (array $month) => sprintf('%04d-%02d', ...$month), $period->months());
+        $months = [];
+        $end    = $period->to->startOfMonth();
 
-        $expected = $logs
+        for ($i = 1, $length = count($period->months()); $i <= $length; $i++) {
+            $months[] = $end->addMonths($i)->format('Y-m');
+        }
+
+        return $logs
             ->reject(fn (BuhTaskLog $log) => (bool) $log->force_closed)
             ->filter(fn (BuhTaskLog $log) => in_array(
-                CarbonImmutable::create($log->year, $log->month, 1)->subMonth()->format('Y-m'),
+                CarbonImmutable::create($log->year, $log->month, 1)->format('Y-m'),
                 $months,
                 true,
             ))
             ->pluck('estimate_item_id')
             ->unique()
-            ->count();
-
-        return max(1, $expected);
+            ->map(fn ($id) => (int) $id)
+            ->values()
+            ->all();
     }
 
     /**
@@ -844,6 +875,9 @@ class AutoAuditRunner
             'side'        => $side,
             'label'       => self::SIDES[$side]['label'],
             'log_id'      => $log->id,
+            // Филиал: у филиального БП своя строка сметы на каждый налоговый орган. По ней
+            // сверка понимает, кто из филиалов сдал, а кто нет.
+            'branch_id'   => $log->estimate_item_id,
             'task_month'  => sprintf('%02d.%d', $log->month, $log->year),
             'employee'    => $this->shortName($log->employee?->full_name),
             'document_id' => $document->id,
