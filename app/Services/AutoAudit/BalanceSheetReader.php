@@ -67,6 +67,9 @@ class BalanceSheetReader
     /** Разобранные ведомости: путь к файлу => строки листа или отказ. */
     private array $tables = [];
 
+    /** Путь к файлу => в PDF есть страницы без текста, то есть прочитали мы его не целиком. */
+    private array $partial = [];
+
     /**
      * Оборот по счёту за период ведомости.
      *
@@ -105,6 +108,14 @@ class BalanceSheetReader
         $found = $this->findAccountRows($rows, $account);
 
         if (!$found) {
+            if ($this->partial[$path] ?? false) {
+                return DocumentValue::uncertain(
+                    "Счёта {$account} на прочитанных страницах нет, но часть страниц без текста: что на них, неизвестно",
+                    ['период' => $period->label(), 'счёт' => $account],
+                    $period,
+                );
+            }
+
             return DocumentValue::notFound("В ведомости нет счёта {$account}", [], $period);
         }
 
@@ -174,15 +185,23 @@ class BalanceSheetReader
     {
         try {
             if (strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'pdf') {
-                $words = $this->pdf->words($path);
+                // Все страницы, а не первая: полная ведомость на одну не влезает, и счета
+                // со второй и дальше раньше просто не находились. Разбор файла от этого не
+                // дорожает: PdfTextLayer и так разбирал его целиком, а отдавал одну страницу.
+                $pages    = $this->pdf->pages($path);
+                $withText = array_filter($pages);
 
                 // Текста нет вовсе: скан или фото, сохранённое в PDF. Документ может быть
                 // и тем, просто прочитать его нечем, поэтому это не «не та форма».
-                if (!$words) {
+                if (!$withText) {
                     return DocumentValue::scan('В PDF нет текста, это скан или фото');
                 }
 
-                return $this->rowsFromPdf($words);
+                // Часть страниц без текста: к распечатке подшит скан. Что на этих страницах,
+                // мы не знаем, и сказать потом «такого счёта в ведомости нет» будет нечестно.
+                $this->partial[$path] = count($withText) < count($pages);
+
+                return $this->rowsFromPdfPages($pages);
             }
 
             return $this->rowsFromSpreadsheet($path);
@@ -211,27 +230,43 @@ class BalanceSheetReader
      * колонки, и попадание однозначно. Дальше таблица уходит в общую логику, и разбираться,
      * из какого формата она пришла, никому не нужно.
      */
-    private function rowsFromPdf(array $words): array
+    private function rowsFromPdfPages(array $pages): array
     {
-        $lines = $this->groupByLine($words);
-        $starts = $this->columnStarts($lines);
+        $table  = [];
+        $starts = [];
 
-        if (!$starts) {
-            // Пустой список — дальше проверка формы скажет «это не ведомость», и это честно:
-            // без шапки мы не знаем, где чьи колонки, а гадать тут нельзя.
-            return [];
-        }
-
-        $table = [];
-
-        foreach ($lines as $cells) {
-            $row = array_fill(0, count($starts) + 1, null);
-
-            foreach ($cells as [$left, $text]) {
-                $row[$this->columnAt($left, $starts)] = $text;
+        foreach ($pages as $words) {
+            if (!$words) {
+                continue;
             }
 
-            $table[] = $row;
+            // Строки собираем внутри страницы. Высота на каждой странице отсчитывается
+            // заново, поэтому в общей куче слов строка с середины первой страницы слиплась
+            // бы со строкой с середины второй: у них близкие координаты.
+            $lines = $this->groupByLine($words);
+            $own   = $this->columnStarts($lines);
+
+            // Шапка у 1С обычно повторяется на каждой странице, но не всегда. Своей нет,
+            // берём колонки последней страницы, где она была.
+            if ($own) {
+                $starts = $own;
+            }
+
+            if (!$starts) {
+                // Шапки не было ни здесь, ни раньше: без неё мы не знаем, где чьи колонки,
+                // а гадать тут нельзя. Дальше проверка формы скажет «это не ведомость».
+                continue;
+            }
+
+            foreach ($lines as $cells) {
+                $row = array_fill(0, count($starts) + 1, null);
+
+                foreach ($cells as [$left, $text]) {
+                    $row[$this->columnAt($left, $starts)] = $text;
+                }
+
+                $table[] = $row;
+            }
         }
 
         return $table;

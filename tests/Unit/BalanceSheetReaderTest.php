@@ -43,12 +43,30 @@ class BalanceSheetReaderTest extends TestCase
 
     private function reader(array $pdfWords = []): BalanceSheetReader
     {
-        $layer = new class($pdfWords) extends PdfTextLayer {
-            public function __construct(private array $words) {}
+        return $this->readerWithPages($pdfWords ? [1 => $pdfWords] : []);
+    }
+
+    /**
+     * Читалка с многостраничным PDF: номер страницы => слова на ней.
+     *
+     * Подменяем и words(), и pages(): так тест одинаково честен и к старому разбору первой
+     * страницы, и к новому разбору всех.
+     *
+     * @param array<int, PdfWord[]> $pages
+     */
+    private function readerWithPages(array $pages): BalanceSheetReader
+    {
+        $layer = new class($pages) extends PdfTextLayer {
+            public function __construct(private array $pages) {}
 
             public function words(string $path, int $page = 1): array
             {
-                return $this->words;
+                return $this->pages[$page] ?? [];
+            }
+
+            public function pages(string $path): array
+            {
+                return $this->pages;
             }
         };
 
@@ -573,6 +591,104 @@ class BalanceSheetReaderTest extends TestCase
         return $w;
     }
 
+    /**
+     * Следующая страница печати: своя шапка (1С обычно её повторяет) и строки счетов.
+     *
+     * Высота по умолчанию та же, что у счёта 3210 на первой странице: на каждой странице
+     * координаты отсчитываются заново, и строки разных страниц не должны слипаться.
+     *
+     * @param array<string, string> $accountRows номер счёта => оборот по кредиту
+     * @return PdfWord[]
+     */
+    private function pdfNextPage(array $accountRows, bool $withHeader = true, float $top = -586.0): array
+    {
+        $c  = self::PDF_COLUMNS;
+        $w  = [];
+        $at = function (float $column, float $line, string $text) use (&$w) {
+            $w[] = new PdfWord($column + (is_numeric(str_replace([' ', ','], ['', '.'], $text)) ? 25.0 : 0.0), $line, $text);
+        };
+
+        if ($withHeader) {
+            $at($c['счёт'], -777, 'Счет');
+            $at($c['показатели'], -777, 'Показа');
+            $at($c['сальдо_нач_д'], -777, 'Сальдо на начало периода');
+            $at($c['оборот_д'], -777, 'Обороты за период');
+            $at($c['сальдо_кон_д'], -777, 'Сальдо на конец периода');
+
+            $at($c['показатели'], -745, 'БУ');
+            $at($c['сальдо_нач_д'], -745, 'Дебет');
+            $at($c['сальдо_нач_к'], -745, 'Кредит');
+            $at($c['оборот_д'], -745, 'Дебет');
+            $at($c['оборот_к'], -745, 'Кредит');
+            $at($c['сальдо_кон_д'], -745, 'Дебет');
+            $at($c['сальдо_кон_к'], -745, 'Кредит');
+        }
+
+        foreach ($accountRows as $account => $credit) {
+            $at($c['счёт'], $top, (string) $account);
+            $at($c['показатели'], $top, 'БУ');
+            $at($c['оборот_к'], $top, $credit);
+            $top -= 14.0;
+        }
+
+        return $w;
+    }
+
+    /** Счёт со второй страницы находится: полная ведомость на одну страницу не влезает. */
+    public function test_pdf_account_on_the_second_page_is_found(): void
+    {
+        $reader = $this->readerWithPages([
+            1 => $this->pdfBalanceSheet(),
+            2 => $this->pdfNextPage(['3534' => '500,00'], top: -700.0),
+        ]);
+
+        $result = $reader->turnover('осв.pdf', '3534', 'credit');
+
+        $this->assertTrue($result->isFound(), $result->reason ?? '');
+        $this->assertSame(500.0, $result->value);
+        $this->assertSame('01.07.2026 – 31.07.2026', $result->period?->label());
+    }
+
+    /** Строки разных страниц не слипаются, даже если стоят на одной высоте. */
+    public function test_pdf_rows_of_different_pages_do_not_merge(): void
+    {
+        $reader = $this->readerWithPages([
+            1 => $this->pdfBalanceSheet(),
+            2 => $this->pdfNextPage(['3534' => '500,00']),
+        ]);
+
+        $this->assertSame(500.0, $reader->turnover('осв.pdf', '3534', 'credit')->value);
+        $this->assertSame(87513.60, $reader->turnover('осв.pdf', '3210', 'credit')->value);
+    }
+
+    /** Своей шапки на странице нет: берём колонки той страницы, где она была. */
+    public function test_pdf_page_without_its_own_header_uses_columns_of_the_first(): void
+    {
+        $reader = $this->readerWithPages([
+            1 => $this->pdfBalanceSheet(),
+            2 => $this->pdfNextPage(['3534' => '500,00'], withHeader: false, top: -700.0),
+        ]);
+
+        $this->assertSame(500.0, $reader->turnover('осв.pdf', '3534', 'credit')->value);
+    }
+
+    /**
+     * Часть страниц без текста: к распечатке подшит скан.
+     *
+     * Сказать «такого счёта в ведомости нет» мы не вправе: что на нечитаемых страницах,
+     * неизвестно. Счета с прочитанных страниц при этом читаются как обычно.
+     */
+    public function test_pdf_with_a_scanned_page_does_not_claim_the_account_is_missing(): void
+    {
+        $reader = $this->readerWithPages([1 => $this->pdfBalanceSheet(), 2 => []]);
+
+        $result = $reader->turnover('осв.pdf', '9999', 'credit');
+
+        $this->assertSame(DocumentValue::UNCERTAIN, $result->status);
+        $this->assertStringContainsString('без текста', $result->reason);
+        $this->assertSame(87513.60, $reader->turnover('осв.pdf', '3210', 'credit')->value);
+    }
+
     public function test_reads_credit_turnover_from_pdf(): void
     {
         $result = $this->reader($this->pdfBalanceSheet())->turnover('осв.pdf', '3210', 'credit');
@@ -660,6 +776,13 @@ class BalanceSheetReaderTest extends TestCase
                 $this->calls++;
 
                 return $this->words;
+            }
+
+            public function pages(string $path): array
+            {
+                $this->calls++;
+
+                return [1 => $this->words];
             }
         };
 
