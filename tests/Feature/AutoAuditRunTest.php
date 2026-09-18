@@ -1326,6 +1326,72 @@ class AutoAuditRunTest extends TestCase
             ->assertSee('Последняя проверка упала и не записала результаты: Не хватило памяти');
     }
 
+    /**
+     * Разметка эталонных БП потерялась: прогон останавливается и не трогает прошлые строки.
+     *
+     * Раньше он шёл дальше, стирал все результаты фирмы и записывал ноль. Прогон при этом
+     * считался успешным, и страница писала «Проверки ещё не было»: потерю результатов было
+     * не отличить от фирмы, где аудит ни разу не запускали.
+     */
+    public function test_run_without_reference_services_keeps_previous_results(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $this->runAudit();
+        $before = AutoAuditResult::count();
+        $this->assertGreaterThan(0, $before);
+
+        // Кто-то снял пометки: ни одна проверка больше не работает.
+        Service::query()->update(['reference_id' => null]);
+
+        $stopped = false;
+
+        try {
+            app(AutoAuditRunner::class)->run();
+        } catch (\RuntimeException $e) {
+            $stopped = true;
+            $this->assertStringContainsString('не размечены эталонные БП', $e->getMessage());
+        }
+
+        $this->assertTrue($stopped, 'прогон должен был остановиться, а не стереть результаты');
+        $this->assertSame($before, AutoAuditResult::count());
+    }
+
+    /**
+     * Упавший прогон: состояние «упала», текст ошибки и прежние строки на месте.
+     *
+     * Сам блок обработки ошибки в задании до сих пор не выполнялся ни в одном тесте:
+     * соседний тест кладёт готовое состояние в кеш и проверяет только вёрстку.
+     */
+    public function test_failed_run_records_the_state_and_keeps_results(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $this->runAudit();
+        $before = AutoAuditResult::count();
+
+        $runner = new class extends AutoAuditRunner {
+            public function __construct() {}
+
+            public function run(): array
+            {
+                throw new \RuntimeException('разметка потерялась');
+            }
+        };
+
+        (new \App\Jobs\RunAutoAuditJob($this->tenant->id))->handle($runner);
+
+        $state = \Illuminate\Support\Facades\Cache::get(\App\Jobs\RunAutoAuditJob::stateKey($this->tenant->id));
+
+        $this->assertSame(\App\Jobs\RunAutoAuditJob::FAILED, $state['status']);
+        $this->assertSame('разметка потерялась', $state['error']);
+        $this->assertSame($before, AutoAuditResult::count());
+    }
+
     /** Имя файла открывает окно просмотра прямо на странице, а не скачивание. */
     public function test_document_names_open_the_viewer(): void
     {

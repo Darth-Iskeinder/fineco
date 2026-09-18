@@ -189,12 +189,20 @@ class AutoAuditRunner
         // Проверка работает, только если в фирме размечены оба её БП.
         $rules = array_filter(self::RULES, fn (array $rule) => isset($services['osv'], $services[$rule['document']]));
 
+        // Ни одна проверка не работает: в фирме не размечены эталонные БП. Это ошибка
+        // разметки, а не пустой результат, и останавливаемся мы до удаления. Раньше прогон
+        // шёл дальше, стирал все прошлые строки фирмы и записывал ноль, а страница после
+        // этого писала «Проверки ещё не было»: потерю было не отличить от чистой фирмы.
+        if (!$rules) {
+            throw new RuntimeException(
+                'В фирме не размечены эталонные БП, проверять нечего. Результаты прошлого прогона не тронуты',
+            );
+        }
+
         $rows = [];
 
-        if ($rules) {
-            foreach (Client::orderBy('name')->get() as $client) {
-                array_push($rows, ...$this->checkClient($client, $services, $rules));
-            }
+        foreach (Client::orderBy('name')->get() as $client) {
+            array_push($rows, ...$this->checkClient($client, $services, $rules));
         }
 
         DB::transaction(function () use ($rows) {
