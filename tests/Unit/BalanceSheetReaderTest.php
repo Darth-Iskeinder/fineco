@@ -121,6 +121,53 @@ class BalanceSheetReaderTest extends TestCase
         return $path;
     }
 
+    /**
+     * Ведомость с произвольным списком строк счетов: ['3210, Авансы' => 87513.60].
+     *
+     * Шапка и заголовок те же, что в writeBalanceSheet, а вот строки счетов задаёт тест:
+     * порядок строк тут и есть предмет проверки.
+     */
+    private function writeSheetWithAccountRows(array $accountRows): string
+    {
+        $book  = new Spreadsheet();
+        $sheet = $book->getActiveSheet();
+
+        $sheet->setCellValue('A1', 'Общество с ограниченной ответственностью "Тест"');
+        $sheet->setCellValue('A2', 'Оборотно-сальдовая ведомость за Июль 2026 г.');
+
+        $sheet->setCellValue('A4', 'Счет, Наименование счета');
+        $sheet->setCellValue('B4', 'Показатели');
+        $sheet->setCellValue('C4', 'Сальдо на начало периода');
+        $sheet->setCellValue('E4', 'Обороты за период');
+        $sheet->setCellValue('H4', 'Сальдо на конец периода');
+        $sheet->mergeCells('C4:D4');
+        $sheet->mergeCells('E4:G4');
+        $sheet->mergeCells('H4:I4');
+
+        $sheet->setCellValue('B5', 'БУ');
+        $sheet->setCellValue('C5', 'Дебет');
+        $sheet->setCellValue('D5', 'Кредит');
+        $sheet->setCellValue('E5', 'Дебет');
+        $sheet->setCellValue('F5', 'Кредит');
+        $sheet->setCellValue('H5', 'Дебет');
+        $sheet->setCellValue('I5', 'Кредит');
+
+        $row = 6;
+
+        foreach ($accountRows as $first => $credit) {
+            $sheet->setCellValue("A{$row}", (string) $first);
+            $sheet->setCellValue("B{$row}", 'БУ');
+            $sheet->setCellValue("F{$row}", $credit);
+            $row++;
+        }
+
+        $path = tempnam(sys_get_temp_dir(), 'osv') . '.xlsx';
+        (new Xlsx($book))->save($path);
+        $book->disconnectWorksheets();
+
+        return $path;
+    }
+
     public function test_reads_credit_turnover_of_the_account(): void
     {
         $result = $this->reader()->turnover($this->file, '3210', 'credit');
@@ -244,6 +291,78 @@ class BalanceSheetReaderTest extends TestCase
 
         $this->assertSame(DocumentValue::NOT_FOUND, $result->status);
         // Форма опознана, значит период известен: сверке он нужен, чтобы поставить ведомость в пару.
+        $this->assertSame('01.07.2026 – 31.07.2026', $result->period?->label());
+    }
+
+    /**
+     * Субсчёт напечатан выше самого счёта.
+     *
+     * Раньше строка счёта искалась по границе слова, а она срабатывает и перед точкой:
+     * «3210.1» считалось строкой счёта 3210. Брали первую подходящую сверху, то есть
+     * субсчёт, и его оборот уходил в сверку как оборот всего счёта.
+     */
+    public function test_subaccount_above_the_account_is_not_taken(): void
+    {
+        $file = $this->writeSheetWithAccountRows([
+            '3210.1, Авансы покупателей в сомах'    => 11.11,
+            '3210.2, Авансы покупателей в валюте'   => 22.22,
+            '3210, Авансы покупателей и заказчиков' => 87513.60,
+        ]);
+
+        $result = $this->reader()->turnover($file, '3210', 'credit');
+
+        $this->assertTrue($result->isFound(), $result->reason ?? '');
+        $this->assertSame(87513.60, $result->value);
+    }
+
+    /** Разделитель субсчёта бывает разный, и ни один из них не делает субсчёт счётом. */
+    public function test_subaccount_separators_are_all_skipped(): void
+    {
+        foreach (['3210.1, Аванс', '3210.01, Аванс', '3210-1, Аванс', '3210/1, Аванс'] as $first) {
+            $file = $this->writeSheetWithAccountRows([$first => 11.11, '3210, Авансы' => 87513.60]);
+
+            $this->assertSame(87513.60, $this->reader()->turnover($file, '3210', 'credit')->value, $first);
+        }
+    }
+
+    /** Субсчета есть, а строки самого счёта нет: складывать их на догадку мы не станем. */
+    public function test_only_subaccounts_without_the_account_is_not_found(): void
+    {
+        $file = $this->writeSheetWithAccountRows([
+            '3210.1, Авансы покупателей в сомах'  => 11.11,
+            '3210.2, Авансы покупателей в валюте' => 22.22,
+        ]);
+
+        $result = $this->reader()->turnover($file, '3210', 'credit');
+
+        $this->assertSame(DocumentValue::NOT_FOUND, $result->status);
+        $this->assertNull($result->value);
+    }
+
+    /** Счёт с более длинным номером счётом не считался и раньше: это регресс. */
+    public function test_account_with_a_longer_number_is_not_confused(): void
+    {
+        $file = $this->writeSheetWithAccountRows([
+            '32101, Совсем другой счёт' => 11.11,
+            '3210, Авансы'              => 87513.60,
+        ]);
+
+        $this->assertSame(87513.60, $this->reader()->turnover($file, '3210', 'credit')->value);
+    }
+
+    /** Счёт напечатан двумя строками: какую брать, непонятно, и втихую мы не выбираем. */
+    public function test_two_rows_of_one_account_are_refused(): void
+    {
+        $file = $this->writeSheetWithAccountRows([
+            '3410, Единый налог, Бишкек' => 1000.00,
+            '3410, Единый налог, Ош'     => 2000.00,
+        ]);
+
+        $result = $this->reader()->turnover($file, '3410', 'credit');
+
+        $this->assertSame(DocumentValue::UNCERTAIN, $result->status);
+        $this->assertNull($result->value);
+        $this->assertStringContainsString('строки 6, 7', $result->reason);
         $this->assertSame('01.07.2026 – 31.07.2026', $result->period?->label());
     }
 
@@ -489,6 +608,22 @@ class BalanceSheetReaderTest extends TestCase
     }
 
     /** Чужой PDF: без шапки ведомости колонок не найти, и гадать нельзя. */
+    /** Разбор у Excel и PDF общий, поэтому субсчёт не должен подменять счёт и здесь. */
+    public function test_pdf_subaccount_above_the_account_is_not_taken(): void
+    {
+        $c     = self::PDF_COLUMNS;
+        $words = array_merge($this->pdfBalanceSheet(), [
+            new PdfWord($c['счёт'], -595.0, '3210.1'),
+            new PdfWord($c['показатели'], -595.0, 'БУ'),
+            new PdfWord($c['оборот_к'] + 25.0, -595.0, '11,11'),
+        ]);
+
+        $result = $this->reader($words)->turnover('осв.pdf', '3210', 'credit');
+
+        $this->assertTrue($result->isFound(), $result->reason ?? '');
+        $this->assertSame(87513.60, $result->value);
+    }
+
     public function test_pdf_without_balance_sheet_header_is_rejected(): void
     {
         $words = [new PdfWord(59.0, -100.0, 'Счет на оплату № 12'), new PdfWord(59.0, -120.0, '1 000,00')];

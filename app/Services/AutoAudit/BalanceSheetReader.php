@@ -102,11 +102,25 @@ class BalanceSheetReader
             );
         }
 
-        $row = $this->findAccountRow($rows, $account);
+        $found = $this->findAccountRows($rows, $account);
 
-        if ($row === null) {
+        if (!$found) {
             return DocumentValue::notFound("В ведомости нет счёта {$account}", [], $period);
         }
+
+        // Счёт напечатан несколькими строками, например по подразделениям. Сложить их или
+        // взять одну, мы не знаем, а молчаливый выбор первой давал бы неполную сумму.
+        if (count($found) > 1) {
+            $lines = implode(', ', array_map(fn (int $r) => $r + 1, $found));
+
+            return DocumentValue::uncertain(
+                "В ведомости несколько строк счёта {$account}: строки {$lines}. Какую брать, непонятно",
+                ['период' => $period->label(), 'счёт' => $account, 'строки' => $lines],
+                $period,
+            );
+        }
+
+        $row = $found[0];
 
         $raw   = $rows[$row][$column] ?? null;
         $cell  = $this->columnLetter($column) . ($row + 1);
@@ -375,18 +389,31 @@ class BalanceSheetReader
     }
 
     /**
-     * Строка самого счёта, а не его валютной подстроки.
+     * Строки самого счёта: не его валютной подстроки и не его субсчёта.
      *
      * В первой колонке у счёта стоит «3210, Авансы покупателей...», у подстроки — «RUB»
      * или «сом», а у строки «Вал.» первая колонка вообще пуста. Плюс требуем «БУ» во
      * второй колонке: строка «Вал.» несёт сумму в валюте, и брать её нельзя.
+     *
+     * После номера счёта должна идти запятая, пробел или конец строки. Раньше здесь стояла
+     * граница слова, а она срабатывает и перед точкой, поэтому под счёт 3210 подходили
+     * «3210.1» и «3210-1». Брали при этом первую подходящую строку сверху, и если субсчёт
+     * напечатан выше самого счёта, в сверку уходил оборот субсчёта вместо оборота счёта.
+     * Число выглядело настоящим, и выходило «Совпало» по чужой сумме.
+     *
+     * Возвращаем все совпадения, а не первое: решать, что делать с несколькими строками
+     * одного счёта, должен вызывающий, а не этот поиск втихую.
+     *
+     * @return int[] номера строк
      */
-    private function findAccountRow(array $rows, string $account): ?int
+    private function findAccountRows(array $rows, string $account): array
     {
+        $found = [];
+
         foreach ($rows as $r => $row) {
             $first = trim((string) ($row[0] ?? ''));
 
-            if ($first === '' || !preg_match('/^' . preg_quote($account, '/') . '\b/u', $first)) {
+            if ($first === '' || !preg_match('/^' . preg_quote($account, '/') . '(?=[,\s]|$)/u', $first)) {
                 continue;
             }
 
@@ -394,10 +421,10 @@ class BalanceSheetReader
                 continue;
             }
 
-            return $r;
+            $found[] = $r;
         }
 
-        return null;
+        return $found;
     }
 
     /**
