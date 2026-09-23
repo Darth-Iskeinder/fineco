@@ -37,20 +37,10 @@
                     @endif
                 </p>
             </div>
-
-            <form method="POST" action="{{ route('auto-audit.run') }}"
-                  x-data="{ busy: @js($running) }" @submit="busy = true">
-                @csrf
-                <button type="submit" :disabled="busy" @disabled($running)
-                        class="inline-flex items-center px-4 py-2 bg-gradient-to-r from-violet-500 to-indigo-600 text-white text-sm font-medium rounded-lg shadow-sm disabled:opacity-60 transition">
-                    {{-- x-text, а не x-show с x-cloak: правила [x-cloak] в проекте нет --}}
-                    <span x-text="busy ? 'Проверка идёт…' : 'Проверить сейчас'">{{ $running ? 'Проверка идёт…' : 'Проверить сейчас' }}</span>
-                </button>
-            </form>
         </div>
 
         @if ($running)
-            {{-- Прогон идёт после ответа браузеру: показываем это и обновляем страницу, пока не закончится. --}}
+            {{-- Прогон идёт в терминале: показываем это и обновляем страницу, пока не закончится. --}}
             <div class="mx-6 mb-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
                 Идёт проверка с {{ \Carbon\CarbonImmutable::parse($state['started_at'])->setTimezone(config('app.timezone'))->format('H:i') }}.
                 Ниже пока прежние результаты. Страница обновится сама.
@@ -106,7 +96,7 @@
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-x-auto">
         @if ($results->isEmpty())
             <p class="px-6 py-10 text-center text-sm text-slate-500">
-                Результатов нет. Нажмите «Проверить сейчас».
+                Результатов нет.
             </p>
         @else
             <table class="min-w-full text-sm">

@@ -1066,7 +1066,7 @@ class AutoAuditRunTest extends TestCase
     public function test_firm_staff_cannot_see_or_run_the_audit(): void
     {
         $this->actingAs($this->admin, 'employee')->get(route('auto-audit.index'))->assertNotFound();
-        $this->actingAs($this->admin, 'employee')->post(route('auto-audit.run'))->assertNotFound();
+        $this->actingAs($this->admin, 'employee')->post('/auto-audit/run')->assertNotFound();
 
         $this->actingAs($this->admin, 'employee')
             ->get(route('employees.index'))
@@ -1074,7 +1074,7 @@ class AutoAuditRunTest extends TestCase
             ->assertDontSee(route('auto-audit.index'));
     }
 
-    public function test_vendor_inside_the_firm_runs_the_audit_and_sees_the_result(): void
+    public function test_vendor_inside_the_firm_sees_the_result_of_the_command(): void
     {
         $client = $this->client();
         $this->attachSheet($client, 'осв.xls', ['3210' => 150.00, '3410' => 4.00]);
@@ -1082,10 +1082,7 @@ class AutoAuditRunTest extends TestCase
 
         $this->asVendor()->get(route('employees.index'))->assertSee(route('auto-audit.index'));
 
-        $this->asVendor()
-            ->post(route('auto-audit.run'))
-            ->assertRedirect(route('auto-audit.index'))
-            ->assertSessionHas('success');
+        $this->artisan('autoaudit:run', ['--tenant' => $this->tenant->id])->assertSuccessful();
 
         $this->asVendor()
             ->get(route('auto-audit.index'))
@@ -1259,16 +1256,14 @@ class AutoAuditRunTest extends TestCase
             ->assertDontSee($matched->name);
     }
 
-    /** Кнопка не ждёт прогона: он идёт после ответа и записывает итог и длительность. */
-    public function test_run_goes_after_the_response_and_records_its_state(): void
+    /** Команда записывает итог и длительность, и страница их показывает. */
+    public function test_command_records_its_state_for_the_page(): void
     {
         $client = $this->client();
         $this->attachSheet($client, 'осв.xls', ['3210' => 1.00, '3410' => 1.00]);
         $this->attachReport($client, 'отчёт.pdf', base: 1.00, tax: 1.00);
 
-        $this->asVendor()->post(route('auto-audit.run'))
-            ->assertRedirect(route('auto-audit.index'))
-            ->assertSessionHas('success', 'Проверка запущена и идёт в фоне. Страница обновится сама, когда она закончится.');
+        $this->artisan('autoaudit:run', ['--tenant' => $this->tenant->id])->assertSuccessful();
 
         $state = \Illuminate\Support\Facades\Cache::get(\App\Jobs\RunAutoAuditJob::stateKey($this->tenant->id));
 
@@ -1281,39 +1276,79 @@ class AutoAuditRunTest extends TestCase
             ->assertDontSee('Идёт проверка');
     }
 
-    /** Пока прогон идёт, второй не запускается, а страница показывает это и обновляется сама. */
-    public function test_second_run_does_not_start_while_one_is_running(): void
+    /**
+     * Пока прогон идёт, страница показывает это и обновляется сама. Что второй прогон не
+     * начнётся, проверяют тесты замка ниже.
+     */
+    public function test_page_shows_a_running_audit_and_reloads(): void
     {
-        $client = $this->client();
-        $this->attachSheet($client, 'осв.xls', ['3210' => 1.00, '3410' => 1.00]);
-        $this->attachReport($client, 'отчёт.pdf', base: 1.00, tax: 1.00);
-
         \App\Jobs\RunAutoAuditJob::markRunning($this->tenant->id);
-
-        $this->asVendor()->post(route('auto-audit.run'))
-            ->assertSessionHas('success', 'Проверка уже идёт. Страница обновится сама, когда она закончится.');
-
-        $this->assertCount(0, AutoAuditResult::all());
 
         $this->asVendor()->get(route('auto-audit.index'))
             ->assertSee('Идёт проверка с')
             ->assertSee('window.location.reload', false);
     }
 
-    /** «Идёт» дольше 15 минут значит, что процесс умер: запуск снова разрешён. */
-    public function test_stale_running_state_does_not_block_the_button(): void
+    /** «Идёт» дольше 15 минут значит, что процесс умер: плашка больше не висит. */
+    public function test_stale_running_state_is_not_shown(): void
+    {
+        \App\Jobs\RunAutoAuditJob::markRunning($this->tenant->id);
+        $this->travel(16)->minutes();
+
+        $this->asVendor()->get(route('auto-audit.index'))
+            ->assertOk()
+            ->assertDontSee('Идёт проверка')
+            ->assertDontSee('window.location.reload', false);
+    }
+
+    /** Кнопки нет: со страницы проверку не запустить даже вендору, только командой. */
+    public function test_page_has_no_run_button_and_no_run_route(): void
     {
         $client = $this->client();
         $this->attachSheet($client, 'осв.xls', ['3210' => 1.00, '3410' => 1.00]);
         $this->attachReport($client, 'отчёт.pdf', base: 1.00, tax: 1.00);
 
-        \App\Jobs\RunAutoAuditJob::markRunning($this->tenant->id);
-        $this->travel(16)->minutes();
+        $this->asVendor()->get(route('auto-audit.index'))
+            ->assertOk()
+            ->assertDontSee('Проверить сейчас')
+            ->assertDontSee('/auto-audit/run', false);
 
-        $this->asVendor()->post(route('auto-audit.run'))
-            ->assertSessionHas('success', 'Проверка запущена и идёт в фоне. Страница обновится сама, когда она закончится.');
+        $this->asVendor()->post('/auto-audit/run')->assertNotFound();
+        $this->asVendor()->get('/auto-audit/run')->assertNotFound();
 
-        $this->assertCount(2, AutoAuditResult::all());
+        $this->assertCount(0, AutoAuditResult::all());
+    }
+
+    /**
+     * Команда без доступа к папке документов не начинает прогон.
+     *
+     * На бою так бывает, если запустить не от www-data: папка закрыта правами 0700. Прогон
+     * тогда не падает, а записывает всем «Файл не открылся» и стирает настоящие результаты.
+     */
+    public function test_command_refuses_without_access_to_documents(): void
+    {
+        if (function_exists('posix_getuid') && posix_getuid() === 0) {
+            $this->markTestSkipped('У root права на папку не отнять');
+        }
+
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 1.00, '3410' => 1.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 1.00, tax: 1.00);
+        $this->runAudit();
+        $before = AutoAuditResult::orderBy('id')->pluck('id')->all();
+
+        $root = \Illuminate\Support\Facades\Storage::disk('local')->path('');
+        chmod($root, 0000);
+
+        try {
+            $this->artisan('autoaudit:run', ['--tenant' => $this->tenant->id])
+                ->expectsOutputToContain('Нет доступа к папке документов')
+                ->assertFailed();
+        } finally {
+            chmod($root, 0755);
+        }
+
+        $this->assertSame($before, AutoAuditResult::orderBy('id')->pluck('id')->all());
     }
 
     /** Упавший прогон виден на странице, а не молча оставляет старые результаты. */
@@ -1385,7 +1420,7 @@ class AutoAuditRunTest extends TestCase
             }
         };
 
-        (new \App\Jobs\RunAutoAuditJob($this->tenant->id))->handle($runner);
+        $this->performQuietly($runner);
 
         $state = \Illuminate\Support\Facades\Cache::get(\App\Jobs\RunAutoAuditJob::stateKey($this->tenant->id));
 
@@ -1419,14 +1454,14 @@ class AutoAuditRunTest extends TestCase
             }
         };
 
-        (new RunAutoAuditJob($this->tenant->id))->handle($runner);
+        $this->performQuietly($runner);
 
         $this->assertSame(0, $runner->calls, 'прогон пошёл поверх занятого замка');
 
         $lock->release();
     }
 
-    /** Команда из терминала берёт тот же замок, что и кнопка, и поверх прогона не запускается. */
+    /** Команда берёт тот же замок и поверх идущего прогона не запускается. */
     public function test_command_does_not_run_while_the_lock_is_held(): void
     {
         $lock = Cache::lock(RunAutoAuditJob::lockKey($this->tenant->id), 60);
@@ -1451,7 +1486,7 @@ class AutoAuditRunTest extends TestCase
             }
         };
 
-        (new RunAutoAuditJob($this->tenant->id))->handle($runner);
+        $this->performQuietly($runner);
 
         $lock = Cache::lock(RunAutoAuditJob::lockKey($this->tenant->id), 60);
 
@@ -1479,7 +1514,7 @@ class AutoAuditRunTest extends TestCase
             }
         };
 
-        (new RunAutoAuditJob($this->tenant->id))->handle($runner);
+        $this->performQuietly($runner);
 
         $this->assertSame(RunAutoAuditJob::RUNNING, $runner->seen);
         $this->assertSame(RunAutoAuditJob::DONE, Cache::get($key)['status']);
@@ -1510,7 +1545,7 @@ class AutoAuditRunTest extends TestCase
             }
         };
 
-        (new RunAutoAuditJob($this->tenant->id))->handle($runner);
+        $this->performQuietly($runner);
 
         $this->assertSame(1, $runner->calls, 'чужой замок заблокировал прогон');
 
@@ -1534,6 +1569,18 @@ class AutoAuditRunTest extends TestCase
             ->assertSee('href="' . route('documents.task', $document) . '"', false)
             // Разбор таблиц для Excel подключён: без него окно не нарисует ведомость.
             ->assertSee('function sheetPreview()', false);
+    }
+
+    /**
+     * Прогон под замком, как его делает команда. Ошибку прогона глотаем: тесты смотрят на
+     * состояние и замок, которые perform записал до того, как пробросить её наружу.
+     */
+    private function performQuietly(AutoAuditRunner $runner): void
+    {
+        try {
+            RunAutoAuditJob::perform($this->tenant->id, $runner);
+        } catch (\Throwable) {
+        }
     }
 
     private function asVendor(): static

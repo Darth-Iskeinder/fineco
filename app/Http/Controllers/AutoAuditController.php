@@ -8,7 +8,6 @@ use App\Services\AutoAudit\AutoAuditRunner;
 use App\Support\Impersonation;
 use App\Support\TenantContext;
 use Carbon\CarbonImmutable;
-use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\View\View;
@@ -27,14 +26,14 @@ use Illuminate\View\View;
  *   - проверка. По умолчанию все;
  *   - статус. По умолчанию все.
  *
- * Кнопка «Проверить сейчас» не ждёт конца прогона: он идёт после ответа браузеру, см.
- * RunAutoAuditJob. Пока прогон идёт, страница показывает это и сама обновляется.
+ * Запустить проверку со страницы нельзя: прогон идёт только командой `autoaudit:run` в
+ * терминале. Пока он идёт, страница показывает это и сама обновляется.
  */
 class AutoAuditController extends Controller
 {
     /**
      * «Идёт» дольше этого не бывает. Значит, процесс умер, не записав итог (его, например,
-     * убил сервер), и запуск надо снова разрешить, а не блокировать кнопку навсегда.
+     * убили в терминале), и плашка «идёт проверка» висеть дальше не должна.
      */
     private const STALE_MINUTES = 15;
 
@@ -92,23 +91,6 @@ class AutoAuditController extends Controller
             'state'     => $state,
             'running'   => $this->isRunning($state),
         ]);
-    }
-
-    public function run(): RedirectResponse
-    {
-        $this->vendorOnly();
-
-        // Второй прогон поверх идущего стирал бы и писал результаты вперемешку с первым.
-        if ($this->isRunning($this->state())) {
-            return redirect()->route('auto-audit.index')
-                ->with('success', 'Проверка уже идёт. Страница обновится сама, когда она закончится.');
-        }
-
-        RunAutoAuditJob::markRunning(TenantContext::id());
-        RunAutoAuditJob::dispatchAfterResponse(TenantContext::id());
-
-        return redirect()->route('auto-audit.index')
-            ->with('success', 'Проверка запущена и идёт в фоне. Страница обновится сама, когда она закончится.');
     }
 
     private function vendorOnly(): void
