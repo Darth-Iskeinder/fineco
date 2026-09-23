@@ -263,9 +263,9 @@
                     </a>
                 @endif
 
-                {{-- Автоаудит пока видит только владелец системы, зашедший в фирму.
-                     Сотрудникам фирмы пункта нет, а сама страница отвечает им 404. --}}
-                @if(\App\Support\Impersonation::isActive())
+                {{-- Автоаудит видят владелец системы, зашедший в фирму, и руководитель фирмы,
+                     которой страницу открыли. Остальным пункта нет, а страница отвечает 404. --}}
+                @if(\App\Support\Impersonation::isActive() || ($currentEmployee && $currentEmployee->canSeeAutoAudit()))
                     <a href="{{ route('auto-audit.index') }}"
                        class="flex items-center px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200
                               @if(request()->routeIs('auto-audit.*'))

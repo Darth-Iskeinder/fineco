@@ -26,9 +26,12 @@
         <div class="px-6 py-4 flex items-start justify-between flex-wrap gap-4">
             <div>
                 <h2 class="text-lg font-semibold text-slate-800">Автоаудит</h2>
-                <p class="text-sm text-slate-500 mt-0.5">
-                    Страницу видит только владелец системы, сотрудники фирмы её не видят.
-                </p>
+                @if ($vendor)
+                    {{-- Подсказка вендору: руководитель видит то же самое или нет. --}}
+                    <p class="text-sm text-slate-500 mt-0.5">
+                        {{ $openToManager ? 'Руководитель фирмы видит эту страницу.' : 'Руководитель фирмы эту страницу пока не видит.' }}
+                    </p>
+                @endif
                 <p class="text-sm text-slate-500 mt-0.5">
                     @if ($checkedAt)
                         Последняя проверка: {{ $checkedAt->format('d.m.Y H:i') }}@if (($state['status'] ?? null) === \App\Jobs\RunAutoAuditJob::DONE && isset($state['seconds'])), заняла {{ $state['seconds'] }} с@endif

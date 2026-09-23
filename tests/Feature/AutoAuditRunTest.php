@@ -1610,6 +1610,116 @@ class AutoAuditRunTest extends TestCase
         $lock->release();
     }
 
+    /** Руководитель фирмы, которой страницу не открыли: ни пункта меню, ни страницы. */
+    public function test_manager_does_not_see_the_page_while_the_firm_flag_is_off(): void
+    {
+        $manager = $this->employee(Role::MANAGER);
+
+        $this->actingAs($manager, 'employee')->get(route('auto-audit.index'))->assertNotFound();
+        $this->actingAs($manager, 'employee')
+            ->get(route('employees.index'))
+            ->assertOk()
+            ->assertDontSee(route('auto-audit.index'));
+    }
+
+    /** Флаг включён: руководитель видит пункт меню, результаты, исполнителей и открывает файлы. */
+    public function test_manager_sees_the_page_when_the_firm_flag_is_on(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 150.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $results = $this->runAudit();
+
+        $this->tenant->setAutoAuditEnabled(true);
+        $manager = $this->employee(Role::MANAGER);
+
+        $this->actingAs($manager, 'employee')->get(route('employees.index'))->assertSee(route('auto-audit.index'));
+
+        $employee = $results->first()->sources[0]['employee'];
+        $this->assertNotEmpty($employee);
+
+        $this->actingAs($manager, 'employee')->get(route('auto-audit.index'))
+            ->assertOk()
+            ->assertSee($client->name)
+            ->assertSee('Не совпало')
+            ->assertSee($employee)
+            // Подсказка про видимость только для вендора.
+            ->assertDontSee('Руководитель фирмы');
+
+        $document = \App\Models\BuhTaskDocument::where('name', 'отчёт.pdf')->firstOrFail();
+        $this->actingAs($manager, 'employee')->get(route('documents.task', $document))->assertOk();
+    }
+
+    /** Флаг открывает страницу только руководителю: остальным ролям фирмы по-прежнему 404. */
+    public function test_other_roles_do_not_see_the_page_even_with_the_flag_on(): void
+    {
+        $this->tenant->setAutoAuditEnabled(true);
+
+        foreach ([Role::ADMIN, Role::HEAD_ACCOUNTANT, Role::ACCOUNTANT, Role::AUDITOR] as $role) {
+            $employee = $this->employee($role);
+
+            $this->actingAs($employee, 'employee')->get(route('auto-audit.index'))->assertNotFound();
+            $this->actingAs($employee, 'employee')
+                ->get(route('employees.index'))
+                ->assertDontSee(route('auto-audit.index'));
+        }
+    }
+
+    /** Флаг одной фирмы не открывает страницу руководителю другой. */
+    public function test_flag_of_one_firm_does_not_open_the_page_in_another(): void
+    {
+        $this->tenant->setAutoAuditEnabled(true);
+
+        $other = Tenant::create([
+            'name'   => 'Соседняя фирма ' . uniqid(),
+            'slug'   => 'neighbour-' . uniqid(),
+            'status' => Tenant::STATUS_ACTIVE,
+        ]);
+        $foreignManager = TenantContext::for($other, fn () => $this->employee(Role::MANAGER));
+
+        $this->assertSame($other->id, $foreignManager->tenant_id);
+        $this->actingAs($foreignManager, 'employee')->get(route('auto-audit.index'))->assertNotFound();
+    }
+
+    /**
+     * Руководитель видит только свою фирму, даже если страница открыта обеим.
+     *
+     * Результаты отсекает по фирме сама модель. Тест держит это на случай, если страницу
+     * когда-нибудь начнут собирать мимо модели.
+     */
+    public function test_manager_sees_only_results_of_own_firm(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 1.00, '3410' => 1.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 1.00, tax: 1.00);
+        $this->runAudit();
+        $this->tenant->setAutoAuditEnabled(true);
+
+        $other = Tenant::create([
+            'name'   => 'Соседняя фирма ' . uniqid(),
+            'slug'   => 'neighbour-' . uniqid(),
+            'status' => Tenant::STATUS_ACTIVE,
+        ]);
+        $other->setAutoAuditEnabled(true);
+        $foreignManager = TenantContext::for($other, fn () => $this->employee(Role::MANAGER));
+
+        $this->actingAs($foreignManager, 'employee')->get(route('auto-audit.index'))
+            ->assertOk()
+            ->assertDontSee($client->name);
+    }
+
+    /** Вендор видит, открыта ли страница руководителю, чтобы не гадать. */
+    public function test_vendor_sees_whether_the_manager_sees_the_page(): void
+    {
+        $this->asVendor()->get(route('auto-audit.index'))
+            ->assertSee('Руководитель фирмы эту страницу пока не видит.');
+
+        $this->tenant->setAutoAuditEnabled(true);
+
+        $this->asVendor()->get(route('auto-audit.index'))
+            ->assertSee('Руководитель фирмы видит эту страницу.');
+    }
+
     /** Имя файла открывает окно просмотра прямо на странице, а не скачивание. */
     public function test_document_names_open_the_viewer(): void
     {
@@ -1639,6 +1749,16 @@ class AutoAuditRunTest extends TestCase
             RunAutoAuditJob::perform($this->tenant->id, $runner);
         } catch (\Throwable) {
         }
+    }
+
+    private function employee(string $role): Employee
+    {
+        return Employee::create([
+            'full_name' => 'Сотрудник ' . $role, 'position' => $role,
+            'email' => 'autoaudit.' . $role . '.' . uniqid() . '@example.com', 'password' => 'secret123',
+            'role_id' => Role::where('name', $role)->value('id'),
+            'status' => Employee::STATUS_ACTIVE,
+        ]);
     }
 
     private function asVendor(): static

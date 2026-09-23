@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Jobs\RunAutoAuditJob;
 use App\Models\AutoAuditResult;
+use App\Models\Tenant;
 use App\Services\AutoAudit\AutoAuditRunner;
 use App\Support\Impersonation;
 use App\Support\TenantContext;
@@ -15,10 +16,9 @@ use Illuminate\View\View;
 /**
  * Страница автоаудита: одна таблица за выбранный отчётный период.
  *
- * Пока её видит только владелец системы, зашедший в фирму. Сырые результаты фирме
- * показывать рано: неизвестно, как выглядит настоящее расхождение, и ложное красное
- * подорвало бы доверие к проверке с первого дня. Всем остальным страница отвечает 404,
- * как будто её нет.
+ * Видят её владелец системы, зашедший в фирму, и руководитель фирмы, если фирме её
+ * открыли (флаг autoaudit:access). Открываем по одной фирме: ложное красное подорвало бы
+ * доверие к проверке с первого дня. Всем остальным страница отвечает 404, как будто её нет.
  *
  * Фильтров три, все в адресе страницы и работают вместе:
  *   - отчётный период, то есть период, за который составлены документы, а не месяц
@@ -39,7 +39,7 @@ class AutoAuditController extends Controller
 
     public function index(Request $request): View
     {
-        $this->vendorOnly();
+        $this->allowedOnly();
 
         $all = AutoAuditResult::with('client:id,name')->get();
 
@@ -80,22 +80,27 @@ class AutoAuditController extends Controller
         $state = $this->state();
 
         return view('auto-audit.index', [
-            'results'   => $results,
-            'periods'   => $periods,
-            'period'    => $period,
-            'rule'      => $rule,
-            'status'    => $status,
+            'results'       => $results,
+            'periods'       => $periods,
+            'period'        => $period,
+            'rule'          => $rule,
+            'status'        => $status,
             // Счётчики без фильтра статуса: иначе при выборе одного статуса остальные обнулятся.
-            'counts'    => $inPeriodAndRule->countBy('outcome'),
-            'checkedAt' => $all->max('created_at'),
-            'state'     => $state,
-            'running'   => $this->isRunning($state),
+            'counts'        => $inPeriodAndRule->countBy('outcome'),
+            'checkedAt'     => $all->max('created_at'),
+            'state'         => $state,
+            'running'       => $this->isRunning($state),
+            'vendor'        => Impersonation::isActive(),
+            'openToManager' => (bool) Tenant::find(TenantContext::id())?->autoAuditEnabled(),
         ]);
     }
 
-    private function vendorOnly(): void
+    private function allowedOnly(): void
     {
-        abort_unless(Impersonation::isActive(), 404);
+        abort_unless(
+            Impersonation::isActive() || auth('employee')->user()?->canSeeAutoAudit(),
+            404,
+        );
     }
 
     private function state(): ?array

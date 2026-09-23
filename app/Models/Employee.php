@@ -186,6 +186,16 @@ class Employee extends Authenticatable
         return $this->role?->isManager() ?? false;
     }
 
+    /**
+     * Видит ли сотрудник страницу автоаудита. Только руководитель и только в фирме, которой
+     * её открыли (канарейка, см. Tenant::autoAuditEnabled). Вендор, зашедший в фирму, видит
+     * её всегда, это проверяется отдельно.
+     */
+    public function canSeeAutoAudit(): bool
+    {
+        return $this->isManager() && (bool) $this->tenant?->autoAuditEnabled();
+    }
+
     public function isActive(): bool
     {
         return $this->status === self::STATUS_ACTIVE;
