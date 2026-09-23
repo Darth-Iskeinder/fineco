@@ -930,6 +930,64 @@ class AutoAuditRunTest extends TestCase
     }
 
     /**
+     * Файл есть, но прав на его папку нет: прогон падает целиком и не трогает прошлые строки.
+     *
+     * На бою 23.09.2026 команду запустили не от www-data. Корень диска читался, а папки задач
+     * нет, и прогон записал «Файл не открылся» в 199 строк вместо настоящих результатов.
+     */
+    public function test_no_access_to_document_folder_keeps_previous_results(): void
+    {
+        if (function_exists('posix_getuid') && posix_getuid() === 0) {
+            $this->markTestSkipped('У root права на папку не отнять');
+        }
+
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 1.00, '3410' => 1.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 1.00, tax: 1.00);
+        $this->runAudit();
+        $before = AutoAuditResult::orderBy('id')->pluck('outcome', 'id')->all();
+
+        $folder = Storage::disk('local')->path('buh_task_documents');
+        chmod($folder, 0000);
+
+        try {
+            $this->artisan('autoaudit:run', ['--tenant' => $this->tenant->id])
+                ->expectsOutputToContain('Нет прав на чтение файлов документов')
+                ->assertFailed();
+        } finally {
+            chmod($folder, 0755);
+        }
+
+        $this->assertSame($before, AutoAuditResult::orderBy('id')->pluck('outcome', 'id')->all());
+        $this->assertSame(
+            RunAutoAuditJob::FAILED,
+            Cache::get(RunAutoAuditJob::stateKey($this->tenant->id))['status'],
+        );
+    }
+
+    /** Файл закрыт правами сам по себе, а папка открыта: тоже права, а не пропажа. */
+    public function test_unreadable_file_in_an_open_folder_is_not_called_missing(): void
+    {
+        if (function_exists('posix_getuid') && posix_getuid() === 0) {
+            $this->markTestSkipped('У root права на файл не отнять');
+        }
+
+        $client = $this->client();
+        $this->attachLog($client, $this->item($client, $this->osvService), 'осв.xls');
+        $document = \App\Models\BuhTaskDocument::where('name', 'осв.xls')->firstOrFail();
+        $file = Storage::disk('local')->path($document->path);
+        chmod($file, 0000);
+
+        try {
+            $this->expectException(\RuntimeException::class);
+            $this->expectExceptionMessage('Нет прав на чтение файлов документов');
+            $this->runAudit();
+        } finally {
+            chmod($file, 0644);
+        }
+    }
+
+    /**
      * Оборота в ведомости нет, и в документе тоже ноль.
      *
      * Раньше это было «Совпало»: 1С не печатает счёт без оборотов, и ноль слева считался

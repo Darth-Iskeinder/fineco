@@ -7,6 +7,7 @@ use App\Models\AutoAuditResult;
 use App\Services\AutoAudit\AutoAuditRunner;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
+use Throwable;
 
 /**
  * Прогон автоаудита по одной фирме из терминала.
@@ -36,8 +37,9 @@ class RunAutoAudit extends Command
             return self::FAILURE;
         }
 
-        // Без доступа к файлам прогон не упадёт, а честно запишет всем «Файл не открылся» и
-        // сотрёт настоящие результаты. Поэтому не начинаем вовсе.
+        // Быстрая проверка до начала работы. Её одной мало: на бою корень диска после chown
+        // принадлежит client и читается, а закрыты вложенные папки задач. Их проверяет сам
+        // прогон на каждом файле и падает, ничего не записав.
         $documents = Storage::disk('local')->path('');
 
         if (!is_readable($documents) || !is_executable($documents)) {
@@ -49,7 +51,15 @@ class RunAutoAudit extends Command
         }
 
         $started = microtime(true);
-        $counts  = RunAutoAuditJob::perform($tenant, $runner);
+
+        try {
+            $counts = RunAutoAuditJob::perform($tenant, $runner);
+        } catch (Throwable $e) {
+            // Состояние «упала» и журнал сбоев perform уже записал, здесь только сказать.
+            $this->error('Проверка не прошла: ' . $e->getMessage());
+
+            return self::FAILURE;
+        }
 
         if ($counts === null) {
             $this->error('По этой фирме уже идёт проверка: второй прогон не начат');

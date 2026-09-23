@@ -855,6 +855,16 @@ class AutoAuditRunner
         $path = Storage::disk('local')->path($document->path);
 
         if (!is_readable($path)) {
+            // Файл, до которого нет прав, снаружи выглядит так же, как удалённый. Но это
+            // поломка запуска, а не документа: прогон не от того пользователя честно записал бы
+            // всем «Файл не открылся» и стёр настоящие результаты. Так было на бою 23.09.2026.
+            if ($this->accessDenied($path)) {
+                throw new RuntimeException(
+                    "Нет прав на чтение файлов документов (первый: «{$document->name}»). "
+                    . 'Запускайте проверку от пользователя веб-сервера (www-data). Прошлые результаты не тронуты',
+                );
+            }
+
             return DocumentValue::unreadable('Файла нет на диске');
         }
 
@@ -874,6 +884,27 @@ class AutoAuditRunner
             // Один кривой файл не должен ронять проверку всей фирмы.
             return DocumentValue::unreadable(class_basename($e) . ': ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Файл не читается из-за прав, а не потому, что его нет.
+     *
+     * Сам файл в закрытой папке не виден вовсе, поэтому идём вверх до первой папки, которая
+     * существует. Войти в неё нельзя, значит, дело в правах. Можно, значит, файла и правда нет.
+     */
+    private function accessDenied(string $path): bool
+    {
+        if (file_exists($path)) {
+            return true;
+        }
+
+        $dir = dirname($path);
+
+        while (!file_exists($dir) && dirname($dir) !== $dir) {
+            $dir = dirname($dir);
+        }
+
+        return !is_executable($dir);
     }
 
     /** Откуда взято число: по этому человек откроет файл и проверит вывод сам. */
