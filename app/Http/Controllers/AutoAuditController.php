@@ -9,6 +9,7 @@ use App\Services\AutoAudit\AutoAuditRunner;
 use App\Support\Impersonation;
 use App\Support\TenantContext;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\View\View;
@@ -41,10 +42,12 @@ class AutoAuditController extends Controller
     {
         $this->allowedOnly();
 
-        $all = AutoAuditResult::with('client:id,name')->get();
-
-        // Периоды от свежих к старым: первый в списке и показываем по умолчанию.
-        $periods = $all
+        // Список периодов из базы, а строки только выбранного: история растёт с каждым
+        // месяцем, и тянуть её в память целиком ради одного периода незачем.
+        $periods = AutoAuditResult::query()
+            ->select(['period_from', 'period_to'])
+            ->distinct()
+            ->get()
             ->sortByDesc(fn (AutoAuditResult $r) => [$r->period_to?->timestamp, $r->period_from?->timestamp])
             ->mapWithKeys(fn (AutoAuditResult $r) => [$r->periodKey() => $r->periodLabel()])
             ->all();
@@ -67,8 +70,7 @@ class AutoAuditController extends Controller
             $status = null;
         }
 
-        $inPeriodAndRule = $all
-            ->filter(fn (AutoAuditResult $r) => $r->periodKey() === $period)
+        $inPeriodAndRule = $this->inPeriod($period)
             // «Нет документа» бывает общим для нескольких проверок: строка видна под каждой.
             ->filter(fn (AutoAuditResult $r) => $rule === null || in_array((int) $rule, $r->ruleNumbers(), true));
 
@@ -87,12 +89,30 @@ class AutoAuditController extends Controller
             'status'        => $status,
             // Счётчики без фильтра статуса: иначе при выборе одного статуса остальные обнулятся.
             'counts'        => $inPeriodAndRule->countBy('outcome'),
-            'checkedAt'     => $all->max('created_at'),
+            'checkedAt'     => AutoAuditResult::query()->latest('created_at')->value('created_at'),
             'state'         => $state,
             'running'       => $this->isRunning($state),
             'vendor'        => Impersonation::isActive(),
             'openToManager' => (bool) Tenant::find(TenantContext::id())?->autoAuditEnabled(),
         ]);
+    }
+
+    /**
+     * Строки одного периода. Ключ «2026-07-01..2026-07-31»; у строки с неразобранным
+     * периодом обе даты пустые, и ключ тогда «..».
+     */
+    private function inPeriod(?string $period): Collection
+    {
+        if ($period === null) {
+            return new Collection();
+        }
+
+        [$from, $to] = explode('..', $period, 2);
+
+        return AutoAuditResult::with('client:id,name')
+            ->when($from === '', fn ($q) => $q->whereNull('period_from'), fn ($q) => $q->whereDate('period_from', $from))
+            ->when($to === '', fn ($q) => $q->whereNull('period_to'), fn ($q) => $q->whereDate('period_to', $to))
+            ->get();
     }
 
     private function allowedOnly(): void

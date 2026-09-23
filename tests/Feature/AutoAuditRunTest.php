@@ -395,9 +395,11 @@ class AutoAuditRunTest extends TestCase
             ->assertSeeInOrder([
                 '№4 Начисленный доход сходится с учётом',
                 $client->name,
-                'ОСВ, задача за 08.2026',
+                'Задача за 08.2026',
+                'ОСВ',
                 'Админ А.',
-                'Форма 161, задача за 08.2026',
+                'Задача за 08.2026',
+                'Форма 161',
                 'Админ А.',
                 'Совпало',
             ]);
@@ -1145,7 +1147,7 @@ class AutoAuditRunTest extends TestCase
         $this->asVendor()
             ->get(route('auto-audit.index'))
             ->assertOk()
-            ->assertSee('Отчётный период')
+            ->assertSee('Период')
             ->assertSee('№1 Налоговая база сходится с учётом')
             ->assertSee('№3 Начисленный единый налог сходится с учётом')
             ->assertSee($client->name)
@@ -1275,8 +1277,8 @@ class AutoAuditRunTest extends TestCase
             ->assertOk()
             ->assertSee($mismatch->name)
             ->assertDontSee($matched->name)
-            ->assertSee('Совпало: 1;')
-            ->assertSee('Не совпало: 1;');
+            ->assertSee('data-status="matched" data-count="1"', false)
+            ->assertSee('data-status="mismatch" data-count="1"', false);
 
         // Совпавшие по №3: у обоих клиентов налог сошёлся.
         $this->asVendor()->get(route('auto-audit.index', ['rule' => '3', 'status' => AutoAuditResult::MATCHED]))
@@ -1305,7 +1307,7 @@ class AutoAuditRunTest extends TestCase
 
         $this->asVendor()->get(route('auto-audit.index'))
             ->assertOk()
-            ->assertSee('Не удалось проверить: 1;');
+            ->assertSee('data-status="unverified" data-count="1"', false);
 
         // Фильтр по новому статусу оставляет только его строку.
         $this->asVendor()->get(route('auto-audit.index', ['status' => AutoAuditResult::UNVERIFIED]))
@@ -1329,8 +1331,10 @@ class AutoAuditRunTest extends TestCase
         $this->assertSame(2, $state['counts'][AutoAuditResult::MATCHED]);
         $this->assertCount(2, AutoAuditResult::all());
 
+        // Дата данных видна, а служебная длительность прогона на странице больше не пишется.
         $this->asVendor()->get(route('auto-audit.index'))
-            ->assertSee('заняла')
+            ->assertSee('Данные на')
+            ->assertDontSee('заняла')
             ->assertDontSee('Идёт проверка');
     }
 
@@ -1418,7 +1422,17 @@ class AutoAuditRunTest extends TestCase
 
         $this->asVendor()->get(route('auto-audit.index'))
             ->assertOk()
-            ->assertSee('Последняя проверка упала и не записала результаты: Не хватило памяти');
+            ->assertSee('Последняя проверка не прошла, ниже результаты предыдущей.')
+            ->assertSee('Причина: Не хватило памяти');
+
+        // Руководителю техническая причина ни к чему: он её не починит.
+        $this->tenant->setAutoAuditEnabled(true);
+        $this->flushSession();
+
+        $this->actingAs($this->employee(Role::MANAGER), 'employee')->get(route('auto-audit.index'))
+            ->assertOk()
+            ->assertSee('Последняя проверка не прошла, ниже результаты предыдущей.')
+            ->assertDontSee('Не хватило памяти');
     }
 
     /**
@@ -1718,6 +1732,31 @@ class AutoAuditRunTest extends TestCase
 
         $this->asVendor()->get(route('auto-audit.index'))
             ->assertSee('Руководитель фирмы видит эту страницу.');
+    }
+
+    /**
+     * Строки с неразобранным периодом находятся своим пунктом в списке периодов.
+     *
+     * Страница берёт из базы только выбранный период, и пустые даты ищутся отдельно: простое
+     * сравнение с пустой строкой их бы не нашло.
+     */
+    public function test_rows_without_a_period_are_reachable(): void
+    {
+        $client = $this->client(['name' => 'ООО Без периода ' . uniqid()]);
+
+        AutoAuditResult::create([
+            'client_id' => $client->id, 'rule' => '1', 'outcome' => AutoAuditResult::UNREADABLE,
+            'reason' => 'Файл не открылся', 'sources' => [],
+        ]);
+
+        $this->asVendor()->get(route('auto-audit.index'))
+            ->assertOk()
+            ->assertSee('период не разобран')
+            ->assertSee($client->name);
+
+        $this->asVendor()->get(route('auto-audit.index', ['period' => '..']))
+            ->assertOk()
+            ->assertSee($client->name);
     }
 
     /** Имя файла открывает окно просмотра прямо на странице, а не скачивание. */

@@ -17,29 +17,52 @@
         AutoAuditResult::UNREADABLE       => 'bg-slate-100 text-slate-600',
     ];
 
+    // Цвет точки на плитке-счётчике: та же гамма, что у плашек статуса в таблице.
+    $statusDots = [
+        AutoAuditResult::MATCHED          => 'bg-emerald-600',
+        AutoAuditResult::MISMATCH         => 'bg-red-600',
+        AutoAuditResult::UNVERIFIED       => 'bg-orange-500',
+        AutoAuditResult::MISSING_DOCUMENT => 'bg-amber-600',
+        AutoAuditResult::WRONG_DOCUMENT   => 'bg-amber-600',
+        AutoAuditResult::SCAN             => 'bg-slate-300',
+        AutoAuditResult::UNREADABLE       => 'bg-slate-300',
+    ];
+
+    // Подсказка при наведении на плитку: что значит статус и что с ним делать.
+    $statusHints = [
+        AutoAuditResult::MATCHED          => 'Суммы в двух документах сошлись',
+        AutoAuditResult::MISMATCH         => 'Суммы разошлись. Нужно пояснение бухгалтера',
+        AutoAuditResult::UNVERIFIED       => 'Система не уверена в числах и вердикт не выносит. Сверить глазами',
+        AutoAuditResult::MISSING_DOCUMENT => 'Задача закрыта, а нужного документа к ней не приложили',
+        AutoAuditResult::WRONG_DOCUMENT   => 'К задаче приложен не тот документ или документ другой фирмы',
+        AutoAuditResult::SCAN             => 'Приложен скан или фото, система такие не читает',
+        AutoAuditResult::UNREADABLE       => 'Файл повреждён или пропал',
+    ];
+
     $money = fn ($value) => $value === null ? '' : number_format((float) $value, 2, ',', ' ');
 @endphp
 
 <div class="space-y-4" x-data="autoAuditDocs()" @keydown.escape.window="closeDocViewer()">
 
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50">
-        <div class="px-6 py-4 flex items-start justify-between flex-wrap gap-4">
-            <div>
-                <h2 class="text-lg font-semibold text-slate-800">Автоаудит</h2>
-                @if ($vendor)
-                    {{-- Подсказка вендору: руководитель видит то же самое или нет. --}}
-                    <p class="text-sm text-slate-500 mt-0.5">
-                        {{ $openToManager ? 'Руководитель фирмы видит эту страницу.' : 'Руководитель фирмы эту страницу пока не видит.' }}
-                    </p>
+        <div class="px-6 py-4">
+            <p class="text-sm text-slate-600">
+                Система сама сверяет суммы в документах, которые бухгалтеры прикладывают к задачам.
+                «Не совпало» не значит ошибку: это повод попросить у бухгалтера пояснение.
+            </p>
+            <p class="text-sm text-slate-500 mt-1">
+                @if ($checkedAt)
+                    Данные на {{ $checkedAt->format('d.m.Y H:i') }}
+                @else
+                    Проверок пока не было
                 @endif
-                <p class="text-sm text-slate-500 mt-0.5">
-                    @if ($checkedAt)
-                        Последняя проверка: {{ $checkedAt->format('d.m.Y H:i') }}@if (($state['status'] ?? null) === \App\Jobs\RunAutoAuditJob::DONE && isset($state['seconds'])), заняла {{ $state['seconds'] }} с@endif
-                    @else
-                        Проверки ещё не было
-                    @endif
+            </p>
+            @if ($vendor)
+                {{-- Подсказка вендору: руководитель видит то же самое или нет. --}}
+                <p class="text-xs text-slate-400 mt-1">
+                    {{ $openToManager ? 'Руководитель фирмы видит эту страницу.' : 'Руководитель фирмы эту страницу пока не видит.' }}
                 </p>
-            </div>
+            @endif
         </div>
 
         @if ($running)
@@ -51,15 +74,21 @@
             <script>setTimeout(() => window.location.reload(), 15000);</script>
         @elseif (($state['status'] ?? null) === \App\Jobs\RunAutoAuditJob::FAILED)
             <div class="mx-6 mb-4 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
-                Последняя проверка упала и не записала результаты: {{ $state['error'] ?? 'причина неизвестна' }}.
-                Ниже результаты предыдущей проверки.
+                Последняя проверка не прошла, ниже результаты предыдущей.
+                @if ($vendor)
+                    Причина: {{ $state['error'] ?? 'неизвестна' }}.
+                @endif
             </div>
         @endif
 
         @if ($periods)
             <div class="px-6 pb-4">
                 <form method="GET" action="{{ route('auto-audit.index') }}" class="flex items-center flex-wrap gap-3">
-                    <label for="period" class="text-sm font-medium text-slate-700">Отчётный период</label>
+                    @if ($status)
+                        <input type="hidden" name="status" value="{{ $status }}">
+                    @endif
+                    <label for="period" class="text-sm font-medium text-slate-700"
+                           title="Период, за который составлены документы. Отчёт за июль сдают в августе, и он здесь в июле.">Период</label>
                     <select id="period" name="period" onchange="this.form.submit()"
                             class="rounded-lg border border-slate-200 text-sm px-3 py-2">
                         @foreach ($periods as $key => $label)
@@ -74,24 +103,30 @@
                             <option value="{{ $number }}" @selected($rule === (string) $number)>№{{ $number }} {{ $definition['name'] }}</option>
                         @endforeach
                     </select>
-                    <label for="status" class="text-sm font-medium text-slate-700">Статус</label>
-                    <select id="status" name="status" onchange="this.form.submit()"
-                            class="rounded-lg border border-slate-200 text-sm px-3 py-2">
-                        <option value="">Все статусы</option>
-                        @foreach (AutoAuditResult::LABELS as $outcome => $label)
-                            <option value="{{ $outcome }}" @selected($status === $outcome)>{{ $label }}</option>
-                        @endforeach
-                    </select>
-                    <span class="text-sm text-slate-500">
-                        @foreach (AutoAuditResult::LABELS as $outcome => $label)
-                            {{ $label }}: {{ $counts[$outcome] ?? 0 }}{{ $loop->last ? '' : ';' }}
-                        @endforeach
-                    </span>
                 </form>
-                <p class="text-xs text-slate-400 mt-2">
-                    Период, за который составлены документы, а не месяц задачи: отчёт за июль сдают в августе, и он здесь в июле.
-                    Если файла нет или его не прочитать, период взят по задаче: месяц перед ней.
-                </p>
+            </div>
+
+            {{-- Плитки-счётчики, как на странице руководителя. Клик выбирает статус, повторный
+                 клик по выбранной снимает фильтр. Цвет несёт точка, цифры чернильные. --}}
+            <div class="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-px bg-slate-100 border-t border-slate-100 rounded-b-2xl overflow-hidden">
+                @php $filters = array_filter(['period' => $period, 'rule' => $rule]); @endphp
+                <a href="{{ route('auto-audit.index', $filters) }}"
+                   @class(['flex flex-col justify-between px-4 py-3 transition-colors', 'bg-indigo-50' => $status === null, 'bg-white hover:bg-slate-50' => $status !== null])>
+                    <div class="text-[13px] text-slate-500">Все</div>
+                    <div class="mt-1 text-2xl leading-none font-semibold text-slate-900">{{ $counts->sum() }}</div>
+                </a>
+                @foreach (AutoAuditResult::LABELS as $outcome => $label)
+                    @php $count = $counts[$outcome] ?? 0; @endphp
+                    <a href="{{ route('auto-audit.index', $status === $outcome ? $filters : $filters + ['status' => $outcome]) }}"
+                       title="{{ $statusHints[$outcome] ?? '' }}" data-status="{{ $outcome }}" data-count="{{ $count }}"
+                       @class(['flex flex-col justify-between px-4 py-3 transition-colors', 'bg-indigo-50' => $status === $outcome, 'bg-white hover:bg-slate-50' => $status !== $outcome])>
+                        <div class="flex items-center gap-1.5 text-[13px] text-slate-500">
+                            <span class="w-2 h-2 rounded-full flex-shrink-0 {{ $statusDots[$outcome] ?? 'bg-slate-300' }}"></span>
+                            {{ $label }}
+                        </div>
+                        <div @class(['mt-1 text-2xl leading-none font-semibold', 'text-slate-900' => $count > 0, 'text-slate-300' => $count === 0])>{{ $count }}</div>
+                    </a>
+                @endforeach
             </div>
         @endif
     </div>
@@ -99,7 +134,7 @@
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-x-auto">
         @if ($results->isEmpty())
             <p class="px-6 py-10 text-center text-sm text-slate-500">
-                Результатов нет.
+                {{ $periods ? 'Под выбранные фильтры строк нет.' : 'Проверок пока не было.' }}
             </p>
         @else
             <table class="min-w-full text-sm">
@@ -129,7 +164,7 @@
                                 {{ $result->periodLabel() }}
                                 {{-- Период не из документа, а по задаче: это надо видеть. --}}
                                 @if ($result->periodFromTask())
-                                    <p class="text-xs text-slate-400">по месяцу задачи</p>
+                                    <p class="text-xs text-slate-400" title="Документ не прочитан, поэтому период взят по задаче: месяц перед ней">по месяцу задачи</p>
                                 @endif
                             </td>
                             <td class="px-4 py-3 text-right whitespace-nowrap">{{ $money($result->left_value) }}</td>
@@ -142,7 +177,8 @@
                                 @foreach ($result->sources ?? [] as $source)
                                     @php $documentUrl = route('documents.task', $source['document_id']); @endphp
                                     <div>
-                                        <span class="text-slate-400">{{ $source['label'] ?? ($source['side'] === 'osv' ? 'ОСВ' : 'Отчёт') }}, задача за {{ $source['task_month'] }}@if (!empty($source['employee'])), <span class="font-medium text-slate-500">{{ $source['employee'] }}</span>@endif:</span>
+                                        {{-- Месяц задачи нужен редко: при наведении, чтобы не шуметь в каждой строке. --}}
+                                        <span class="text-slate-400" title="Задача за {{ $source['task_month'] }}">{{ $source['label'] ?? ($source['side'] === 'osv' ? 'ОСВ' : 'Отчёт') }}@if (!empty($source['employee'])), <span class="font-medium text-slate-500">{{ $source['employee'] }}</span>@endif:</span>
                                         {{-- Клик открывает просмотр на этой же странице. Ctrl-клик и средняя кнопка открывают вкладку, как у обычной ссылки. --}}
                                         <a href="{{ $documentUrl }}" target="_blank"
                                            @click="openDocFromLink($event, @js(['name' => $source['name'], 'url' => $documentUrl]))"
@@ -160,7 +196,14 @@
                                     {{ AutoAuditResult::LABELS[$result->outcome] ?? $result->outcome }}
                                 </span>
                                 @if ($result->reason)
-                                    <p class="mt-1 text-xs text-slate-500">{{ $result->reason }}</p>
+                                    {{-- Причина часто начинается словами плашки, «Не удалось проверить: …». Второй раз их не пишем. --}}
+                                    @php
+                                        $label  = AutoAuditResult::LABELS[$result->outcome] ?? '';
+                                        $reason = $label !== '' && str_starts_with($result->reason, $label . ': ')
+                                            ? mb_substr($result->reason, mb_strlen($label) + 2)
+                                            : $result->reason;
+                                    @endphp
+                                    <p class="mt-1 text-xs text-slate-500">{{ mb_strtoupper(mb_substr($reason, 0, 1)) . mb_substr($reason, 1) }}</p>
                                 @endif
                             </td>
                         </tr>
