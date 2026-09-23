@@ -24,6 +24,9 @@ class Tenant extends Model
     /** Служебный аккаунт-образец: в него не входят, из него копируют. */
     public const STATUS_TEMPLATE = 'template';
 
+    /** Ключ в settings: страница автоаудита открыта руководителю фирмы. */
+    public const SETTING_AUTO_AUDIT = 'auto_audit';
+
     protected $fillable = [
         'name', 'slug', 'status', 'plan', 'settings', 'is_template',
         // Профиль фирмы: правится в настройках, уходит в акты и сметы.
@@ -84,6 +87,27 @@ class Tenant extends Model
     public function documentName(): string
     {
         return $this->legal_name ?: $this->name;
+    }
+
+    /**
+     * Видит ли руководитель фирмы страницу автоаудита.
+     *
+     * Канарейка: открываем фирмам по одной, начиная с Fineco. Включает и выключает
+     * вендор командой autoaudit:access, без выкатки кода.
+     */
+    public function autoAuditEnabled(): bool
+    {
+        return (bool) ($this->settings[self::SETTING_AUTO_AUDIT] ?? false);
+    }
+
+    /**
+     * Меняем только свой ключ: в settings могут лежать и другие настройки фирмы,
+     * их нельзя затереть.
+     */
+    public function setAutoAuditEnabled(bool $enabled): void
+    {
+        $this->settings = array_merge($this->settings ?? [], [self::SETTING_AUTO_AUDIT => $enabled]);
+        $this->save();
     }
 
     /** Образец, из которого новые аккаунты получают стартовый набор. */
