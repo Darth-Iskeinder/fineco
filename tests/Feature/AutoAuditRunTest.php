@@ -15,6 +15,7 @@ use App\Models\Periodicity;
 use App\Models\Role;
 use App\Models\Service;
 use App\Models\Tenant;
+use App\Services\AutoAudit\AutoAuditQuestions;
 use App\Services\AutoAudit\AutoAuditRunner;
 use App\Services\AutoAudit\BalanceSheetReader;
 use App\Services\AutoAudit\DocumentPeriod;
@@ -23,6 +24,7 @@ use App\Services\AutoAudit\SingleTaxReportReader;
 use App\Support\TenantContext;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
+use Illuminate\Http\UploadedFile;
 use App\Jobs\RunAutoAuditJob;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -251,8 +253,13 @@ class AutoAuditRunTest extends TestCase
         $this->assertSame('июль 2026', $row->periodLabel());
         $this->assertTrue($row->periodFromTask());
         $this->assertStringContainsString('за 08.2026: исполнитель Админ автоаудита, закрыта 05.08.2026 без файла', $row->reason);
-        $this->assertSame(['отчёт.pdf'], array_column($row->sources, 'name'));
-        $this->assertNull($row->sources[0]['value']);
+        // Первой идёт сама задача без файла: по ней видно, чья она. Файла у неё нет.
+        $this->assertSame([null, 'отчёт.pdf'], array_column($row->sources, 'name'));
+        $this->assertSame(AutoAuditRunner::SOURCE_MISSING, $row->sources[0]['status']);
+        $this->assertSame('osv', $row->sources[0]['side']);
+        $this->assertSame(BuhTaskLog::whereDoesntHave('documents')->sole()->id, $row->sources[0]['log_id']);
+        $this->assertNull($row->sources[0]['document_id']);
+        $this->assertNull($row->sources[1]['value']);
 
         $this->asVendor()->get(route('auto-audit.index'))
             ->assertSeeInOrder([
@@ -260,6 +267,7 @@ class AutoAuditRunTest extends TestCase
                 '№3 Начисленный единый налог сходится с учётом',
                 $client->name,
                 'по месяцу задачи',
+                'файл не приложен',
                 'отчёт.pdf',
                 'Нет документа',
             ]);
@@ -526,7 +534,8 @@ class AutoAuditRunTest extends TestCase
         $missing = $results->firstWhere('outcome', AutoAuditResult::MISSING_DOCUMENT);
         $this->assertSame([4, 5, 6, 7], $missing->ruleNumbers());
         $this->assertStringContainsString('Форма 161 и зарплатные налоги', $missing->reason);
-        $this->assertSame(['осв.xls'], array_column($missing->sources, 'name'));
+        $this->assertSame([null, 'осв.xls'], array_column($missing->sources, 'name'));
+        $this->assertSame('f161', $missing->sources[0]['side']);
     }
 
     /** Нет ведомости: ломаются все проверки клиента, в том числе проверки по форме 161. */
@@ -2406,6 +2415,386 @@ class AutoAuditRunTest extends TestCase
         $this->assertSame(AutoAuditResult::MISMATCH, $mismatch->outcome);
 
         return [$client, $mismatch];
+    }
+
+    // ─── Вопросы бухгалтеру (этап 3) ─────────────────────────────────────────────
+
+    /** «Не совпало»: вопрос обоим исполнителям, и каждый может заменить только свой файл. */
+    public function test_mismatch_question_goes_to_both_executors(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        [$osvDoer, $taxDoer] = [$this->accountant(), $this->accountant()];
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 150.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $this->ownedBy('осв.xls', $osvDoer);
+        $this->ownedBy('отчёт.pdf', $taxDoer);
+        $this->runAudit();
+
+        $questions = app(AutoAuditQuestions::class);
+
+        $osvQuestions = $questions->forEmployee($osvDoer);
+        $this->assertCount(1, $osvQuestions);
+        $this->assertSame([$this->logOf('осв.xls')->id], $osvQuestions->first()['fixable']->pluck('id')->all());
+
+        $taxQuestions = $questions->forEmployee($taxDoer);
+        $this->assertCount(1, $taxQuestions);
+        $this->assertSame([$this->logOf('отчёт.pdf')->id], $taxQuestions->first()['fixable']->pluck('id')->all());
+
+        // Ответственный за клиента (здесь админ) вопроса не получает: исполнители на месте.
+        $this->assertCount(0, $questions->forEmployee($this->admin));
+
+        $page = $this->actingAs($osvDoer, 'employee')->get(route('buhtasks.index'))->assertOk()->getContent();
+        $onPage = $this->auditQuestionsOnPage($page);
+        $this->assertCount(1, $onPage);
+        $this->assertSame('№1 Налоговая база сходится с учётом', $onPage[0]['rules'][0]);
+        $this->assertSame($client->name, $onPage[0]['client_name']);
+        $this->assertSame('replace', $onPage[0]['fix'][0]['action']);
+    }
+
+    /** «Нет документа»: вопрос тому, кто закрыл задачу без файла, и файл можно приложить. */
+    public function test_missing_document_question_goes_to_who_closed_the_task(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $doer   = $this->accountant();
+        $client = $this->client();
+        $log    = $this->closeWithoutFile($client, $this->osvService);
+        $log->update(['employee_id' => $doer->id]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $this->runAudit();
+
+        $question = app(AutoAuditQuestions::class)->forEmployee($doer)->sole();
+        $front    = app(AutoAuditQuestions::class)->toFront($question);
+
+        $this->assertSame([['log_id' => $log->id, 'label' => 'ОСВ за 08.2026', 'action' => 'attach', 'files' => []]], $front['fix']);
+        $this->assertCount(0, app(AutoAuditQuestions::class)->forEmployee($this->admin));
+    }
+
+    /** Исполнитель уволен: вопрос уходит ответственному за клиента, но чужой файл он не трогает. */
+    public function test_question_of_a_fired_executor_goes_to_the_responsible(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $fired  = $this->accountant();
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 150.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $this->ownedBy('осв.xls', $fired);
+        $this->ownedBy('отчёт.pdf', $fired);
+        $this->runAudit();
+        $fired->delete();
+
+        $question = app(AutoAuditQuestions::class)->forEmployee($this->admin)->sole();
+        $this->assertCount(0, $question['fixable']);
+
+        $this->actingAs($this->admin, 'employee')
+            ->postJson(route('buhtasks.audit-questions.fix', $question['finding']), [
+                'result_id' => $question['result']->id,
+                'log_id'    => $this->logOf('осв.xls')->id,
+                'file'      => UploadedFile::fake()->create('осв-новая.xls', 5),
+            ])
+            ->assertForbidden();
+        $this->assertSame(0, AutoAuditFindingMessage::count());
+    }
+
+    /** Объяснение уходит руководителю, вопрос пропадает у бухгалтера. «Не принято» его возвращает. */
+    public function test_explanation_goes_to_the_manager_and_rejection_brings_it_back(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $doer = $this->accountant();
+        [, $mismatch] = $this->mismatchRow();
+        $this->ownedBy('осв.xls', $doer);
+        $this->ownedBy('отчёт.pdf', $doer);
+        $finding = AutoAuditFinding::sole();
+
+        $this->actingAs($doer, 'employee')
+            ->postJson(route('buhtasks.audit-questions.explain', $finding), ['result_id' => $mismatch->id, 'body' => ''])
+            ->assertUnprocessable();
+
+        $this->actingAs($doer, 'employee')
+            ->postJson(route('buhtasks.audit-questions.explain', $finding), ['result_id' => $mismatch->id, 'body' => 'Возврат покупателю'])
+            ->assertOk()
+            ->assertJson(['success' => true]);
+
+        $message = AutoAuditFindingMessage::sole();
+        $this->assertSame(AutoAuditFindingMessage::EXPLAINED, $message->kind);
+        $this->assertSame($doer->id, $message->employee_id);
+        $this->assertCount(0, app(AutoAuditQuestions::class)->forEmployee($doer));
+
+        $this->asVendor()->get(route('auto-audit.index'))
+            ->assertSee('Возврат покупателю')
+            ->assertSee('Объяснил')
+            ->assertSee('Без ответа: 0');
+
+        $this->asVendor()->post(route('auto-audit.findings.reject', $finding), ['result_id' => $mismatch->id, 'body' => 'Приложите акт возврата']);
+
+        $front = app(AutoAuditQuestions::class)->toFront(app(AutoAuditQuestions::class)->forEmployee($doer)->sole());
+        $this->assertSame('Приложите акт возврата', $front['rejection']['body']);
+    }
+
+    /**
+     * Замена файла: задача остаётся закрытой с той же датой, файл строки заменён, прочие
+     * файлы задачи на месте.
+     */
+    public function test_replacing_a_file_keeps_the_task_closed(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $doer = $this->accountant();
+        [, $mismatch] = $this->mismatchRow();
+        $this->ownedBy('осв.xls', $doer);
+        $this->ownedBy('отчёт.pdf', $doer);
+
+        $log = $this->logOf('осв.xls');
+        $log->update(['completed_at' => '2026-08-05 10:00:00']);
+        $extra = $log->documents()->create(['path' => "buh_task_documents/{$log->id}/пояснение.pdf", 'name' => 'пояснение.pdf']);
+        $old   = $log->documents()->where('name', 'осв.xls')->sole();
+
+        $this->actingAs($doer, 'employee')
+            ->post(route('buhtasks.audit-questions.fix', AutoAuditFinding::sole()), [
+                'result_id' => $mismatch->id,
+                'log_id'    => $log->id,
+                'file'      => UploadedFile::fake()->create('осв-исправленная.xls', 5),
+            ], ['Accept' => 'application/json'])
+            ->assertOk()
+            ->assertJson(['success' => true]);
+
+        $log->refresh();
+        $this->assertSame('completed', $log->status);
+        $this->assertSame('2026-08-05 10:00:00', $log->completed_at->format('Y-m-d H:i:s'));
+        $this->assertNull(BuhTaskDocument::find($old->id));
+        Storage::disk('local')->assertMissing($old->path);
+        $this->assertNotNull(BuhTaskDocument::find($extra->id));
+        $this->assertSame(['пояснение.pdf', 'осв-исправленная.xls'], $log->documents()->orderBy('id')->pluck('name')->all());
+
+        $message = AutoAuditFindingMessage::sole();
+        $this->assertSame(AutoAuditFindingMessage::FIXED, $message->kind);
+        $this->assertSame('Заменил «осв.xls» на «осв-исправленная.xls»', $message->body);
+        $this->assertCount(0, app(AutoAuditQuestions::class)->forEmployee($doer));
+
+        $this->asVendor()->get(route('auto-audit.index'))->assertSee('Файл заменён, ждёт следующей проверки');
+    }
+
+    /** Заменил, а прогон показал то же: вопрос возвращается с пометкой. Помогло: закрывается. */
+    public function test_fix_that_did_not_help_brings_the_question_back(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $doer = $this->accountant();
+        [, $mismatch] = $this->mismatchRow();
+        $this->ownedBy('осв.xls', $doer);
+        $this->ownedBy('отчёт.pdf', $doer);
+
+        $this->actingAs($doer, 'employee')->post(route('buhtasks.audit-questions.fix', AutoAuditFinding::sole()), [
+            'result_id' => $mismatch->id,
+            'log_id'    => $this->logOf('осв.xls')->id,
+            'file'      => UploadedFile::fake()->create('осв-2.xls', 5),
+        ], ['Accept' => 'application/json'])->assertOk();
+
+        // Новый файл с теми же числами.
+        $stored = basename($this->logOf('осв-2.xls')->documents()->sole()->path);
+        $this->sheets[$stored] = $this->sheets['осв.xls'];
+        $this->travel(1)->minutes();
+        $this->runAudit();
+
+        $front = app(AutoAuditQuestions::class)->toFront(app(AutoAuditQuestions::class)->forEmployee($doer)->sole());
+        $this->assertTrue($front['fix_failed']);
+        $this->asVendor()->get(route('auto-audit.index'))->assertSee('всё ещё не сходится');
+
+        // Теперь числа сошлись: вопрос закрывается сам.
+        $this->sheets[$stored]['accounts']['3210'] = 100.00;
+        $this->runAudit();
+        $this->assertNotNull(AutoAuditFinding::sole()->closed_at);
+        $this->assertCount(0, app(AutoAuditQuestions::class)->forEmployee($doer));
+    }
+
+    /** К эталонному БП принимаем только PDF и Excel, как при обычной загрузке. */
+    public function test_fix_accepts_only_readable_formats(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $doer = $this->accountant();
+        [, $mismatch] = $this->mismatchRow();
+        $this->ownedBy('осв.xls', $doer);
+
+        $this->actingAs($doer, 'employee')->post(route('buhtasks.audit-questions.fix', AutoAuditFinding::sole()), [
+            'result_id' => $mismatch->id,
+            'log_id'    => $this->logOf('осв.xls')->id,
+            'file'      => UploadedFile::fake()->create('скан.jpg', 5),
+        ], ['Accept' => 'application/json'])->assertUnprocessable();
+
+        $this->assertSame(0, AutoAuditFindingMessage::count());
+        $this->assertSame(['осв.xls'], $this->logOf('осв.xls')->documents()->pluck('name')->all());
+    }
+
+    /** Между загрузкой страницы и ответом прошёл прогон и итог сменился: ответ не пишем. */
+    public function test_answer_to_a_changed_question_is_refused(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $doer = $this->accountant();
+        [, $mismatch] = $this->mismatchRow();
+        $this->ownedBy('осв.xls', $doer);
+
+        $this->sheets['осв.xls']['accounts']['3210'] = 170.00;
+        $this->runAudit();
+
+        $this->actingAs($doer, 'employee')
+            ->postJson(route('buhtasks.audit-questions.explain', AutoAuditFinding::sole()), ['result_id' => $mismatch->id, 'body' => 'так надо'])
+            ->assertStatus(409)
+            ->assertJson(['stale' => true]);
+        $this->assertSame(0, AutoAuditFindingMessage::count());
+    }
+
+    /** Ответить может только тот, кому задан вопрос. */
+    public function test_stranger_cannot_answer(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $doer = $this->accountant();
+        [, $mismatch] = $this->mismatchRow();
+        $this->ownedBy('осв.xls', $doer);
+        $this->ownedBy('отчёт.pdf', $doer);
+
+        $this->actingAs($this->accountant(), 'employee')
+            ->postJson(route('buhtasks.audit-questions.explain', AutoAuditFinding::sole()), ['result_id' => $mismatch->id, 'body' => 'чужое'])
+            ->assertForbidden();
+        $this->assertSame(0, AutoAuditFindingMessage::count());
+    }
+
+    /** Флаг выключен: бухгалтер вопросов не видит и ответить не может. */
+    public function test_questions_are_hidden_while_the_flag_is_off(): void
+    {
+        $doer = $this->accountant();
+        [, $mismatch] = $this->mismatchRow();
+        $this->ownedBy('осв.xls', $doer);
+
+        $page = $this->actingAs($doer, 'employee')->get(route('buhtasks.index'))->assertOk()->getContent();
+        $this->assertSame([], $this->auditQuestionsOnPage($page));
+
+        $this->actingAs($doer, 'employee')
+            ->postJson(route('buhtasks.audit-questions.explain', AutoAuditFinding::sole()), ['result_id' => $mismatch->id, 'body' => 'так'])
+            ->assertNotFound();
+    }
+
+    /** Вопрос чужой фирмы не открыть даже по прямому адресу. */
+    public function test_question_of_another_firm_is_not_reachable(): void
+    {
+        [, $mismatch] = $this->mismatchRow();
+        $finding = AutoAuditFinding::sole();
+
+        $other = Tenant::create([
+            'name'   => 'Соседняя фирма ' . uniqid(),
+            'slug'   => 'neighbour-' . uniqid(),
+            'status' => Tenant::STATUS_ACTIVE,
+        ]);
+        $other->setAutoAuditFindingsEnabled(true);
+        $stranger = TenantContext::for($other, fn () => $this->accountant());
+
+        $this->actingAs($stranger, 'employee')
+            ->postJson(route('buhtasks.audit-questions.explain', $finding), ['result_id' => $mismatch->id, 'body' => 'x'])
+            ->assertNotFound();
+        $this->assertSame(0, AutoAuditFindingMessage::count());
+    }
+
+    /**
+     * №1 и №3 не сошлись по одним и тем же файлам. Файл заменили в одном вопросе: второй
+     * тоже ждёт проверки и уходит из списка, иначе в нём висела бы ссылка на удалённый файл.
+     */
+    public function test_replacing_a_shared_file_answers_every_question_on_it(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $doer   = $this->accountant();
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 150.00, '3410' => 9.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $this->ownedBy('осв.xls', $doer);
+        $this->ownedBy('отчёт.pdf', $doer);
+        $this->runAudit();
+
+        $this->assertSame(2, AutoAuditFinding::count());
+        [$first, $second] = AutoAuditFinding::orderBy('id')->get()->all();
+        $result = AutoAuditResult::current()->get()->first(fn ($r) => $r->key() === $first->key);
+
+        $this->actingAs($doer, 'employee')->post(route('buhtasks.audit-questions.fix', $first), [
+            'result_id' => $result->id,
+            'log_id'    => $this->logOf('осв.xls')->id,
+            'file'      => UploadedFile::fake()->create('осв-новая.xls', 5),
+        ], ['Accept' => 'application/json'])
+            ->assertOk()
+            ->assertJson(['success' => true, 'also_fixed' => [$second->id]]);
+
+        $this->assertSame([AutoAuditFindingMessage::FIXED], $second->messages()->pluck('kind')->all());
+        $this->assertStringContainsString('в другом вопросе', $second->messages()->value('body'));
+        $this->assertCount(0, app(AutoAuditQuestions::class)->forEmployee($doer));
+        // Файл один, а не два: второй вопрос его не добавляет.
+        $this->assertSame(['осв-новая.xls'], $this->logOf('осв-новая.xls')->documents()->pluck('name')->all());
+    }
+
+    /** Объяснили, а потом цифры сменились: объяснение было про другое, вопрос снова ждёт. */
+    public function test_explanation_is_outdated_when_numbers_change(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $doer = $this->accountant();
+        [, $mismatch] = $this->mismatchRow();
+        $this->ownedBy('осв.xls', $doer);
+        $this->ownedBy('отчёт.pdf', $doer);
+
+        $this->actingAs($doer, 'employee')
+            ->postJson(route('buhtasks.audit-questions.explain', AutoAuditFinding::sole()), ['result_id' => $mismatch->id, 'body' => 'Возврат 50'])
+            ->assertOk();
+        $this->assertCount(0, app(AutoAuditQuestions::class)->forEmployee($doer));
+
+        $this->sheets['осв.xls']['accounts']['3210'] = 170.00;
+        $this->runAudit();
+
+        $front = app(AutoAuditQuestions::class)->toFront(app(AutoAuditQuestions::class)->forEmployee($doer)->sole());
+        $this->assertTrue($front['outdated']);
+
+        $this->asVendor()->get(route('auto-audit.index'))
+            ->assertSee('После объяснения цифры изменились')
+            ->assertSee('Без ответа: 1');
+    }
+
+    /** Сбой в данных автоаудита не роняет БухЗадачник: страница открывается без вопросов. */
+    public function test_broken_questions_do_not_break_the_task_page(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $doer = $this->accountant();
+
+        $this->app->instance(AutoAuditQuestions::class, new class extends AutoAuditQuestions {
+            public function forEmployee(Employee $employee): \Illuminate\Support\Collection
+            {
+                throw new \RuntimeException('битые данные автоаудита');
+            }
+        });
+
+        $page = $this->actingAs($doer, 'employee')->get(route('buhtasks.index'))->assertOk()->getContent();
+        $this->assertSame([], $this->auditQuestionsOnPage($page));
+    }
+
+    /** Вопросы, которые БухЗадачник отдал странице. */
+    private function auditQuestionsOnPage(string $html): array
+    {
+        $this->assertSame(1, preg_match('~<script type="application/json" id="audit-questions-data">(.*?)</script>~s', $html, $m));
+
+        return json_decode($m[1], true);
+    }
+
+    /** Бухгалтер с доступом к БухЗадачнику. */
+    private function accountant(): Employee
+    {
+        $employee = $this->employee(Role::ACCOUNTANT);
+        $module   = \App\Models\Module::firstOrCreate(['name' => 'buhtasks'], ['display_name' => 'БухЗадачник', 'is_active' => true]);
+        $employee->modules()->syncWithoutDetaching([$module->id]);
+
+        return $employee;
+    }
+
+    /** Задача, к которой приложен файл с таким именем. */
+    private function logOf(string $file): BuhTaskLog
+    {
+        return BuhTaskLog::whereHas('documents', fn ($q) => $q->where('name', $file))->sole();
+    }
+
+    /** Сделать исполнителем задачи с этим файлом другого сотрудника. */
+    private function ownedBy(string $file, Employee $employee): void
+    {
+        $this->logOf($file)->update(['employee_id' => $employee->id]);
     }
 
     private function performQuietly(AutoAuditRunner $runner): void

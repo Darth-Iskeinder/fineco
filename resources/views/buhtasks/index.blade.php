@@ -72,6 +72,9 @@
     </template>
 </div>
 
+{{-- Вопросы автоаудита к этому бухгалтеру. Отдельным блоком, а не аргументом buhTasks: у того
+     их и так тринадцать, и порядок легко перепутать. --}}
+<script type="application/json" id="audit-questions-data">@json($auditQuestions ?? [])</script>
 <div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($completed) }}, {{ json_encode($employees) }}, {{ $employee->id }}, {{ json_encode($catalog) }}, {{ json_encode($teamTasks) }}, {{ json_encode($teamMembers) }}, {{ json_encode($assignedTasks) }}, {{ (int) $assignedAlertCount }}, {{ (int) $assignedDoneDays }})" x-cloak>
 
     {{-- Шапка --}}
@@ -189,6 +192,19 @@
                 <span>Задачи бухгалтеров</span>
                 <span class="text-xs opacity-80" x-text="teamRows.length"></span>
             </button>
+
+            {{-- Вопросы автоаудита: они и так стоят первыми в списке, кнопка оставляет только их.
+                 Видна, только когда вопросы есть. --}}
+            <button type="button" x-show="auditQuestions.length > 0"
+                    @click="auditOnly = !auditOnly"
+                    :class="auditOnly
+                        ? 'bg-violet-600 text-white border-violet-600'
+                        : 'bg-white text-violet-700 border-violet-200 hover:bg-violet-50'"
+                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border text-sm font-medium transition-colors whitespace-nowrap">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                <span>Автоаудит</span>
+                <span class="text-xs opacity-80" x-text="auditQuestions.length"></span>
+            </button>
         </div>
 
         <button x-show="listFiltersActive" @click="resetListFilters()"
@@ -280,7 +296,7 @@
 
 
     {{-- Нет задач --}}
-    <div x-show="viewMode !== 'completed' && viewMode !== 'assigned' && tasks.length === 0"
+    <div x-show="viewMode !== 'completed' && viewMode !== 'assigned' && tasks.length === 0 && auditQuestions.length === 0"
          class="bg-white rounded-2xl border border-slate-200/50 shadow-sm px-6 py-16 text-center">
         <div class="w-14 h-14 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg class="w-7 h-7 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
@@ -289,12 +305,12 @@
     </div>
 
     {{-- Все задачи скрыты фильтром (только список — у чеклиста свои фильтры) --}}
-    <div x-show="viewMode === 'list' && tasks.length > 0 && visibleCount === 0"
+    <div x-show="viewMode === 'list' && tasks.length > 0 && !auditOnly && visibleCount === 0 && auditRows.length === 0"
          class="bg-white rounded-2xl border border-slate-200/50 shadow-sm px-6 py-10 text-center text-sm text-slate-400">
         Нет задач по выбранным фильтрам.
     </div>
 
-    <div x-show="viewMode === 'completed' || viewMode === 'assigned' || (viewMode === 'checklist' && tasks.length > 0) || (viewMode === 'list' && visibleCount > 0)"
+    <div x-show="viewMode === 'completed' || viewMode === 'assigned' || (viewMode === 'checklist' && tasks.length > 0) || (viewMode === 'list' && (visibleCount > 0 || auditRows.length > 0))"
          class="bg-white rounded-2xl border border-slate-200/50 shadow-sm overflow-hidden">
 
         {{-- ===== РЕЖИМ СПИСОК ===== --}}
@@ -328,6 +344,60 @@
                         ])
                     </tr>
                 </thead>
+                    {{-- Вопросы автоаудита: самой первой группой. Это не задачи: у них нет таймера
+                         и статуса, поэтому строка своя и живёт отдельно от tasks. Клик открывает
+                         окно, где можно объяснить или заменить файл. --}}
+                    <tbody x-show="auditRows.length > 0" class="divide-y divide-slate-100">
+                        <tr class="bg-violet-50/70 text-violet-700">
+                            <td colspan="8" class="px-4 py-2 text-xs font-semibold uppercase tracking-wider">
+                                <span>Автоаудит: вопросы по вашим задачам</span>
+                                <span class="opacity-70" x-text="'(' + auditRows.length + ')'"></span>
+                            </td>
+                        </tr>
+                        <template x-for="q in auditRows" :key="q.uid">
+                            <tr class="border-l-4 border-l-violet-400 bg-violet-50/30 hover:bg-violet-50/60 cursor-pointer"
+                                @click="openAuditQuestion(q)">
+                                <td class="px-4 py-3.5">
+                                    <div class="w-2 h-2 rounded-full mx-auto bg-violet-500"></div>
+                                </td>
+                                <td class="px-4 py-3.5 min-w-[14rem] max-w-[22rem]">
+                                    <div class="flex flex-wrap items-center gap-2 min-w-0">
+                                        <span class="text-sm font-medium text-slate-800 break-words" x-text="auditTitle(q)"></span>
+                                        <span x-show="q.rejection"
+                                              class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-rose-100 text-rose-700">ответ не принят</span>
+                                        <span x-show="q.fix_failed"
+                                              class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">после замены не сходится</span>
+                                        <span x-show="q.outdated"
+                                              class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700">цифры изменились</span>
+                                    </div>
+                                </td>
+                                <td class="px-4 py-3.5">
+                                    <span class="text-sm text-slate-600" x-text="q.client_name"></span>
+                                </td>
+                                <td class="px-4 py-3.5" x-show="showTeam"></td>
+                                <td class="px-4 py-3.5">
+                                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-violet-100 text-violet-700 w-fit">автоаудит</span>
+                                </td>
+                                <td class="px-4 py-3.5">
+                                    <span class="text-sm text-slate-700" x-text="q.period_label"></span>
+                                </td>
+                                <td class="hidden xl:table-cell px-4 py-3.5 max-w-0 w-full">
+                                    <div class="truncate text-sm text-slate-500" :title="q.reason" x-text="q.reason || '—'"></div>
+                                </td>
+                                <td class="px-4 py-3.5 whitespace-nowrap" x-show="!showTeam">
+                                    <span class="text-sm text-slate-500" x-text="auditDays(q)"></span>
+                                </td>
+                                <td class="sticky right-0 z-10 px-4 py-3.5 text-right whitespace-nowrap bg-[#faf8ff]"
+                                    style="box-shadow: -8px 0 8px -8px rgba(15, 23, 42, .10)">
+                                    <button type="button" @click.stop="openAuditQuestion(q)"
+                                            class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 text-white text-xs font-medium rounded-lg hover:bg-violet-700 transition-colors">
+                                        Ответить
+                                    </button>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+
                     {{-- Группы: сверху то, что горит. Заголовки появляются, только когда есть
                          просрочка или задачи на сегодня — в спокойный день список остаётся плоским. --}}
                     <template x-for="group in groupedTasks" :key="group.key">
@@ -596,7 +666,7 @@
             </table>
 
             {{-- Сентинел бесконечной прокрутки: догружает по 20 при приближении --}}
-            <div x-ref="loadMore" x-show="visibleLimit < visibleCount"
+            <div x-ref="loadMore" x-show="!auditOnly && visibleLimit < visibleCount"
                  class="flex items-center justify-center gap-2 py-4 text-xs text-slate-400">
                 <svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
                 <span x-text="'Показано ' + Math.min(visibleLimit, visibleCount) + ' из ' + visibleCount"></span>
@@ -1411,6 +1481,128 @@
         </div>
     </div>
 
+    {{-- ===== ВОПРОС АВТОАУДИТА ===== --}}
+    {{-- Что нашла проверка и два ответа: объяснить руководителю или заменить файл. Задача при
+         замене файла остаётся закрытой, дата выполнения не меняется. --}}
+    <div x-show="auditModal.show"
+         x-transition:enter="ease-out duration-200"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         class="fixed inset-0 z-[55] flex items-center justify-center bg-black/40 p-4"
+         @click.self="closeAuditQuestion()"
+         @keydown.escape.window="auditModal.show && closeAuditQuestion()"
+         style="display:none">
+        <template x-if="auditModal.q">
+            <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-full overflow-y-auto">
+                <div class="px-6 pt-5 pb-4 border-b border-slate-100">
+                    <div class="flex items-start justify-between gap-4">
+                        <div class="min-w-0">
+                            <p class="text-xs font-semibold text-violet-600 uppercase tracking-wider">Вопрос автоаудита</p>
+                            <h3 class="mt-1 text-base font-semibold text-slate-800" x-text="auditModal.q.client_name + ', ' + auditModal.q.period_label"></h3>
+                            <template x-for="rule in auditModal.q.rules" :key="rule">
+                                <p class="text-sm text-slate-500" x-text="rule"></p>
+                            </template>
+                        </div>
+                        <button type="button" @click="closeAuditQuestion()" title="Закрыть"
+                                class="flex-shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
+                            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="px-6 py-4 space-y-3 text-sm">
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold bg-red-50 text-red-700" x-text="auditModal.q.outcome_label"></span>
+                        <span class="text-slate-400" x-text="auditDays(auditModal.q)"></span>
+                    </div>
+
+                    <template x-if="auditModal.q.difference !== null">
+                        <div class="grid grid-cols-3 gap-2 rounded-xl bg-slate-50 px-3 py-2">
+                            <div><p class="text-xs text-slate-400">ОСВ</p><p class="font-medium text-slate-700" x-text="auditMoney(auditModal.q.left_value)"></p></div>
+                            <div><p class="text-xs text-slate-400">Документ</p><p class="font-medium text-slate-700" x-text="auditMoney(auditModal.q.right_value)"></p></div>
+                            <div><p class="text-xs text-slate-400">Разница</p><p class="font-semibold text-red-600" x-text="auditMoney(auditModal.q.difference)"></p></div>
+                        </div>
+                    </template>
+
+                    <p x-show="auditModal.q.reason" class="text-slate-600" x-text="auditModal.q.reason"></p>
+
+                    <div class="space-y-1">
+                        <template x-for="(src, i) in auditModal.q.sources" :key="i">
+                            <div class="text-xs">
+                                <span class="text-slate-400" x-text="src.label + (src.employee ? ', ' + src.employee : '') + ':'"></span>
+                                <template x-if="src.url">
+                                    <a :href="docTabUrl(src)" @click="openDocFromLink($event, src)" target="_blank"
+                                       class="text-indigo-600 hover:underline" x-text="src.name"></a>
+                                </template>
+                                <span x-show="!src.url" class="text-slate-500">файл не приложен</span>
+                                <span x-show="src.value !== null" class="text-slate-500" x-text="auditMoney(src.value)"></span>
+                            </div>
+                        </template>
+                    </div>
+
+                    <div x-show="auditModal.q.fix_failed" class="rounded-xl bg-amber-50 px-3 py-2 text-amber-800">
+                        Файл заменили, но после проверки всё ещё не сходится.
+                    </div>
+                    <div x-show="auditModal.q.outdated" class="rounded-xl bg-amber-50 px-3 py-2 text-amber-800">
+                        После вашего объяснения цифры изменились. Объясните ещё раз или замените файл.
+                    </div>
+
+                    <template x-if="auditModal.q.rejection">
+                        <div class="rounded-xl bg-rose-50 px-3 py-2">
+                            <p class="text-xs text-rose-500" x-text="'Ответ не принят, ' + auditModal.q.rejection.author + ', ' + auditModal.q.rejection.date"></p>
+                            <p class="text-rose-800 whitespace-pre-line" x-text="auditModal.q.rejection.body"></p>
+                        </div>
+                    </template>
+                </div>
+
+                <div class="px-6 pb-5">
+                    <div x-show="auditModal.q.fix.length > 0" class="flex items-center bg-slate-100 rounded-xl p-1 gap-1 mb-3">
+                        <button type="button" @click="auditModal.mode = 'explain'"
+                                :class="auditModal.mode === 'explain' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'"
+                                class="flex-1 px-3 py-1.5 rounded-lg text-sm font-medium transition-all">Объяснить</button>
+                        <button type="button" @click="auditModal.mode = 'fix'"
+                                :class="auditModal.mode === 'fix' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'"
+                                class="flex-1 px-3 py-1.5 rounded-lg text-sm font-medium transition-all"
+                                x-text="auditModal.q.fix.some(f => f.action === 'replace') ? 'Заменить файл' : 'Приложить файл'"></button>
+                    </div>
+
+                    <div x-show="auditModal.mode === 'explain'">
+                        <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Почему так</label>
+                        <textarea x-model="auditModal.body" rows="3" maxlength="2000"
+                                  placeholder="Например: разница из-за возврата, так и должно быть"
+                                  class="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-none"></textarea>
+                        <p class="mt-1 text-xs text-slate-400">Ответ увидит руководитель и решит, принять его или нет.</p>
+                    </div>
+
+                    <div x-show="auditModal.mode === 'fix'" class="space-y-2">
+                        <template x-for="f in auditModal.q.fix" :key="f.log_id">
+                            <label class="flex items-start gap-2 text-sm cursor-pointer">
+                                <input type="radio" :value="f.log_id" x-model.number="auditModal.logId" class="mt-0.5"
+                                       x-show="auditModal.q.fix.length > 1">
+                                <span class="text-slate-500"><span class="font-medium text-slate-700" x-text="f.label"></span><span x-text="f.action === 'replace' ? ': заменит ' + f.files.join(', ') : ': приложит файл к задаче'"></span></span>
+                            </label>
+                        </template>
+                        <input type="file" x-ref="auditFile" accept=".pdf,.xls,.xlsx"
+                               class="block w-full text-sm text-slate-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border-0 file:bg-slate-100 file:text-slate-700 file:text-sm">
+                        <p class="text-xs text-slate-400">Задача останется закрытой, дата выполнения не изменится. Новый файл система проверит при следующей проверке.</p>
+                    </div>
+
+                    <p x-show="auditModal.error" class="mt-2 text-xs text-rose-500" x-text="auditModal.error"></p>
+
+                    <div class="flex gap-3 mt-4">
+                        <button type="button" @click="closeAuditQuestion()"
+                                class="flex-1 py-2.5 px-4 border border-slate-200 text-slate-600 text-sm font-medium rounded-xl hover:bg-slate-50 transition-colors">
+                            Отмена
+                        </button>
+                        <button type="button" @click="submitAuditQuestion()" :disabled="auditModal.saving"
+                                class="flex-1 py-2.5 px-4 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                                x-text="auditModal.mode === 'fix' ? 'Загрузить' : 'Отправить руководителю'"></button>
+                    </div>
+                </div>
+            </div>
+        </template>
+    </div>
+
     {{-- ===== МОДАЛ ЗАДАЧИ (описание + чек-лист подпунктов) ===== --}}
     <div x-show="taskModalIdx !== null"
          x-transition:enter="ease-out duration-200"
@@ -2120,6 +2312,11 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             children: (t.children || []).map(c => ({ ...c, doc_uploading: false })),
         })),
         completed: completed || [],
+        // Вопросы автоаудита к этому бухгалтеру (см. AutoAuditQuestions). Отдельно от tasks:
+        // это не задачи, и счётчики, таймеры и чеклист их не касаются.
+        auditQuestions: JSON.parse(document.getElementById('audit-questions-data')?.textContent || '[]'),
+        auditOnly: false,
+        auditModal: { show: false, q: null, mode: 'explain', body: '', logId: null, saving: false, error: '' },
         completedPage: 1,
         completedPerPage: 20,
         completedItem: null,
@@ -2384,7 +2581,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
 
         get listFiltersActive() {
             return this.activeFilterCount > 0 || this.dueFilter !== 'all'
-                || this.listSearchInput !== '' || this.assignedOnly || this.showTeam;
+                || this.listSearchInput !== '' || this.assignedOnly || this.showTeam || this.auditOnly;
         },
 
         resetListFilters() {
@@ -2394,6 +2591,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             this.listSearch = '';
             this.assignedOnly = false;
             this.showTeam = false;
+            this.auditOnly = false;
             this.afterFilterChange();
         },
 
@@ -2491,6 +2689,8 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         },
 
         get groupedTasks() {
+            // «Только автоаудит»: задачи прячем, вопросы рисуются своей группой выше.
+            if (this.auditOnly) return [];
             if (this.showTeam) return this.groupedByClient;
 
             const overdue = [], today = [], rest = [];
@@ -2798,6 +2998,90 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             this.tasks = [...this.tasks].sort(byField);
             this.teamRows = [...this.teamRows].sort(byField);
         },
+        // ─── Вопросы автоаудита ───────────────────────────────────────────────
+
+        /**
+         * Вопросы в списке. Слушаются поиска и воронки «Компания», как задачи. Остальные
+         * отборы (срок, «Поручено мне», воронки по задаче и стадии) их прячут: это отбор
+         * задач, а вопрос не задача.
+         */
+        get auditRows() {
+            if (this.dueFilter !== 'all' || this.assignedOnly) return [];
+            if (Object.entries(this.filters).some(([key, chosen]) => key !== 'client' && chosen.length)) return [];
+
+            const words = this.listSearch.toLowerCase().split(/\s+/).filter(Boolean);
+            const clients = this.filters.client || [];
+
+            return this.auditQuestions.filter(q => {
+                if (clients.length && !clients.includes(String(q.client_id))) return false;
+                const haystack = [q.client_name, q.period_label, q.outcome_label, ...q.rules].join(' ').toLowerCase();
+                return words.every(w => haystack.includes(w));
+            });
+        },
+
+        /** «Не совпало: Налоговая база…», «Нет документа: Отчёт по ЕН». */
+        auditTitle(q) {
+            return q.outcome_label + (q.subject ? ': ' + q.subject : '');
+        },
+
+        auditDays(q) {
+            if (q.days === 0) return 'висит с сегодня';
+            const n = q.days, m10 = n % 10, m100 = n % 100;
+            const word = m10 === 1 && m100 !== 11 ? 'день' : (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20) ? 'дня' : 'дней');
+            return 'висит ' + n + ' ' + word;
+        },
+
+        auditMoney(v) {
+            return v === null || v === undefined ? '' : Number(v).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        },
+
+        openAuditQuestion(q) {
+            this.auditModal = {
+                show: true, q, mode: 'explain', body: '',
+                logId: q.fix.length ? q.fix[0].log_id : null,
+                saving: false, error: '',
+            };
+        },
+
+        closeAuditQuestion() {
+            this.auditModal = { show: false, q: null, mode: 'explain', body: '', logId: null, saving: false, error: '' };
+        },
+
+        /** Ответ ушёл: вопрос пропадает из списка, пока руководитель не решит или прогон не покажет новое. */
+        async submitAuditQuestion() {
+            const m = this.auditModal;
+            m.error = '';
+            let data;
+
+            if (m.mode === 'fix') {
+                const file = this.$refs.auditFile?.files?.[0];
+                if (!file) { m.error = 'Выберите файл'; return; }
+                const fd = new FormData();
+                fd.append('result_id', m.q.result_id);
+                fd.append('log_id', m.logId);
+                fd.append('file', file);
+                m.saving = true;
+                data = await this.postForm(`/buhtasks/audit-questions/${m.q.id}/fix`, fd, 'Обновите страницу и проверьте, приложился ли файл.');
+            } else {
+                if (!m.body.trim()) { m.error = 'Напишите объяснение'; return; }
+                m.saving = true;
+                data = await this.post(`/buhtasks/audit-questions/${m.q.id}/explain`, { result_id: m.q.result_id, body: m.body });
+            }
+
+            m.saving = false;
+
+            if (!data.success) {
+                m.error = data.message || Object.values(data.errors || {})[0]?.[0] || 'Не удалось отправить, попробуйте ещё раз';
+                return;
+            }
+
+            // Вместе с этим вопросом уходят те, где был тот же файл: их тоже проверит прогон.
+            const gone = [m.q.id, ...(data.also_fixed || [])];
+            this.auditQuestions = this.auditQuestions.filter(q => !gone.includes(q.id));
+            if (this.auditQuestions.length === 0) this.auditOnly = false;
+            this.closeAuditQuestion();
+        },
+
         get visibleCount() {
             // Считаем только активные строки (без выполненных) — как их и рисует visibleTasks,
             // иначе сентинел бесконечной прокрутки не «догрузит» до реального конца списка.
@@ -2882,6 +3166,9 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             if (typeof IntersectionObserver === 'undefined') return;
             this._io = new IntersectionObserver((entries) => {
                 if (!entries.some(e => e.isIntersecting)) return;
+                // «Только автоаудит»: задач на экране нет, догружать их незачем. Иначе в фоне
+                // догрузился бы весь список и нарисовался разом, когда кнопку отожмут.
+                if (this.auditOnly) return;
                 if (this.visibleLimit >= this.visibleCount) return;
                 this.loadMore();
                 // Сентинел мог остаться в зоне видимости после дорисовки —
@@ -3184,7 +3471,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             });
 
             // Бесконечная прокрутка: при смене фильтра/сортировки начинаем показ заново с 20.
-            ['dueFilter', 'listSearch', 'assignedOnly', 'showTeam', 'sortDir', 'sortBy']
+            ['dueFilter', 'listSearch', 'assignedOnly', 'showTeam', 'sortDir', 'sortBy', 'auditOnly']
                 .forEach(f => this.$watch(f, () => { this.visibleLimit = 20; }));
 
             // Ссылка с отбором сильнее памяти браузера: пришли по ней — показываем ровно

@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AutoAuditFinding;
+use App\Models\AutoAuditFindingMessage;
 use App\Models\BuhAdhocTask;
 use App\Models\BuhTaskDocument;
 use App\Models\BuhTaskLog;
@@ -11,9 +13,12 @@ use App\Models\Estimate;
 use App\Models\EstimateItem;
 use App\Models\Service;
 use App\Models\TaskReminder;
+use App\Services\AutoAudit\AutoAuditQuestions;
 use App\Services\EventTriggeredTasks;
+use App\Support\Impersonation;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 
@@ -960,7 +965,164 @@ class BuhTasksController extends Controller
             ])
             ->values()->toArray();
 
-        return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'reminders', 'reminderCounts', 'completed', 'completedDays', 'employees', 'catalog', 'teamTasks', 'teamMembers', 'assignedTasks', 'assignedAlertCount', 'assignedDoneDays'));
+        // Вопросы автоаудита к этому сотруднику: строками вверху списка. Только при флаге фирмы.
+        // Это главная рабочая страница: если с данными автоаудита что-то не так, она должна
+        // открыться без вопросов, а не упасть. Сбой уходит в журнал.
+        $auditQuestions = [];
+
+        try {
+            if (AutoAuditQuestions::enabled()) {
+                $questions      = app(AutoAuditQuestions::class);
+                $auditQuestions = $questions->forEmployee($employee)->map(fn (array $q) => $questions->toFront($q))->values()->all();
+            }
+        } catch (\Throwable $e) {
+            report($e);
+            $auditQuestions = [];
+        }
+
+        return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'reminders', 'reminderCounts', 'completed', 'completedDays', 'employees', 'catalog', 'teamTasks', 'teamMembers', 'assignedTasks', 'assignedAlertCount', 'assignedDoneDays', 'auditQuestions'));
+    }
+
+    // =============================================
+    // ВОПРОСЫ АВТОАУДИТА
+    // =============================================
+
+    /** Бухгалтер объясняет, почему так. Текст уходит руководителю на страницу автоаудита. */
+    public function explainAuditQuestion(Request $request, AutoAuditFinding $finding)
+    {
+        $data = $request->validate([
+            'result_id' => ['required', 'integer'],
+            'body'      => ['required', 'string', 'max:2000'],
+        ], ['body.required' => 'Напишите объяснение']);
+
+        $question = $this->auditQuestion($finding, (int) $data['result_id']);
+
+        if (!$question) {
+            return $this->staleAuditQuestion();
+        }
+
+        $this->answerAuditQuestion($question, AutoAuditFindingMessage::EXPLAINED, trim($data['body']));
+
+        return response()->json(['success' => true]);
+    }
+
+    /**
+     * Бухгалтер заменил файл или приложил недостающий, прямо из вопроса.
+     *
+     * Задача остаётся закрытой: ни статус, ни дата выполнения не меняются. Возврат на
+     * доработку сдвинул бы дату и записал бы задачу в опоздавшие, хотя сдана она вовремя.
+     * Заменяются только файлы, на которые смотрела проверка; остальные файлы задачи на месте.
+     * Проверит новый файл следующий прогон.
+     */
+    public function fixAuditQuestion(Request $request, AutoAuditFinding $finding)
+    {
+        $request->validate([
+            'result_id' => ['required', 'integer'],
+            'log_id'    => ['required', 'integer'],
+        ]);
+
+        $question = $this->auditQuestion($finding, (int) $request->input('result_id'));
+
+        if (!$question) {
+            return $this->staleAuditQuestion();
+        }
+
+        /** @var BuhTaskLog|null $log */
+        $log = $question['fixable']->firstWhere('id', (int) $request->input('log_id'));
+        abort_unless($log, 403);
+
+        $request->validate([
+            'file' => $this->documentFileRules(service: $log->estimateItem?->service),
+        ], [
+            'file.required' => 'Выберите файл',
+            'file.file'     => 'Не удалось прочитать файл — возможно, он превышает лимит сервера',
+            'file.max'      => 'Файл не должен превышать 40 МБ',
+        ]);
+
+        $replacedIds = collect($question['result']->sources ?? [])
+            ->where('log_id', $log->id)
+            ->pluck('document_id')
+            ->filter()
+            ->all();
+        $replaced = $log->documents()->whereIn('id', $replacedIds)->get();
+
+        if ($log->documents()->count() - $replaced->count() >= self::MAX_DOCUMENTS) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Не больше ' . self::MAX_DOCUMENTS . ' документов на задачу',
+            ], 422);
+        }
+
+        $document = $this->storeTaskDocument($log, $request->file('file'));
+
+        foreach ($replaced as $old) {
+            Storage::disk('local')->delete($old->path);
+            $old->delete();
+        }
+
+        $body = $replaced->isEmpty()
+            ? "Приложил «{$document->name}»"
+            : 'Заменил ' . $replaced->map(fn ($d) => "«{$d->name}»")->join(', ') . " на «{$document->name}»";
+
+        $this->answerAuditQuestion($question, AutoAuditFindingMessage::FIXED, $body);
+
+        // Тот же файл часто стоит и в других вопросах: №1 и №3 берут одну ведомость и один
+        // отчёт. Они тоже ждут следующей проверки, иначе в них осталась бы ссылка на удалённый
+        // файл, а повторная «замена» добавила бы файл второй раз.
+        $alsoFixed = app(AutoAuditQuestions::class)->open()
+            ->filter(fn (array $q) => $q['finding']->id !== $finding->id
+                && in_array($log->id, AutoAuditQuestions::logIds($q['result']), true))
+            ->each(fn (array $q) => $this->answerAuditQuestion($q, AutoAuditFindingMessage::FIXED, $body . ' (в другом вопросе по той же задаче)'))
+            ->map(fn (array $q) => $q['finding']->id)
+            ->values()
+            ->all();
+
+        return response()->json(['success' => true, 'also_fixed' => $alsoFixed]);
+    }
+
+    /**
+     * Вопрос, на который этот сотрудник вправе ответить. null, если вопрос уже закрыт или
+     * строка сменилась после загрузки страницы: ответ относился бы к другому итогу.
+     */
+    private function auditQuestion(AutoAuditFinding $finding, int $resultId): ?array
+    {
+        abort_unless(AutoAuditQuestions::enabled(), 404);
+
+        $employee  = auth('employee')->user();
+        $questions = app(AutoAuditQuestions::class);
+        $question  = $questions->open()->first(fn (array $q) => $q['finding']->id === $finding->id);
+
+        if (!$question) {
+            return null;
+        }
+
+        abort_unless(in_array((int) $employee->id, $questions->executors($question), true), 403);
+
+        if ($question['result']->id !== $resultId) {
+            return null;
+        }
+
+        return $question + ['fixable' => $questions->fixable($question, $employee)];
+    }
+
+    private function answerAuditQuestion(array $question, string $kind, string $body): void
+    {
+        $question['finding']->messages()->create([
+            'result_id'   => $question['result']->id,
+            'employee_id' => auth('employee')->id(),
+            'by_vendor'   => Impersonation::isActive(),
+            'kind'        => $kind,
+            'body'        => $body,
+        ]);
+    }
+
+    private function staleAuditQuestion()
+    {
+        return response()->json([
+            'success' => false,
+            'stale'   => true,
+            'message' => 'Проверка уже прошла заново, и вопрос изменился. Обновите страницу',
+        ], 409);
     }
 
     // =============================================
@@ -1271,15 +1433,20 @@ class BuhTasksController extends Controller
             ], 422);
         }
 
-        $file         = $request->file('file');
+        $this->storeTaskDocument($log, $request->file('file'));
+
+        return response()->json(['success' => true, 'log' => $this->formatLog($log)]);
+    }
+
+    /** Положить файл в папку задачи. Имя с меткой времени: одноимённый файл не затрёт прежний. */
+    private function storeTaskDocument(BuhTaskLog $log, UploadedFile $file): BuhTaskDocument
+    {
         $originalName = $file->getClientOriginalName();
         $extension    = $file->getClientOriginalExtension();
         $safeName     = pathinfo($originalName, PATHINFO_FILENAME) . '_' . time() . '.' . $extension;
         $path         = $file->storeAs('buh_task_documents/' . $log->id, $safeName, 'local');
 
-        $log->documents()->create(['path' => $path, 'name' => $originalName]);
-
-        return response()->json(['success' => true, 'log' => $this->formatLog($log)]);
+        return $log->documents()->create(['path' => $path, 'name' => $originalName]);
     }
 
     /** Удаление прикреплённого документа — пока задача не закрыта и не на проверке. */

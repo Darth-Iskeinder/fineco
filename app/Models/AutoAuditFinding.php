@@ -54,19 +54,43 @@ class AutoAuditFinding extends Model
     /**
      * Что с находкой сейчас.
      *
-     * Решает последнее сообщение. «Принято» действует, только если принимали ту же строку
-     * результата, что стоит на странице сейчас: итог сменился, значит принимали другое.
+     * Решает последнее сообщение:
+     *   - «Принято» и «Объяснил» действуют, только если относились к той же строке
+     *     результата, что стоит на странице сейчас: итог сменился, значит принимали и
+     *     объясняли другое, и вопрос снова ждёт бухгалтера;
+     *   - «Исправил» действует до следующего прогона. Прогон сдвигает время обновления у
+     *     каждой действующей строки. Если после этого находка всё ещё открыта, значит
+     *     исправление не помогло, и она снова ждёт ответа (fixDidNotHelp).
      */
     public function state(AutoAuditResult $current): string
     {
         $last = $this->messages->last();
 
         return match ($last?->kind) {
-            AutoAuditFindingMessage::ACCEPTED => $last->result_id === $current->id ? self::ACCEPTED : self::WAITING,
-            AutoAuditFindingMessage::REJECTED => self::REJECTED,
-            AutoAuditFindingMessage::EXPLAINED, AutoAuditFindingMessage::FIXED => self::ANSWERED,
+            AutoAuditFindingMessage::ACCEPTED  => $last->result_id === $current->id ? self::ACCEPTED : self::WAITING,
+            AutoAuditFindingMessage::REJECTED  => self::REJECTED,
+            AutoAuditFindingMessage::EXPLAINED => $this->explanationOutdated($current) ? self::WAITING : self::ANSWERED,
+            AutoAuditFindingMessage::FIXED     => $this->fixDidNotHelp($current) ? self::WAITING : self::ANSWERED,
             default => self::WAITING,
         };
+    }
+
+    /** Бухгалтер объяснил, а итог после этого сменился: объяснение было про другие цифры. */
+    public function explanationOutdated(AutoAuditResult $current): bool
+    {
+        $last = $this->messages->last();
+
+        return $last?->kind === AutoAuditFindingMessage::EXPLAINED && $last->result_id !== $current->id;
+    }
+
+    /** Бухгалтер заменил файл, прогон после этого прошёл, а находка всё ещё открыта. */
+    public function fixDidNotHelp(AutoAuditResult $current): bool
+    {
+        $last = $this->messages->last();
+
+        return $last?->kind === AutoAuditFindingMessage::FIXED
+            && $current->updated_at
+            && $current->updated_at->greaterThan($last->created_at);
     }
 
     /** Ждёт ответа бухгалтера: ответа не было, или руководитель его не принял. */

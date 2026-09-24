@@ -72,6 +72,9 @@ class AutoAuditRunner
         'f161' => ['ref' => self::REF_FORM_161,      'label' => 'Форма 161',   'genitive' => 'формы 161',                    'probe' => 'income', 'has_inn' => true],
     ];
 
+    /** Статус источника «задача закрыта без файла», см. missingSource. */
+    public const SOURCE_MISSING = 'missing';
+
     /** Начало причины «документ чужой». Собираем и узнаём её в одном месте, чтобы не разошлись. */
     private const INN_MISMATCH = 'ИНН не совпадает';
 
@@ -505,6 +508,8 @@ class AutoAuditRunner
                 $rows[$label] ??= ['period' => $period, 'numbers' => [], 'notes' => [], 'extra' => []];
                 array_push($rows[$label]['numbers'], ...$affects[$side]);
                 $rows[$label]['notes'][] = $this->closedWithoutFileNote($log, $services[$side]);
+                // Сама задача без файла: по ней видно, с кого спросить и куда приложить файл.
+                $rows[$label]['extra'][] = $this->missingSource($side, $log);
             }
         }
 
@@ -566,11 +571,34 @@ class AutoAuditRunner
                 'right_value' => null,
                 'difference'  => null,
                 'reason'      => implode('. ', $row['notes']),
-                'sources'     => collect($sources)->unique('document_id')->values()->all(),
+                // У задачи без файла document_id пустой: такие различаем по задаче, иначе
+                // две задачи без файла слились бы в одну.
+                'sources'     => collect($sources)->unique(fn (array $s) => $s['document_id'] ?? 'log:' . $s['log_id'])->values()->all(),
             ];
         }
 
         return $result;
+    }
+
+    /**
+     * Источник «задача закрыта без файла». Файла нет, поэтому document_id и name пустые,
+     * а status missing. Страница по нему пишет, чья задача, а исполнитель получает вопрос.
+     */
+    private function missingSource(string $side, BuhTaskLog $log): array
+    {
+        return [
+            'side'        => $side,
+            'label'       => self::SIDES[$side]['label'],
+            'log_id'      => $log->id,
+            'branch_id'   => $log->estimate_item_id,
+            'task_month'  => sprintf('%02d.%d', $log->month, $log->year),
+            'employee'    => $this->shortName($log->employee?->full_name),
+            'document_id' => null,
+            'name'        => null,
+            'status'      => self::SOURCE_MISSING,
+            'value'       => null,
+            'reason'      => 'файл не приложен',
+        ];
     }
 
     /**

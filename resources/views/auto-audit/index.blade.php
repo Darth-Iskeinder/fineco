@@ -207,6 +207,14 @@
                             ])>{{ $money($result->difference) }}</td>
                             <td class="px-4 py-3 text-xs space-y-1">
                                 @foreach ($result->sources ?? [] as $source)
+                                    @if (empty($source['document_id']))
+                                        {{-- Задача закрыта без файла: открывать нечего, видно только чья. --}}
+                                        <div class="text-slate-400">
+                                            <span title="Задача за {{ $source['task_month'] }}">{{ $source['label'] }}@if (!empty($source['employee'])), <span class="font-medium text-slate-500">{{ $source['employee'] }}</span>@endif:</span>
+                                            файл не приложен
+                                        </div>
+                                        @continue
+                                    @endif
                                     @php $documentUrl = route('documents.task', $source['document_id']); @endphp
                                     <div>
                                         {{-- Месяц задачи нужен редко: при наведении, чтобы не шуметь в каждой строке. --}}
@@ -260,6 +268,14 @@
                                         @empty
                                             <p class="text-slate-400">Ответа пока нет</p>
                                         @endforelse
+
+                                        @if ($finding->explanationOutdated($result))
+                                            <p class="text-amber-700">После объяснения цифры изменились, ждём нового ответа</p>
+                                        @elseif ($finding->fixDidNotHelp($result))
+                                            <p class="text-amber-700">После замены файла проверка прошла, но всё ещё не сходится</p>
+                                        @elseif ($findingState === AutoAuditFinding::ANSWERED && $finding->messages->last()?->kind === AutoAuditFindingMessage::FIXED)
+                                            <p class="text-slate-400">Файл заменён, ждёт следующей проверки</p>
+                                        @endif
 
                                         @if ($findingState !== AutoAuditFinding::ACCEPTED)
                                             <div class="flex items-start gap-2 pt-1">

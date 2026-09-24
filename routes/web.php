@@ -219,6 +219,9 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/logs/{log}/complete', [BuhTasksController::class, 'complete'])->name('logs.complete');
         Route::post('/logs/{log}/force-complete', [BuhTasksController::class, 'forceComplete'])->name('logs.force-complete');
         Route::post('/logs/{log}/reset', [BuhTasksController::class, 'reset'])->name('logs.reset');
+        // Вопросы автоаудита: ответ бухгалтера. Флаг фирмы и «чей вопрос» проверяет контроллер.
+        Route::post('/audit-questions/{finding}/explain', [BuhTasksController::class, 'explainAuditQuestion'])->name('audit-questions.explain');
+        Route::post('/audit-questions/{finding}/fix', [BuhTasksController::class, 'fixAuditQuestion'])->name('audit-questions.fix');
         Route::post('/logs/{log}/quantity', [BuhTasksController::class, 'updateQuantity'])->name('logs.quantity');
         Route::post('/logs/{log}/comment', [BuhTasksController::class, 'updateComment'])->name('logs.comment');
         Route::post('/logs/{log}/document', [BuhTasksController::class, 'uploadDocument'])->name('logs.document');

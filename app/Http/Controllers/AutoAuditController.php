@@ -7,6 +7,7 @@ use App\Models\AutoAuditFinding;
 use App\Models\AutoAuditFindingMessage;
 use App\Models\AutoAuditResult;
 use App\Models\Tenant;
+use App\Services\AutoAudit\AutoAuditQuestions;
 use App\Services\AutoAudit\AutoAuditRunner;
 use App\Support\Impersonation;
 use App\Support\TenantContext;
@@ -199,8 +200,7 @@ class AutoAuditController extends Controller
     /** Видны ли находки: вендору всегда, руководителю по флагу фирмы. */
     private function findingsVisible(): bool
     {
-        return Impersonation::isActive()
-            || (bool) Tenant::find(TenantContext::id())?->autoAuditFindingsEnabled();
+        return AutoAuditQuestions::enabled();
     }
 
     /** Решать по находкам могут только руководитель (при включённом флаге) и вендор. */
