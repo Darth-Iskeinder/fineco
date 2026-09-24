@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\BuhAdhocTask;
 use App\Models\BuhTaskLog;
+use App\Services\AutoAudit\AutoAuditQuestions;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -92,7 +93,11 @@ class TaskAlertController extends Controller
             ]);
 
         // Доработка выше новых поручений: это работа, которую уже ждут обратно.
-        $items = $reworkAdhoc->concat($reworkLogs)->concat($assigned)
+        //
+        // Вопросы автоаудита самыми первыми. Их всегда немного (одна сводка и редкие «Не
+        // принято»), а карточка показывает пять строк из двадцати: у кого два десятка
+        // возвратов, до автоаудита в хвосте дело бы не дошло никогда.
+        $items = collect($this->auditAlerts($employee))->concat($reworkAdhoc)->concat($reworkLogs)->concat($assigned)
             ->take(self::MAX_ITEMS)
             ->values();
 
@@ -109,8 +114,17 @@ class TaskAlertController extends Controller
 
         $employeeId = auth('employee')->id();
         $buckets    = ['assigned:adhoc' => [], 'rework:adhoc' => [], 'rework:log' => []];
+        $auditSeen  = false;
 
         foreach ($validated['keys'] as $key) {
+            // Вопросы автоаудита гасятся одной отметкой у самого сотрудника: id из ключа
+            // не используем, поэтому чужой вопрос подставленным ключом не погасить.
+            if (str_starts_with($key, 'audit:')) {
+                $auditSeen = true;
+
+                continue;
+            }
+
             [$kind, $type, $id] = array_pad(explode(':', $key), 3, null);
             $bucket = $kind . ':' . $type;
 
@@ -139,7 +153,26 @@ class TaskAlertController extends Controller
                 ->update(['rework_seen_at' => $now]);
         }
 
+        if ($auditSeen) {
+            app(AutoAuditQuestions::class)->markSeen(auth('employee')->user());
+        }
+
         return response()->json(['success' => true]);
+    }
+
+    /**
+     * Вопросы автоаудита для карточки. Только при флаге фирмы. Сбой здесь не должен
+     * лишить человека уведомлений о возвратах: карточку отдаём без вопросов, сбой в журнал.
+     */
+    private function auditAlerts($employee): array
+    {
+        try {
+            return AutoAuditQuestions::enabled() ? app(AutoAuditQuestions::class)->alerts($employee) : [];
+        } catch (\Throwable $e) {
+            report($e);
+
+            return [];
+        }
     }
 
     /** Срок внеплановой задачи: день внутри её месяца, с поправкой на короткие месяцы. */

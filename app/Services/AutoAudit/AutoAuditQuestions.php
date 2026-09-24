@@ -11,6 +11,7 @@ use App\Models\Employee;
 use App\Models\Tenant;
 use App\Support\Impersonation;
 use App\Support\TenantContext;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 
 /**
@@ -228,6 +229,104 @@ class AutoAuditQuestions
             $result->outcome === AutoAuditResult::MISSING_DOCUMENT => $sources->where('status', AutoAuditRunner::SOURCE_MISSING)->pluck('label')->unique()->join(', ') ?: 'ОСВ',
             default => $sources->pluck('label')->unique()->join(', '),
         };
+    }
+
+    /**
+     * Строки для всплывающей карточки уведомлений (TaskAlertController).
+     *
+     * Показываем только то, что случилось после последнего «Понятно» (eventAt):
+     *   - «Не принято»: отдельной строкой на вопрос, с комментарием руководителя. По сути
+     *     это возврат на доработку;
+     *   - остальное одной строкой-сводкой «N вопросов по вашим задачам». Списком нельзя:
+     *     у кого вопросов два десятка, они вытеснили бы из карточки возвраты.
+     *
+     * Ключи: audit:finding:ID и audit:summary. «Понятно» по любому из них ставит одну
+     * отметку времени у самого сотрудника (markSeen), чужие вопросы ключом не погасить.
+     *
+     * @return array<int, array>
+     */
+    public function alerts(Employee $employee): array
+    {
+        $seen = $employee->audit_alert_seen_at;
+
+        $fresh = $this->forEmployee($employee)
+            ->filter(fn (array $q) => $seen === null || $this->eventAt($q)->greaterThan($seen))
+            ->values();
+
+        if ($fresh->isEmpty()) {
+            return [];
+        }
+
+        [$rejected, $rest] = $fresh->partition(fn (array $q) => self::rejection($q['finding']) !== null);
+
+        $items = $rejected->map(function (array $q) {
+            $front     = $this->toFront($q);
+            $rejection = self::rejection($q['finding']);
+
+            return [
+                'key'         => 'audit:finding:' . $q['finding']->id,
+                'kind'        => 'audit_rejected',
+                'name'        => $front['outcome_label'] . ($front['subject'] ? ': ' . $front['subject'] : ''),
+                'client_name' => $front['client_name'] . ', ' . $front['period_label'],
+                'due_date'    => null,
+                'from_name'   => $rejection->authorName(),
+                'comment'     => $rejection->body,
+            ];
+        })->values();
+
+        if ($rest->isNotEmpty()) {
+            $n = $rest->count();
+
+            $items->push([
+                'key'         => 'audit:summary',
+                'kind'        => 'audit',
+                'name'        => $n . ' ' . self::plural($n, ['вопрос', 'вопроса', 'вопросов']) . ' по вашим задачам',
+                // «21 нет документа, 2 не тот документ»: что это за вопросы, без списка.
+                'client_name' => $rest->countBy(fn (array $q) => $q['result']->outcome)
+                    ->sortDesc()
+                    ->map(fn (int $count, string $outcome) => $count . ' ' . mb_strtolower(AutoAuditResult::LABELS[$outcome] ?? $outcome))
+                    ->join(', '),
+                'due_date'    => null,
+                'from_name'   => null,
+                'comment'     => null,
+            ]);
+        }
+
+        return $items->all();
+    }
+
+    /** «Понятно»: всё, что было до этой минуты, больше не всплывает. Только у себя. */
+    public function markSeen(Employee $employee): void
+    {
+        $employee->forceFill(['audit_alert_seen_at' => now()])->save();
+    }
+
+    /**
+     * Когда по вопросу случилось последнее, о чём стоит сказать: открыли находку, сменился
+     * итог (новая строка результата), кто-то написал. Своё объяснение сюда тоже попадает,
+     * но такой вопрос ждёт руководителя, а не бухгалтера, и в уведомление не идёт вовсе.
+     *
+     * Исправление, которое не помогло, видно по строке, а не по событию: прогон её не
+     * пересоздаёт. Тогда берём время самого «Исправил»: вопрос всплывёт, если «Понятно»
+     * нажимали до замены файла.
+     */
+    public function eventAt(array $question): CarbonInterface
+    {
+        $times = array_filter([
+            $question['finding']->created_at,
+            $question['result']->created_at,
+            $question['finding']->messages->last()?->created_at,
+        ]);
+
+        return max($times);
+    }
+
+    private static function plural(int $n, array $forms): string
+    {
+        $m10 = $n % 10;
+        $m100 = $n % 100;
+
+        return $forms[$m10 === 1 && $m100 !== 11 ? 0 : ($m10 >= 2 && $m10 <= 4 && ($m100 < 10 || $m100 >= 20) ? 1 : 2)];
     }
 
     /** Последний комментарий руководителя «Не принято», если вопрос вернулся с ним. */

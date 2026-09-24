@@ -2767,6 +2767,210 @@ class AutoAuditRunTest extends TestCase
         $this->assertSame([], $this->auditQuestionsOnPage($page));
     }
 
+    // ─── Уведомления (этап 4) ────────────────────────────────────────────────────
+
+    /** Флаг выключен: в карточке уведомлений автоаудита нет. */
+    public function test_alert_is_silent_while_the_flag_is_off(): void
+    {
+        $doer = $this->accountant();
+        $this->mismatchRow();
+        $this->ownedBy('осв.xls', $doer);
+
+        $this->actingAs($doer, 'employee')->getJson(route('task-alerts.index'))
+            ->assertOk()
+            ->assertJsonMissing(['kind' => 'audit']);
+    }
+
+    /** Новые вопросы одной строкой-сводкой с разбивкой, «Понятно» её гасит. */
+    public function test_new_questions_come_as_one_summary_until_seen(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $doer = $this->accountant();
+        $this->mismatchRow();
+        $this->ownedBy('осв.xls', $doer);
+        $this->ownedBy('отчёт.pdf', $doer);
+
+        $missing = $this->client();
+        $log     = $this->closeWithoutFile($missing, $this->osvService);
+        $log->update(['employee_id' => $doer->id]);
+        $this->attachReport($missing, 'отчёт-2.pdf', base: 1.00, tax: 1.00);
+        $this->runAudit();
+
+        $items = $this->actingAs($doer, 'employee')->getJson(route('task-alerts.index'))->assertOk()->json('items');
+        $audit = collect($items)->where('kind', 'audit')->values();
+
+        $this->assertCount(1, $audit);
+        $this->assertSame('audit:summary', $audit[0]['key']);
+        $this->assertSame('2 вопроса по вашим задачам', $audit[0]['name']);
+        $this->assertSame('1 не совпало, 1 нет документа', $audit[0]['client_name']);
+
+        $this->actingAs($doer, 'employee')->postJson(route('task-alerts.seen'), ['keys' => ['audit:summary']])->assertOk();
+        $this->assertNotNull($doer->fresh()->audit_alert_seen_at);
+
+        $this->actingAs($doer, 'employee')->getJson(route('task-alerts.index'))
+            ->assertJsonMissing(['kind' => 'audit']);
+
+        // Вопросы при этом никуда не делись: они в задачнике.
+        $this->assertCount(2, app(AutoAuditQuestions::class)->forEmployee($doer));
+    }
+
+    /** После «Понятно» всплывает только новое: новый вопрос приходит сводкой из одного. */
+    public function test_only_new_questions_come_back_after_seen(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $doer = $this->accountant();
+        $this->mismatchRow();
+        $this->ownedBy('осв.xls', $doer);
+        $this->ownedBy('отчёт.pdf', $doer);
+
+        $this->actingAs($doer, 'employee')->postJson(route('task-alerts.seen'), ['keys' => ['audit:summary']]);
+
+        $this->travel(1)->minutes();
+        $other = $this->client();
+        $this->attachSheet($other, 'осв-2.xls', ['3210' => 300.00, '3410' => 4.00]);
+        $this->attachReport($other, 'отчёт-2.pdf', base: 100.00, tax: 4.00);
+        $this->ownedBy('осв-2.xls', $doer);
+        $this->runAudit();
+
+        $audit = collect($this->actingAs($doer, 'employee')->getJson(route('task-alerts.index'))->json('items'))->where('kind', 'audit')->values();
+        $this->assertCount(1, $audit);
+        $this->assertSame('1 вопрос по вашим задачам', $audit[0]['name']);
+    }
+
+    /** «Не принято» отдельной строкой с комментарием и тем, кто не принял. */
+    public function test_rejection_comes_as_its_own_line(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $doer = $this->accountant();
+        [$client, $mismatch] = $this->mismatchRow();
+        $this->ownedBy('осв.xls', $doer);
+        $this->ownedBy('отчёт.pdf', $doer);
+        $finding = AutoAuditFinding::sole();
+
+        $this->actingAs($doer, 'employee')->postJson(route('buhtasks.audit-questions.explain', $finding), ['result_id' => $mismatch->id, 'body' => 'Возврат']);
+        $this->actingAs($doer, 'employee')->postJson(route('task-alerts.seen'), ['keys' => ['audit:summary']]);
+
+        $this->travel(1)->minutes();
+        $this->asVendor()->post(route('auto-audit.findings.reject', $finding), ['result_id' => $mismatch->id, 'body' => 'Нужен акт']);
+
+        $items = collect($this->actingAs($doer, 'employee')->getJson(route('task-alerts.index'))->json('items'));
+        $line  = $items->firstWhere('kind', 'audit_rejected');
+
+        $this->assertNotNull($line);
+        $this->assertSame('audit:finding:' . $finding->id, $line['key']);
+        $this->assertSame('Нужен акт', $line['comment']);
+        $this->assertSame('Kubik', $line['from_name']);
+        $this->assertStringContainsString($client->name, $line['client_name']);
+        $this->assertNull($items->firstWhere('kind', 'audit'));
+    }
+
+    /** Вопрос другого бухгалтера в мою карточку не попадает. */
+    public function test_alert_shows_only_own_questions(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $doer = $this->accountant();
+        $this->mismatchRow();
+        $this->ownedBy('осв.xls', $doer);
+        $this->ownedBy('отчёт.pdf', $doer);
+
+        $this->actingAs($this->accountant(), 'employee')->getJson(route('task-alerts.index'))
+            ->assertOk()
+            ->assertJsonMissing(['kind' => 'audit']);
+    }
+
+    /** Мой «Понятно» гасит уведомление только у меня: у второго исполнителя оно остаётся. */
+    public function test_seen_affects_only_the_employee_who_pressed_it(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        [$osvDoer, $taxDoer] = [$this->accountant(), $this->accountant()];
+        $this->mismatchRow();
+        $this->ownedBy('осв.xls', $osvDoer);
+        $this->ownedBy('отчёт.pdf', $taxDoer);
+
+        $finding = AutoAuditFinding::sole();
+        $this->actingAs($osvDoer, 'employee')
+            ->postJson(route('task-alerts.seen'), ['keys' => ['audit:summary', 'audit:finding:' . $finding->id, 'audit:finding:999999']])
+            ->assertOk();
+
+        $this->assertNull($taxDoer->fresh()->audit_alert_seen_at);
+        $this->actingAs($taxDoer, 'employee')->getJson(route('task-alerts.index'))->assertJsonFragment(['kind' => 'audit']);
+        // Подставленные ключи ничего, кроме своей отметки, не меняют.
+        $this->assertSame(0, AutoAuditFindingMessage::count());
+    }
+
+    /** Карточка другой фирмы вопросов этой не показывает, даже при включённом флаге там. */
+    public function test_alert_does_not_leak_to_another_firm(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $this->mismatchRow();
+
+        $other = Tenant::create([
+            'name'   => 'Соседняя фирма ' . uniqid(),
+            'slug'   => 'neighbour-' . uniqid(),
+            'status' => Tenant::STATUS_ACTIVE,
+        ]);
+        $other->setAutoAuditFindingsEnabled(true);
+        $stranger = TenantContext::for($other, fn () => $this->accountant());
+        // Даже если бы чужой задачей числился он сам.
+        BuhTaskLog::query()->update(['employee_id' => $stranger->id]);
+
+        $this->actingAs($stranger, 'employee')->getJson(route('task-alerts.index'))
+            ->assertOk()
+            ->assertJsonMissing(['kind' => 'audit']);
+    }
+
+    /** Без доступа к задачнику уведомлений нет вовсе: звать туда незачем. */
+    public function test_no_alert_without_the_task_module(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $doer = $this->employee(Role::ACCOUNTANT);
+        $this->mismatchRow();
+        $this->ownedBy('осв.xls', $doer);
+
+        $this->actingAs($doer, 'employee')->getJson(route('task-alerts.index'))->assertExactJson(['items' => []]);
+    }
+
+    /** Два десятка возвратов не вытесняют автоаудит: его строки в карточке первые. */
+    public function test_audit_line_is_not_pushed_out_by_many_reworks(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $doer = $this->accountant();
+        $this->mismatchRow();
+        $this->ownedBy('осв.xls', $doer);
+
+        $client = $this->client();
+        for ($i = 0; $i < 25; $i++) {
+            $log = $this->closeWithoutFile($client, $this->taxService, 'rework');
+            $log->update(['employee_id' => $doer->id, 'month' => 1 + $i % 12, 'year' => 2020 + intdiv($i, 12)]);
+        }
+
+        $items = $this->actingAs($doer, 'employee')->getJson(route('task-alerts.index'))->json('items');
+
+        $this->assertCount(20, $items);
+        $this->assertSame('audit', $items[0]['kind']);
+    }
+
+    /** Сбой в вопросах не лишает карточку возвратов на доработку. */
+    public function test_broken_questions_keep_the_rest_of_the_alerts(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $doer   = $this->accountant();
+        $client = $this->client();
+        $log    = $this->closeWithoutFile($client, $this->osvService, 'rework');
+        $log->update(['employee_id' => $doer->id, 'review_comment' => 'Переделать']);
+
+        $this->app->instance(AutoAuditQuestions::class, new class extends AutoAuditQuestions {
+            public function alerts(Employee $employee): array
+            {
+                throw new \RuntimeException('битые данные автоаудита');
+            }
+        });
+
+        $this->actingAs($doer, 'employee')->getJson(route('task-alerts.index'))
+            ->assertOk()
+            ->assertJsonFragment(['kind' => 'rework', 'comment' => 'Переделать']);
+    }
+
     /** Вопросы, которые БухЗадачник отдал странице. */
     private function auditQuestionsOnPage(string $html): array
     {

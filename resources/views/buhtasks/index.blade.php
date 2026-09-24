@@ -3470,6 +3470,11 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 this._searchTimer = setTimeout(() => { this.listSearch = value; }, 200);
             });
 
+            // Пришли из уведомления о вопросах автоаудита (?audit=1): сразу показываем только их.
+            if (new URLSearchParams(location.search).get('audit') === '1' && this.auditQuestions.length > 0) {
+                this.auditOnly = true;
+            }
+
             // Бесконечная прокрутка: при смене фильтра/сортировки начинаем показ заново с 20.
             ['dueFilter', 'listSearch', 'assignedOnly', 'showTeam', 'sortDir', 'sortBy', 'auditOnly']
                 .forEach(f => this.$watch(f, () => { this.visibleLimit = 20; }));

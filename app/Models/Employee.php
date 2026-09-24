@@ -47,6 +47,8 @@ class Employee extends Authenticatable
         'invite_sent_at' => 'datetime',
         'invite_accepted_at' => 'datetime',
         'password' => 'hashed',
+        // «Понятно» на уведомлении о вопросах автоаудита. Не в $fillable: ставит только сервер.
+        'audit_alert_seen_at' => 'datetime',
     ];
 
     // Статусы аккаунта

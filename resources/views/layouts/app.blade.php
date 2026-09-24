@@ -540,14 +540,14 @@
                     <div class="py-2.5">
                         <div class="flex items-center gap-2 flex-wrap">
                             <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium"
-                                  :class="a.kind === 'rework' ? 'bg-rose-100 text-rose-700' : 'bg-indigo-100 text-indigo-700'"
-                                  x-text="a.kind === 'rework' ? 'на доработку' : 'поручено'"></span>
+                                  :class="badgeClass(a)"
+                                  x-text="badgeLabel(a)"></span>
                             <span class="text-sm font-medium text-slate-700" x-text="a.name"></span>
                         </div>
                         <p class="text-xs text-slate-400 mt-0.5">
                             <span x-text="a.client_name || 'Без компании'"></span>
                             <span x-show="a.due_date" x-text="' · до ' + fmt(a.due_date)"></span>
-                            <span x-show="a.from_name" x-text="' · ' + (a.kind === 'rework' ? 'вернул: ' : 'поручил: ') + a.from_name"></span>
+                            <span x-show="a.from_name" x-text="' · ' + (a.kind === 'assigned' ? 'поручил: ' : (a.kind === 'rework' ? 'вернул: ' : 'не принял: ')) + a.from_name"></span>
                         </p>
                         {{-- Что именно исправить — главное в возврате, показываем сразу --}}
                         <p x-show="a.comment" class="text-xs text-rose-600 mt-1 line-clamp-2" x-text="a.comment"></p>
@@ -558,7 +558,8 @@
             </div>
 
             <div class="flex gap-2 px-5 py-3 bg-slate-50/70 border-t border-slate-100">
-                <a href="{{ route('buhtasks.index') }}" @click="dismiss()"
+                {{-- Одни вопросы автоаудита: открываем задачник сразу с ними. --}}
+                <a :href="onlyAudit ? '{{ route('buhtasks.index', ['audit' => 1]) }}' : '{{ route('buhtasks.index') }}'" @click="dismiss()"
                    class="flex-1 text-center py-2 px-3 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 transition-colors">
                     Открыть задачи
                 </a>
@@ -596,15 +597,39 @@
                     const n = this.items.length;
                     if (n === 0) return '';
                     if (n === 1) {
-                        return this.items[0].kind === 'rework'
-                            ? 'Задачу вернули на доработку'
-                            : 'Вам поручили задачу';
+                        return {
+                            rework: 'Задачу вернули на доработку',
+                            assigned: 'Вам поручили задачу',
+                            audit: 'Вопросы автоаудита',
+                            audit_rejected: 'Руководитель не принял ответ',
+                        }[this.items[0].kind] || 'Требует внимания';
                     }
                     // Больше одной — поводы не перечисляем, они видны в списке ниже.
                     // Единственное число сюда не попадает (n === 1 обработан выше), а больше
                     // MAX_ITEMS сервер не отдаёт, так что вариантов склонения ровно два.
                     const word = [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? 'задачи' : 'задач';
                     return `${n} ${word} требуют внимания`;
+                },
+
+                // Вопросы автоаудита: «Не принято» того же цвета, что возврат, сводка своим.
+                badgeClass(a) {
+                    return {
+                        rework: 'bg-rose-100 text-rose-700',
+                        audit_rejected: 'bg-rose-100 text-rose-700',
+                        audit: 'bg-violet-100 text-violet-700',
+                    }[a.kind] || 'bg-indigo-100 text-indigo-700';
+                },
+
+                badgeLabel(a) {
+                    return {
+                        rework: 'на доработку',
+                        audit_rejected: 'ответ не принят',
+                        audit: 'автоаудит',
+                    }[a.kind] || 'поручено';
+                },
+
+                get onlyAudit() {
+                    return this.items.length > 0 && this.items.every(a => a.kind.startsWith('audit'));
                 },
 
                 fmt(date) {
