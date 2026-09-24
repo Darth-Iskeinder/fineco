@@ -2,6 +2,7 @@
 
 namespace App\Services\AutoAudit;
 
+use App\Models\AutoAuditFinding;
 use App\Models\AutoAuditResult;
 use App\Models\BuhTaskDocument;
 use App\Models\BuhTaskLog;
@@ -171,6 +172,9 @@ class AutoAuditRunner
     /** Что изменил последний прогон, см. store. */
     private array $changes = [];
 
+    /** Что прогон сделал с находками, см. syncFindings. */
+    private array $findingChanges = [];
+
     public function __construct(
         private readonly BalanceSheetReader $balanceSheet,
         private readonly SingleTaxReportReader $taxReport,
@@ -220,8 +224,13 @@ class AutoAuditRunner
         }
 
         // Одна транзакция на весь прогон: либо записалось всё, либо ничего, и половинчатой
-        // страницы не бывает.
-        $this->changes = DB::transaction(fn () => $this->store($rows));
+        // страницы не бывает. Находки в той же: без неё строка и её находка могли бы разойтись.
+        $this->changes = DB::transaction(function () use ($rows) {
+            $changes = $this->store($rows);
+            $this->syncFindings();
+
+            return $changes;
+        });
 
         return collect($rows)->countBy('outcome')->all();
     }
@@ -235,6 +244,82 @@ class AutoAuditRunner
     public function changes(): array
     {
         return $this->changes;
+    }
+
+    /**
+     * Что последний прогон сделал с находками: сколько открыл, сколько закрыл и сколько
+     * открытых осталось всего.
+     *
+     * @return array{opened: int, closed: int, open: int}
+     */
+    public function findingChanges(): array
+    {
+        return $this->findingChanges;
+    }
+
+    /**
+     * Открыть и закрыть находки по действующим строкам. Идёт сразу после store, в той же
+     * транзакции.
+     *
+     * По ключу строки:
+     *   - итог проблемный (FINDING_OUTCOMES), открытой находки нет: открываем. Висит она с
+     *     того дня, когда появилась строка: при первом прогоне после выкатки это честнее,
+     *     чем день выкатки;
+     *   - итог проблемный, находка открыта: не трогаем, даже если итог сменился с одного
+     *     проблемного на другой. Разговор тот же;
+     *   - итог стал другим (совпало, скан, не удалось проверить) или строки нет: закрываем.
+     *     Ничего не удаляем, переписка остаётся.
+     */
+    private function syncFindings(): void
+    {
+        $now     = now();
+        $changes = ['opened' => 0, 'closed' => 0, 'open' => 0];
+
+        // Ключ у действующих строк один на строку, это держит store.
+        $current = AutoAuditResult::current()->orderBy('id')->get()->keyBy(fn (AutoAuditResult $r) => $r->key());
+
+        $open = [];
+
+        foreach (AutoAuditFinding::open()->orderBy('id')->get() as $finding) {
+            // Двух открытых с одним ключом быть не должно. Если вышло, оставляем старшую: у
+            // неё переписка. Младшую закрываем, иначе строка показала бы чужой разговор.
+            if (isset($open[$finding->key])) {
+                $finding->update(['closed_at' => $now]);
+
+                continue;
+            }
+
+            $open[$finding->key] = $finding;
+        }
+
+        foreach ($current as $key => $result) {
+            if (!in_array($result->outcome, AutoAuditResult::FINDING_OUTCOMES, true)) {
+                continue;
+            }
+
+            $changes['open']++;
+
+            if (isset($open[$key])) {
+                unset($open[$key]);
+
+                continue;
+            }
+
+            AutoAuditFinding::create([
+                'client_id' => $result->client_id,
+                'key'       => $key,
+                'opened_at' => $result->created_at,
+            ]);
+            $changes['opened']++;
+        }
+
+        // Остались находки, у которых проблемной строки больше нет.
+        foreach ($open as $key => $finding) {
+            $finding->update(['closed_at' => $now, 'closed_outcome' => $current[$key]->outcome ?? null]);
+            $changes['closed']++;
+        }
+
+        $this->findingChanges = $changes;
     }
 
     /**

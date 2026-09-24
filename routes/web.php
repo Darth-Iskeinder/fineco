@@ -138,6 +138,9 @@ Route::middleware('auth:employee')->group(function () {
     // страница отвечает 404, проверка внутри контроллера. Со страницы проверку не
     // запустить: прогон только командой autoaudit:run в терминале.
     Route::get('/auto-audit', [AutoAuditController::class, 'index'])->name('auto-audit.index');
+    // Решение руководителя по находке. Права и флаг проверяет контроллер.
+    Route::post('/auto-audit/findings/{finding}/accept', [AutoAuditController::class, 'accept'])->name('auto-audit.findings.accept');
+    Route::post('/auto-audit/findings/{finding}/reject', [AutoAuditController::class, 'reject'])->name('auto-audit.findings.reject');
 
     // Страница руководителя (только роль manager, вне системы модулей)
     Route::prefix('dashboard')->name('dashboard.')->middleware('manager')->group(function () {

@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Jobs\RunAutoAuditJob;
+use App\Models\AutoAuditFinding;
+use App\Models\AutoAuditFindingMessage;
 use App\Models\AutoAuditResult;
 use App\Models\Tenant;
 use App\Services\AutoAudit\AutoAuditRunner;
@@ -10,6 +12,7 @@ use App\Support\Impersonation;
 use App\Support\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\View\View;
@@ -29,6 +32,10 @@ use Illuminate\View\View;
  *
  * Запустить проверку со страницы нельзя: прогон идёт только командой `autoaudit:run` в
  * терминале. Пока он идёт, страница показывает это и сама обновляется.
+ *
+ * Находки (см. AutoAuditFinding): у проблемных строк колонка «Ответ» с перепиской и
+ * кнопками «Принять» и «Не принято», и фильтр «Без ответа». Руководителю это видно, только
+ * когда фирме включили флаг autoaudit:access --findings-on, вендору всегда.
  */
 class AutoAuditController extends Controller
 {
@@ -75,8 +82,17 @@ class AutoAuditController extends Controller
             // «Нет документа» бывает общим для нескольких проверок: строка видна под каждой.
             ->filter(fn (AutoAuditResult $r) => $rule === null || in_array((int) $rule, $r->ruleNumbers(), true));
 
+        $showFindings = $this->findingsVisible();
+        $findings     = $showFindings ? $this->openFindings($inPeriodAndRule) : [];
+
+        $awaiting = fn (AutoAuditResult $r) => isset($findings[$r->key()]) && $findings[$r->key()]->awaitsAnswer($r);
+
+        // Фильтр «Без ответа» работает вместе с остальными, но только там, где находки видны.
+        $unanswered = $showFindings && $request->query('answer') === 'none';
+
         $results = $inPeriodAndRule
             ->filter(fn (AutoAuditResult $r) => $status === null || $r->outcome === $status)
+            ->filter(fn (AutoAuditResult $r) => !$unanswered || $awaiting($r))
             ->sort(fn (AutoAuditResult $a, AutoAuditResult $b) => $this->sortKey($a) <=> $this->sortKey($b))
             ->values();
 
@@ -97,7 +113,102 @@ class AutoAuditController extends Controller
             'running'       => $this->isRunning($state),
             'vendor'        => Impersonation::isActive(),
             'openToManager' => (bool) Tenant::find(TenantContext::id())?->autoAuditEnabled(),
+            'showFindings'  => $showFindings,
+            'findings'      => $findings,
+            'unanswered'    => $unanswered,
+            // Без фильтра статуса, как плитки: число не должно зависеть от выбранной плитки.
+            'awaitingCount' => $inPeriodAndRule->filter($awaiting)->count(),
         ]);
+    }
+
+    /** Руководитель принял объяснение: строка становится «Объяснено», пока итог тот же. */
+    public function accept(Request $request, AutoAuditFinding $finding): RedirectResponse
+    {
+        return $this->decide($request, $finding, AutoAuditFindingMessage::ACCEPTED, null);
+    }
+
+    /** Руководитель не принял ответ: комментарий обязателен, находка снова ждёт бухгалтера. */
+    public function reject(Request $request, AutoAuditFinding $finding): RedirectResponse
+    {
+        $data = $request->validate(
+            ['body' => ['required', 'string', 'max:2000']],
+            ['body.required' => 'Напишите, что не так с ответом'],
+        );
+
+        return $this->decide($request, $finding, AutoAuditFindingMessage::REJECTED, trim($data['body']));
+    }
+
+    /**
+     * Записать решение руководителя по находке.
+     *
+     * Страница присылает id строки, которую человек видел. Если с тех пор прошёл прогон и
+     * итог сменился, решение относилось бы к другому, и мы его не пишем, а просим обновить.
+     */
+    private function decide(Request $request, AutoAuditFinding $finding, string $kind, ?string $body): RedirectResponse
+    {
+        $this->decidersOnly();
+
+        $result = AutoAuditResult::current()->find((int) $request->input('result_id'));
+
+        if (
+            $finding->closed_at !== null
+            || $result === null
+            || $result->key() !== $finding->key
+            || !in_array($result->outcome, AutoAuditResult::FINDING_OUTCOMES, true)
+        ) {
+            return back()->with('error', 'После вашего входа на страницу прошла проверка и строка изменилась. Обновите страницу и посмотрите ещё раз');
+        }
+
+        $finding->messages()->create([
+            'result_id'   => $result->id,
+            'employee_id' => auth('employee')->id(),
+            'by_vendor'   => Impersonation::isActive(),
+            'kind'        => $kind,
+            'body'        => $body,
+        ]);
+
+        return back()->with('success', $kind === AutoAuditFindingMessage::ACCEPTED ? 'Принято' : 'Отправлено бухгалтеру');
+    }
+
+    /**
+     * Открытые находки строк периода, по ключу строки. Переписка подгружается сразу: по ней
+     * считается состояние каждой строки.
+     *
+     * @return array<string, AutoAuditFinding>
+     */
+    private function openFindings(Collection $results): array
+    {
+        $keys = $results->map(fn (AutoAuditResult $r) => $r->key())->unique()->values()->all();
+
+        if (!$keys) {
+            return [];
+        }
+
+        return AutoAuditFinding::open()
+            ->whereIn('key', $keys)
+            ->with('messages.employee:id,full_name')
+            ->orderBy('id')
+            ->get()
+            // Если открытых с одним ключом вдруг две, прогон закроет младшую. До тех пор
+            // показываем старшую: у неё переписка.
+            ->reverse()
+            ->keyBy('key')
+            ->all();
+    }
+
+    /** Видны ли находки: вендору всегда, руководителю по флагу фирмы. */
+    private function findingsVisible(): bool
+    {
+        return Impersonation::isActive()
+            || (bool) Tenant::find(TenantContext::id())?->autoAuditFindingsEnabled();
+    }
+
+    /** Решать по находкам могут только руководитель (при включённом флаге) и вендор. */
+    private function decidersOnly(): void
+    {
+        $this->allowedOnly();
+
+        abort_unless($this->findingsVisible(), 404);
     }
 
     /**

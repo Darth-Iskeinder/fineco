@@ -4,6 +4,8 @@
 
 @section('content')
 @php
+    use App\Models\AutoAuditFinding;
+    use App\Models\AutoAuditFindingMessage;
     use App\Models\AutoAuditResult;
     use App\Services\AutoAudit\AutoAuditRunner;
 
@@ -40,6 +42,12 @@
     ];
 
     $money = fn ($value) => $value === null ? '' : number_format((float) $value, 2, ',', ' ');
+
+    // Русский плюрал: формы [1, 2–4, 5+] (локаль приложения en, trans_choice не подходит)
+    $plural = fn (int $n, array $f) => $f[($n % 10 === 1 && $n % 100 !== 11) ? 0 : (($n % 10 >= 2 && $n % 10 <= 4 && ($n % 100 < 10 || $n % 100 >= 20)) ? 1 : 2)];
+
+    // Все фильтры страницы, кроме статуса: их несут плитки и ссылка «Без ответа».
+    $filters = array_filter(['period' => $period, 'rule' => $rule, 'answer' => $unanswered ? 'none' : null]);
 @endphp
 
 <div class="space-y-4" x-data="autoAuditDocs()" @keydown.escape.window="closeDocViewer()">
@@ -88,6 +96,9 @@
                     @if ($status)
                         <input type="hidden" name="status" value="{{ $status }}">
                     @endif
+                    @if ($unanswered)
+                        <input type="hidden" name="answer" value="none">
+                    @endif
                     <label for="period" class="text-sm font-medium text-slate-700"
                            title="Период, за который составлены документы. Отчёт за июль сдают в августе, и он здесь в июле.">Период</label>
                     <select id="period" name="period" onchange="this.form.submit()"
@@ -104,13 +115,21 @@
                             <option value="{{ $number }}" @selected($rule === (string) $number)>№{{ $number }} {{ $definition['name'] }}</option>
                         @endforeach
                     </select>
+                    @if ($showFindings)
+                        {{-- Строки, по которым бухгалтер не ответил или ответ не приняли. Повторный клик снимает фильтр. --}}
+                        @php $answerFilters = array_filter(['period' => $period, 'rule' => $rule, 'status' => $status]); @endphp
+                        <a href="{{ route('auto-audit.index', $unanswered ? $answerFilters : $answerFilters + ['answer' => 'none']) }}"
+                           title="Бухгалтер не ответил, или ответ не приняли"
+                           @class(['rounded-lg border text-sm px-3 py-2 transition-colors', 'border-indigo-200 bg-indigo-50 text-indigo-700' => $unanswered, 'border-slate-200 text-slate-700 hover:bg-slate-50' => !$unanswered])>
+                            Без ответа: {{ $awaitingCount }}
+                        </a>
+                    @endif
                 </form>
             </div>
 
             {{-- Плитки-счётчики, как на странице руководителя. Клик выбирает статус, повторный
                  клик по выбранной снимает фильтр. Цвет несёт точка, цифры чернильные. --}}
             <div class="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-px bg-slate-100 border-t border-slate-100 rounded-b-2xl overflow-hidden">
-                @php $filters = array_filter(['period' => $period, 'rule' => $rule]); @endphp
                 <a href="{{ route('auto-audit.index', $filters) }}"
                    @class(['flex flex-col justify-between px-4 py-3 transition-colors', 'bg-indigo-50' => $status === null, 'bg-white hover:bg-slate-50' => $status !== null])>
                     <div class="text-[13px] text-slate-500">Все</div>
@@ -132,6 +151,10 @@
         @endif
     </div>
 
+    @if ($errors->has('body'))
+        <div class="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{{ $errors->first('body') }}</div>
+    @endif
+
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-x-auto">
         @if ($results->isEmpty())
             <p class="px-6 py-10 text-center text-sm text-slate-500">
@@ -149,11 +172,19 @@
                         <th class="px-4 py-3 text-right">Разница</th>
                         <th class="px-4 py-3">Документы</th>
                         <th class="px-4 py-3">Статус</th>
+                        @if ($showFindings)
+                            <th class="px-4 py-3">Ответ</th>
+                        @endif
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
                     @foreach ($results as $result)
-                        <tr class="align-top">
+                        @php
+                            $finding = $findings[$result->key()] ?? null;
+                            $findingState = $finding?->state($result);
+                        @endphp
+                        {{-- Принятое остаётся на странице, но серым: смотреть на него больше не нужно. --}}
+                        <tr @class(['align-top', 'opacity-60' => $findingState === AutoAuditFinding::ACCEPTED])>
                             {{-- У «нет документа» строка общая для всех проверок клиента: номера столбиком. --}}
                             <td class="px-4 py-3 text-slate-700 space-y-1">
                                 @foreach ($result->ruleNumbers() as $number)
@@ -207,6 +238,52 @@
                                     <p class="mt-1 text-xs text-slate-500">{{ mb_strtoupper(mb_substr($reason, 0, 1)) . mb_substr($reason, 1) }}</p>
                                 @endif
                             </td>
+                            @if ($showFindings)
+                                <td class="px-4 py-3 text-xs space-y-1 min-w-[16rem]">
+                                    @if ($finding)
+                                        @if ($findingState === AutoAuditFinding::ACCEPTED)
+                                            <span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap bg-slate-100 text-slate-600">Объяснено</span>
+                                        @else
+                                            @php $days = $finding->daysOpen(); @endphp
+                                            <p class="text-slate-500" title="С {{ $finding->opened_at->format('d.m.Y') }}">
+                                                {{ $days === 0 ? 'Висит с сегодня' : 'Висит ' . $days . ' ' . $plural($days, ['день', 'дня', 'дней']) }}
+                                            </p>
+                                        @endif
+
+                                        @forelse ($finding->messages as $message)
+                                            <div>
+                                                <span class="font-medium text-slate-600">{{ AutoAuditFindingMessage::LABELS[$message->kind] ?? $message->kind }}</span><span class="text-slate-400">, {{ $message->authorName() }}, {{ $message->created_at->format('d.m') }}</span>@if ($message->result_id !== $result->id)<span class="text-slate-400" title="Сообщение относится к прежнему итогу строки, до замены файла или исправления">, к прежнему итогу</span>@endif
+                                                @if ($message->body)
+                                                    <p class="text-slate-700 whitespace-pre-line">{{ $message->body }}</p>
+                                                @endif
+                                            </div>
+                                        @empty
+                                            <p class="text-slate-400">Ответа пока нет</p>
+                                        @endforelse
+
+                                        @if ($findingState !== AutoAuditFinding::ACCEPTED)
+                                            <div class="flex items-start gap-2 pt-1">
+                                                <form method="POST" action="{{ route('auto-audit.findings.accept', $finding) }}">
+                                                    @csrf
+                                                    <input type="hidden" name="result_id" value="{{ $result->id }}">
+                                                    <button type="submit" class="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 font-semibold hover:bg-emerald-100 transition-colors">Принять</button>
+                                                </form>
+                                                {{-- Комментарий обязателен: бухгалтеру надо понять, что не так. --}}
+                                                <details class="flex-1">
+                                                    <summary class="inline-block px-2 py-1 rounded-lg bg-red-50 text-red-700 font-semibold cursor-pointer" style="list-style: none">Не принято</summary>
+                                                    <form method="POST" action="{{ route('auto-audit.findings.reject', $finding) }}" class="mt-2 space-y-2">
+                                                        @csrf
+                                                        <input type="hidden" name="result_id" value="{{ $result->id }}">
+                                                        <textarea name="body" rows="3" required maxlength="2000" placeholder="Что не так с ответом"
+                                                                  class="w-full rounded-lg border border-slate-200 text-xs px-2 py-1"></textarea>
+                                                        <button type="submit" class="px-2 py-1 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition-colors">Отправить бухгалтеру</button>
+                                                    </form>
+                                                </details>
+                                            </div>
+                                        @endif
+                                    @endif
+                                </td>
+                            @endif
                         </tr>
                     @endforeach
                 </tbody>

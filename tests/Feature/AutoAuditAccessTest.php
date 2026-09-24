@@ -110,4 +110,32 @@ class AutoAuditAccessTest extends TestCase
 
         $this->assertFalse($this->tenant->fresh()->autoAuditEnabled());
     }
+
+    /** Флаг находок отдельный: не трогает флаг страницы и остальные настройки. */
+    public function test_findings_flag_is_separate(): void
+    {
+        $this->assertFalse($this->tenant->autoAuditFindingsEnabled());
+
+        $this->artisan('autoaudit:access', ['--tenant' => $this->tenant->id, '--findings-on' => true])
+            ->expectsOutputToContain('Ответы по находкам руководителю: видны')
+            ->assertSuccessful();
+
+        $tenant = $this->tenant->fresh();
+        $this->assertTrue($tenant->autoAuditFindingsEnabled());
+        $this->assertFalse($tenant->autoAuditEnabled());
+        $this->assertSame('keep me', $tenant->settings['other']);
+
+        $this->artisan('autoaudit:access', ['--tenant' => $this->tenant->id, '--on' => true])->assertSuccessful();
+        $this->artisan('autoaudit:access', ['--tenant' => $this->tenant->id, '--findings-off' => true])
+            ->expectsOutputToContain('скрыты')
+            ->assertSuccessful();
+
+        $tenant = $this->tenant->fresh();
+        $this->assertFalse($tenant->autoAuditFindingsEnabled());
+        $this->assertTrue($tenant->autoAuditEnabled());
+
+        $this->artisan('autoaudit:access', ['--tenant' => $this->tenant->id, '--findings-on' => true, '--findings-off' => true])
+            ->assertFailed();
+        $this->assertFalse($this->tenant->fresh()->autoAuditFindingsEnabled());
+    }
 }

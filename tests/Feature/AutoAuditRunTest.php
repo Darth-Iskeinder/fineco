@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Models\AutoAuditFinding;
+use App\Models\AutoAuditFindingMessage;
 use App\Models\AutoAuditResult;
 use App\Models\BuhTaskDocument;
 use App\Models\BuhTaskLog;
@@ -2023,6 +2025,389 @@ class AutoAuditRunTest extends TestCase
      * Прогон под замком, как его делает команда. Ошибку прогона глотаем: тесты смотрят на
      * состояние и замок, которые perform записал до того, как пробросить её наружу.
      */
+    // ─── Находки ─────────────────────────────────────────────────────────────────
+
+    /** «Не совпало» открывает находку. Висит она с того дня, когда появилась строка. */
+    public function test_mismatch_opens_a_finding_dated_by_its_row(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 150.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $runner = app(AutoAuditRunner::class);
+        $runner->run();
+
+        $mismatch = AutoAuditResult::current()->where('rule', '1')->firstOrFail();
+        $finding  = AutoAuditFinding::sole();
+
+        $this->assertSame(['opened' => 1, 'closed' => 0, 'open' => 1], $runner->findingChanges());
+        $this->assertSame($mismatch->key(), $finding->key);
+        $this->assertSame($client->id, $finding->client_id);
+        $this->assertNull($finding->closed_at);
+        $this->assertTrue($mismatch->created_at->equalTo($finding->opened_at));
+    }
+
+    /** Строки, что уже висели до выкатки находок, получают дату своей строки, а не дату прогона. */
+    public function test_finding_for_an_old_row_counts_days_from_the_row(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 150.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $this->travelTo(now()->subDays(5));
+        $this->runAudit();
+        // Находок тогда ещё не было.
+        AutoAuditFinding::query()->delete();
+        $this->travelBack();
+
+        $this->runAudit();
+
+        $this->assertSame(5, AutoAuditFinding::sole()->daysOpen());
+    }
+
+    public function test_rerun_keeps_the_same_finding(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 150.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $this->runAudit();
+        $finding = AutoAuditFinding::sole();
+
+        $runner = app(AutoAuditRunner::class);
+        $runner->run();
+
+        $this->assertSame(['opened' => 0, 'closed' => 0, 'open' => 1], $runner->findingChanges());
+        $this->assertSame($finding->id, AutoAuditFinding::sole()->id);
+    }
+
+    /** Итог сменился с одного проблемного на другой: находка и переписка те же. */
+    public function test_finding_survives_a_change_of_numbers(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 150.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $this->runAudit();
+        $finding = AutoAuditFinding::sole();
+
+        $this->sheets['осв.xls']['accounts']['3210'] = 170.00;
+        $this->runAudit();
+
+        $this->assertSame(1, AutoAuditFinding::count());
+        $this->assertNull($finding->fresh()->closed_at);
+    }
+
+    /** Исправили: по ключу стало «Совпало», находка закрывается сама, переписка остаётся. */
+    public function test_finding_closes_when_the_row_matches(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 150.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $this->runAudit();
+        $this->asVendor()->post(route('auto-audit.findings.reject', AutoAuditFinding::sole()), [
+            'result_id' => AutoAuditResult::current()->where('rule', '1')->value('id'),
+            'body'      => 'Проверьте оборот',
+        ]);
+
+        $this->sheets['осв.xls']['accounts']['3210'] = 100.00;
+        $runner = app(AutoAuditRunner::class);
+        $runner->run();
+
+        $finding = AutoAuditFinding::sole();
+        $this->assertSame(['opened' => 0, 'closed' => 1, 'open' => 0], $runner->findingChanges());
+        $this->assertNotNull($finding->closed_at);
+        $this->assertSame(AutoAuditResult::MATCHED, $finding->closed_outcome);
+        $this->assertCount(1, $finding->messages);
+    }
+
+    /** Строки не стало (клиента удалили): находка закрывается без итога. */
+    public function test_finding_closes_when_the_row_is_gone(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 150.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $this->runAudit();
+
+        $client->delete();
+        $this->runAudit();
+
+        $finding = AutoAuditFinding::sole();
+        $this->assertNotNull($finding->closed_at);
+        $this->assertNull($finding->closed_outcome);
+    }
+
+    /** Скан и «Не удалось проверить» с бухгалтера не спрашиваем: находки нет. */
+    public function test_scan_and_unverified_open_no_finding(): void
+    {
+        $scanned = $this->client();
+        $this->attachSheet($scanned, 'осв-1.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachLog($scanned, $this->item($scanned, $this->taxService), 'отчёт-фото.jpg');
+
+        $unsure = $this->client();
+        $this->attachSheet($unsure, 'осв-2.xls', ['3210' => null, '3410' => 4.00]);
+        $this->attachReport($unsure, 'отчёт-2.pdf', base: 100.00, tax: 4.00);
+
+        $results = $this->runAudit();
+
+        $this->assertContains(AutoAuditResult::SCAN, $results->pluck('outcome'));
+        $this->assertContains(AutoAuditResult::UNVERIFIED, $results->pluck('outcome'));
+        $this->assertSame(0, AutoAuditFinding::count());
+    }
+
+    /** Все четыре проблемных итога открывают находку. */
+    public function test_missing_and_wrong_documents_open_findings(): void
+    {
+        $missing = $this->client();
+        $this->attachSheet($missing, 'осв-1.xls', ['3210' => 100.00, '3410' => 4.00]);
+        // Задача закрыта, а файла к ней нет.
+        BuhTaskLog::create([
+            'employee_id' => $this->admin->id, 'client_id' => $missing->id,
+            'estimate_item_id' => $this->item($missing, $this->taxService)->id, 'year' => 2026, 'month' => 8, 'status' => 'completed',
+        ]);
+
+        $wrong = $this->client();
+        $this->attachSheet($wrong, 'осв-2.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachLog($wrong, $this->item($wrong, $this->taxService), 'чужое.pdf');
+
+        $results = $this->runAudit();
+
+        $this->assertContains(AutoAuditResult::MISSING_DOCUMENT, $results->pluck('outcome'));
+        $this->assertContains(AutoAuditResult::WRONG_DOCUMENT, $results->pluck('outcome'));
+        $this->assertSame(2, AutoAuditFinding::count());
+    }
+
+    /** Вендор принимает: строка серая «Объяснено», и так остаётся, пока итог тот же. */
+    public function test_vendor_accepts_a_finding(): void
+    {
+        [$client, $mismatch] = $this->mismatchRow();
+
+        $this->asVendor()
+            ->post(route('auto-audit.findings.accept', AutoAuditFinding::sole()), ['result_id' => $mismatch->id])
+            ->assertRedirect();
+
+        $message = AutoAuditFindingMessage::sole();
+        $this->assertSame(AutoAuditFindingMessage::ACCEPTED, $message->kind);
+        $this->assertSame($mismatch->id, $message->result_id);
+        $this->assertTrue($message->by_vendor);
+
+        $this->runAudit();
+
+        $this->asVendor()->get(route('auto-audit.index'))
+            ->assertOk()
+            ->assertSee('Объяснено')
+            ->assertSee('Без ответа: 0')
+            ->assertDontSee(route('auto-audit.findings.accept', AutoAuditFinding::sole()));
+    }
+
+    /** Принятое не переносится на новый итог: цифры сменились, строка снова ждёт ответа. */
+    public function test_acceptance_does_not_carry_over_to_a_new_verdict(): void
+    {
+        [$client, $mismatch] = $this->mismatchRow();
+        $this->asVendor()->post(route('auto-audit.findings.accept', AutoAuditFinding::sole()), ['result_id' => $mismatch->id]);
+
+        $this->sheets['осв.xls']['accounts']['3210'] = 170.00;
+        $this->runAudit();
+
+        $current = AutoAuditResult::current()->where('rule', '1')->firstOrFail();
+        $finding = AutoAuditFinding::with('messages')->sole();
+        $this->assertNotSame($mismatch->id, $current->id);
+        $this->assertSame(AutoAuditFinding::WAITING, $finding->state($current));
+
+        $this->asVendor()->get(route('auto-audit.index'))
+            ->assertSee('Без ответа: 1')
+            ->assertSee('к прежнему итогу')
+            ->assertDontSee('Объяснено');
+    }
+
+    /** «Не принято» без комментария не пишется. С комментарием строка снова ждёт бухгалтера. */
+    public function test_reject_needs_a_comment(): void
+    {
+        [, $mismatch] = $this->mismatchRow();
+        $finding = AutoAuditFinding::sole();
+
+        $this->asVendor()
+            ->post(route('auto-audit.findings.reject', $finding), ['result_id' => $mismatch->id, 'body' => '  '])
+            ->assertSessionHasErrors('body');
+        $this->assertSame(0, AutoAuditFindingMessage::count());
+
+        $this->asVendor()
+            ->post(route('auto-audit.findings.reject', $finding), ['result_id' => $mismatch->id, 'body' => 'Где пояснение?'])
+            ->assertSessionHasNoErrors();
+
+        $finding = AutoAuditFinding::with('messages')->sole();
+        $this->assertSame(AutoAuditFinding::REJECTED, $finding->state($mismatch));
+
+        $this->asVendor()->get(route('auto-audit.index', ['answer' => 'none']))
+            ->assertSee('Где пояснение?')
+            ->assertSee('Не принято')
+            ->assertSee('Без ответа: 1');
+    }
+
+    /** Между загрузкой страницы и кликом прошёл прогон: решение по старой строке не пишем. */
+    public function test_decision_on_a_changed_row_is_refused(): void
+    {
+        [, $mismatch] = $this->mismatchRow();
+
+        $this->sheets['осв.xls']['accounts']['3210'] = 170.00;
+        $this->runAudit();
+
+        $this->asVendor()
+            ->post(route('auto-audit.findings.accept', AutoAuditFinding::sole()), ['result_id' => $mismatch->id])
+            ->assertSessionHas('error');
+        $this->assertSame(0, AutoAuditFindingMessage::count());
+    }
+
+    /** Закрытую находку принять нельзя. */
+    public function test_closed_finding_takes_no_decision(): void
+    {
+        [, $mismatch] = $this->mismatchRow();
+        $finding = AutoAuditFinding::sole();
+
+        $this->sheets['осв.xls']['accounts']['3210'] = 100.00;
+        $this->runAudit();
+
+        $this->asVendor()
+            ->post(route('auto-audit.findings.accept', $finding), ['result_id' => $mismatch->id])
+            ->assertSessionHas('error');
+        $this->assertSame(0, AutoAuditFindingMessage::count());
+    }
+
+    /** Фильтр «Без ответа» оставляет только строки, которые ждут бухгалтера. */
+    public function test_unanswered_filter(): void
+    {
+        [$client, $mismatch] = $this->mismatchRow();
+        $other = $this->client();
+        $this->attachSheet($other, 'осв-2.xls', ['3210' => 300.00, '3410' => 4.00]);
+        $this->attachReport($other, 'отчёт-2.pdf', base: 100.00, tax: 4.00);
+        $this->runAudit();
+
+        $this->asVendor()->post(
+            route('auto-audit.findings.accept', AutoAuditFinding::get()->firstWhere('client_id', $client->id)),
+            ['result_id' => $mismatch->id],
+        );
+
+        $this->asVendor()->get(route('auto-audit.index', ['answer' => 'none']))
+            ->assertOk()
+            ->assertSee($other->name)
+            ->assertDontSee($client->name)
+            ->assertSee('Без ответа: 1');
+    }
+
+    /** Флаг находок выключен: руководитель не видит колонку и не может решать. */
+    public function test_manager_without_the_findings_flag_sees_no_answers(): void
+    {
+        [, $mismatch] = $this->mismatchRow();
+        $this->tenant->setAutoAuditEnabled(true);
+        $manager = $this->employee(Role::MANAGER);
+
+        $this->actingAs($manager, 'employee')->get(route('auto-audit.index', ['answer' => 'none']))
+            ->assertOk()
+            ->assertDontSee('Без ответа')
+            ->assertDontSee('Ответа пока нет')
+            ->assertDontSee(route('auto-audit.findings.accept', AutoAuditFinding::sole()));
+
+        $this->actingAs($manager, 'employee')
+            ->post(route('auto-audit.findings.accept', AutoAuditFinding::sole()), ['result_id' => $mismatch->id])
+            ->assertNotFound();
+        $this->assertSame(0, AutoAuditFindingMessage::count());
+    }
+
+    /** Флаг включён: руководитель видит ответы и принимает от своего имени. */
+    public function test_manager_with_the_findings_flag_accepts(): void
+    {
+        [, $mismatch] = $this->mismatchRow();
+        $this->tenant->setAutoAuditEnabled(true);
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $manager = $this->employee(Role::MANAGER);
+
+        $this->actingAs($manager, 'employee')->get(route('auto-audit.index'))
+            ->assertOk()
+            ->assertSee('Ответа пока нет')
+            ->assertSee('Висит с сегодня')
+            ->assertSee(route('auto-audit.findings.accept', AutoAuditFinding::sole()));
+
+        $this->actingAs($manager, 'employee')
+            ->post(route('auto-audit.findings.accept', AutoAuditFinding::sole()), ['result_id' => $mismatch->id])
+            ->assertSessionHas('success');
+
+        $message = AutoAuditFindingMessage::sole();
+        $this->assertSame($manager->id, $message->employee_id);
+        $this->assertFalse($message->by_vendor);
+        $this->assertSame($manager->full_name, $message->authorName());
+    }
+
+    /** Флаг находок без открытой страницы ничего не открывает, и другим ролям тоже. */
+    public function test_only_manager_and_vendor_decide(): void
+    {
+        [, $mismatch] = $this->mismatchRow();
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+
+        // Страница руководителю закрыта: флаг находок её не открывает.
+        $this->actingAs($this->employee(Role::MANAGER), 'employee')
+            ->post(route('auto-audit.findings.accept', AutoAuditFinding::sole()), ['result_id' => $mismatch->id])
+            ->assertNotFound();
+
+        $this->tenant->setAutoAuditEnabled(true);
+
+        foreach ([Role::ADMIN, Role::HEAD_ACCOUNTANT, Role::ACCOUNTANT, Role::AUDITOR] as $role) {
+            $this->actingAs($this->employee($role), 'employee')
+                ->post(route('auto-audit.findings.reject', AutoAuditFinding::sole()), ['result_id' => $mismatch->id, 'body' => 'нет'])
+                ->assertNotFound();
+        }
+
+        $this->assertSame(0, AutoAuditFindingMessage::count());
+    }
+
+    /** Находку чужой фирмы не открыть даже по прямому адресу. */
+    public function test_finding_of_another_firm_is_not_reachable(): void
+    {
+        [, $mismatch] = $this->mismatchRow();
+        $finding = AutoAuditFinding::sole();
+
+        $other = Tenant::create([
+            'name'   => 'Соседняя фирма ' . uniqid(),
+            'slug'   => 'neighbour-' . uniqid(),
+            'status' => Tenant::STATUS_ACTIVE,
+        ]);
+        $other->setAutoAuditEnabled(true);
+        $other->setAutoAuditFindingsEnabled(true);
+        $foreignManager = TenantContext::for($other, fn () => $this->employee(Role::MANAGER));
+
+        $this->actingAs($foreignManager, 'employee')
+            ->post(route('auto-audit.findings.accept', $finding), ['result_id' => $mismatch->id])
+            ->assertNotFound();
+        $this->assertSame(0, AutoAuditFindingMessage::count());
+    }
+
+    /** Прогон одной фирмы не трогает находки другой. */
+    public function test_run_does_not_touch_findings_of_another_firm(): void
+    {
+        $other = Tenant::create([
+            'name'   => 'Соседняя фирма ' . uniqid(),
+            'slug'   => 'neighbour-' . uniqid(),
+            'status' => Tenant::STATUS_ACTIVE,
+        ]);
+        $foreign = TenantContext::for($other, fn () => AutoAuditFinding::create([
+            'client_id' => $this->client()->id, 'key' => 'check:1:1:2026-07-01..2026-07-31', 'opened_at' => now(),
+        ]));
+
+        $this->runAudit();
+
+        $this->assertNull(AutoAuditFinding::acrossTenants()->find($foreign->id)->closed_at);
+    }
+
+    /** Строка «Не совпало» по №1 у нового клиента, с открытой находкой. */
+    private function mismatchRow(): array
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 150.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $mismatch = $this->runAudit()->firstWhere('rule', '1');
+        $this->assertSame(AutoAuditResult::MISMATCH, $mismatch->outcome);
+
+        return [$client, $mismatch];
+    }
+
     private function performQuietly(AutoAuditRunner $runner): void
     {
         try {

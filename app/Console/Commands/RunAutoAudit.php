@@ -79,6 +79,12 @@ class RunAutoAudit extends Command
             'Без изменений %d, сменилось %d, новых %d, ушло %d',
             $changes['kept'] ?? 0, $changes['changed'] ?? 0, $changes['added'] ?? 0, $changes['gone'] ?? 0,
         ));
+        $findings = $runner->findingChanges();
+
+        $this->line(sprintf(
+            'Находки: открыто %d, закрыто %d, всего открытых %d',
+            $findings['opened'] ?? 0, $findings['closed'] ?? 0, $findings['open'] ?? 0,
+        ));
         $this->line(sprintf('Заняло %.1f с', microtime(true) - $started));
 
         return self::SUCCESS;

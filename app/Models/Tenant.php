@@ -27,6 +27,9 @@ class Tenant extends Model
     /** Ключ в settings: страница автоаудита открыта руководителю фирмы. */
     public const SETTING_AUTO_AUDIT = 'auto_audit';
 
+    /** Ключ в settings: руководитель фирмы видит ответы по находкам автоаудита. */
+    public const SETTING_AUTO_AUDIT_FINDINGS = 'auto_audit_findings';
+
     protected $fillable = [
         'name', 'slug', 'status', 'plan', 'settings', 'is_template',
         // Профиль фирмы: правится в настройках, уходит в акты и сметы.
@@ -107,6 +110,22 @@ class Tenant extends Model
     public function setAutoAuditEnabled(bool $enabled): void
     {
         $this->settings = array_merge($this->settings ?? [], [self::SETTING_AUTO_AUDIT => $enabled]);
+        $this->save();
+    }
+
+    /**
+     * Видит ли руководитель фирмы ответы по находкам автоаудита и кнопки «Принять» и
+     * «Не принято». Включаем вместе с тем, как бухгалтеры начнут отвечать, чтобы
+     * руководитель не смотрел на пустую колонку. Вендору, зашедшему в фирму, видно всегда.
+     */
+    public function autoAuditFindingsEnabled(): bool
+    {
+        return (bool) ($this->settings[self::SETTING_AUTO_AUDIT_FINDINGS] ?? false);
+    }
+
+    public function setAutoAuditFindingsEnabled(bool $enabled): void
+    {
+        $this->settings = array_merge($this->settings ?? [], [self::SETTING_AUTO_AUDIT_FINDINGS => $enabled]);
         $this->save();
     }
 

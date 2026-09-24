@@ -45,6 +45,14 @@ class AutoAuditResult extends Model
     /** Файлы есть, но прочитать нужную форму не вышло. Период у таких строк взят по задаче. */
     public const DOCUMENT_PROBLEMS = [self::WRONG_DOCUMENT, self::SCAN, self::UNREADABLE];
 
+    /**
+     * Итоги, по которым ждём ответа бухгалтера: по ним прогон открывает находку.
+     *
+     * Скан и «Не удалось проверить» сюда не входят. Скан система не читает, а «не удалось
+     * проверить» значит, что не уверена она сама: спрашивать за это с бухгалтера нечестно.
+     */
+    public const FINDING_OUTCOMES = [self::MISMATCH, self::MISSING_DOCUMENT, self::WRONG_DOCUMENT, self::UNREADABLE];
+
     protected $fillable = [
         'client_id', 'rule', 'period_from', 'period_to', 'outcome',
         'left_value', 'right_value', 'difference', 'reason', 'sources', 'superseded_at',
