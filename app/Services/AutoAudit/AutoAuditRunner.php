@@ -41,7 +41,12 @@ use Throwable;
  * Принудительно закрытые задачи ни документа, ни пропуска не дают: человек записал причину,
  * почему документа не будет («ежеквартально», «нет движений», «только один район»).
  *
- * Каждый прогон стирает прошлые результаты фирмы и пишет заново.
+ * Прогон проверяет всех клиентов, но прошлое не стирает, а сравнивает с ним (store).
+ * Новая строка появляется, только когда итог стал другим, прежняя остаётся историей.
+ *
+ * Проверять только изменившихся клиентов сознательно не стали. Итог зависит от многого:
+ * задачи, файлы, ИНН, метод учёта, смета, тип обслуживания. Забыть что-то одно значило бы
+ * молча оставить на странице устаревший вердикт. Полный прогон на бою идёт 35 секунд.
  */
 class AutoAuditRunner
 {
@@ -163,6 +168,9 @@ class AutoAuditRunner
     /** Прочитанное за прогон: один файл разбираем один раз на каждое число. */
     private array $cache = [];
 
+    /** Что изменил последний прогон, см. store. */
+    private array $changes = [];
+
     public function __construct(
         private readonly BalanceSheetReader $balanceSheet,
         private readonly SingleTaxReportReader $taxReport,
@@ -196,7 +204,7 @@ class AutoAuditRunner
         $rules = array_filter(self::RULES, fn (array $rule) => isset($services['osv'], $services[$rule['document']]));
 
         // Ни одна проверка не работает: в фирме не размечены эталонные БП. Это ошибка
-        // разметки, а не пустой результат, и останавливаемся мы до удаления. Раньше прогон
+        // разметки, а не пустой результат, и останавливаемся мы до записи. Раньше прогон
         // шёл дальше, стирал все прошлые строки фирмы и записывал ноль, а страница после
         // этого писала «Проверки ещё не было»: потерю было не отличить от чистой фирмы.
         if (!$rules) {
@@ -211,15 +219,96 @@ class AutoAuditRunner
             array_push($rows, ...$this->checkClient($client, $services, $rules));
         }
 
-        DB::transaction(function () use ($rows) {
-            AutoAuditResult::query()->delete();
-
-            foreach ($rows as $row) {
-                AutoAuditResult::create($row);
-            }
-        });
+        // Одна транзакция на весь прогон: либо записалось всё, либо ничего, и половинчатой
+        // страницы не бывает.
+        $this->changes = DB::transaction(fn () => $this->store($rows));
 
         return collect($rows)->countBy('outcome')->all();
+    }
+
+    /**
+     * Что изменил последний прогон: сколько строк осталось как было, сколько сменилось
+     * новым итогом, сколько появилось впервые и сколько ушло.
+     *
+     * @return array{kept: int, changed: int, added: int, gone: int}
+     */
+    public function changes(): array
+    {
+        return $this->changes;
+    }
+
+    /**
+     * Сверить строки прогона с действующими и записать разницу.
+     *
+     * По ключу строки (AutoAuditResult::keyOf):
+     *   - итог тот же: строку обновляем на месте. Причина, файлы и ФИО могли поменяться,
+     *     а после замены файла ссылка иначе вела бы на удалённый. Время обновления при этом
+     *     сдвигается всегда: по нему страница пишет «Данные на»;
+     *   - итог другой: прежней ставим superseded_at, новую пишем рядом;
+     *   - строки больше нет (исправили, клиента удалили, сняли с полного обслуживания):
+     *     прежней ставим superseded_at. Ничего не удаляем;
+     *   - строка новая: пишем.
+     */
+    private function store(array $rows): array
+    {
+        $now     = now();
+        $changes = ['kept' => 0, 'changed' => 0, 'added' => 0, 'gone' => 0];
+
+        // Правило фирмы на модели: строки других фирм сюда не попадают.
+        $current = [];
+
+        foreach (AutoAuditResult::current()->orderBy('id')->get() as $result) {
+            $key = $result->key();
+
+            // Двух действующих с одним ключом быть не должно. Если всё же вышло, лишнюю
+            // закрываем, иначе она висела бы на странице вечно.
+            if (isset($current[$key])) {
+                $current[$key]->update(['superseded_at' => $now]);
+            }
+
+            $current[$key] = $result;
+        }
+
+        $seen = [];
+
+        foreach ($rows as $row) {
+            $key = AutoAuditResult::keyOf($row);
+
+            // Два одинаковых ключа в одном прогоне значат ошибку в ключе: строки перепутались
+            // бы между прогонами. Лучше упасть, ничего не записав, чем тихо копить путаницу.
+            if (isset($seen[$key])) {
+                throw new RuntimeException("Две строки автоаудита с одним ключом {$key}. Результаты прошлого прогона не тронуты");
+            }
+
+            $seen[$key] = true;
+            $previous   = $current[$key] ?? null;
+            unset($current[$key]);
+
+            if ($previous && $previous->sameVerdict($row)) {
+                $previous->fill($row);
+                $previous->updated_at = $now;
+                $previous->save();
+                $changes['kept']++;
+
+                continue;
+            }
+
+            if ($previous) {
+                $previous->update(['superseded_at' => $now]);
+                $changes['changed']++;
+            } else {
+                $changes['added']++;
+            }
+
+            AutoAuditResult::create($row);
+        }
+
+        foreach ($current as $gone) {
+            $gone->update(['superseded_at' => $now]);
+            $changes['gone']++;
+        }
+
+        return $changes;
     }
 
     /**

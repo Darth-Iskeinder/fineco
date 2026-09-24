@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\AutoAuditResult;
+use App\Models\BuhTaskDocument;
 use App\Models\BuhTaskLog;
 use App\Models\Client;
 use App\Models\Employee;
@@ -76,7 +77,7 @@ class AutoAuditRunTest extends TestCase
         Storage::fake('local');
         Periodicity::firstOrCreate(['name' => 'Ежемесячно'], ['kind' => 'monthly']);
 
-        // Отдельная фирма: прогон стирает результаты фирмы целиком, чужие трогать нельзя.
+        // Отдельная фирма: прогон сверяет строки фирмы целиком, чужие трогать нельзя.
         $this->tenant = Tenant::create([
             'name'   => 'Фирма автоаудита ' . uniqid(),
             'slug'   => 'autoaudit-' . uniqid(),
@@ -1134,6 +1135,160 @@ class AutoAuditRunTest extends TestCase
         $this->assertCount(2, $this->runAudit());
     }
 
+    /**
+     * Повторный прогон без изменений ничего не дописывает. Суммы из базы приходят строкой
+     * «150.00», из прогона числом: сравнение не должно счесть их разными.
+     */
+    public function test_rerun_without_changes_adds_no_history(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 150.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $first = $this->runAudit();
+
+        $runner = app(AutoAuditRunner::class);
+        $runner->run();
+
+        $this->assertSame(['kept' => 2, 'changed' => 0, 'added' => 0, 'gone' => 0], $runner->changes());
+        $this->assertSame(2, AutoAuditResult::count());
+        $this->assertSame($first->pluck('id')->all(), AutoAuditResult::current()->orderBy('id')->pluck('id')->all());
+    }
+
+    /** Итог поменялся: прежняя строка уходит в историю, новая встаёт рядом. */
+    public function test_changed_verdict_keeps_the_old_row_as_history(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 150.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $first = $this->runAudit();
+        $mismatch = $first->firstWhere('rule', '1');
+        $this->assertSame(AutoAuditResult::MISMATCH, $mismatch->outcome);
+
+        // Бухгалтер исправил ведомость.
+        $this->sheets['осв.xls']['accounts']['3210'] = 100.00;
+
+        $runner = app(AutoAuditRunner::class);
+        $runner->run();
+
+        $this->assertSame(['kept' => 1, 'changed' => 1, 'added' => 0, 'gone' => 0], $runner->changes());
+
+        $current = AutoAuditResult::current()->where('rule', '1')->get();
+        $this->assertCount(1, $current);
+        $this->assertSame(AutoAuditResult::MATCHED, $current->first()->outcome);
+
+        $old = $mismatch->fresh();
+        $this->assertNotNull($old->superseded_at);
+        $this->assertSame(AutoAuditResult::MISMATCH, $old->outcome);
+        $this->assertSame('50.00', $old->difference);
+
+        // Проверка №3 не менялась: та же строка, без истории.
+        $this->assertNull($first->firstWhere('rule', '3')->fresh()->superseded_at);
+        $this->assertSame(3, AutoAuditResult::count());
+    }
+
+    /**
+     * Файл заменили на такой же по числам: итог тот же, история не нужна. Но ссылка на файл
+     * обновляется, иначе вела бы на удалённый.
+     */
+    public function test_same_numbers_in_a_new_file_update_the_row_in_place(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $first = $this->runAudit();
+
+        $this->sheets['осв-новая.xls'] = $this->sheets['осв.xls'];
+        $document = BuhTaskDocument::where('name', 'осв.xls')->firstOrFail();
+        $path     = dirname($document->path) . '/осв-новая.xls';
+        Storage::disk('local')->put($path, 'x');
+        $document->update(['path' => $path, 'name' => 'осв-новая.xls']);
+
+        $second = $this->runAudit();
+
+        $this->assertSame($first->pluck('id')->all(), $second->pluck('id')->all());
+        $this->assertSame(2, AutoAuditResult::count());
+        $this->assertContains('осв-новая.xls', array_column($second->first()->sources, 'name'));
+    }
+
+    /** Клиента удалили: его строки уходят в историю, а не стираются. */
+    public function test_rows_of_a_deleted_client_become_history(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $this->runAudit();
+        $client->delete();
+
+        $runner = app(AutoAuditRunner::class);
+        $runner->run();
+
+        $this->assertSame(['kept' => 0, 'changed' => 0, 'added' => 0, 'gone' => 2], $runner->changes());
+        $this->assertSame(0, AutoAuditResult::current()->count());
+        $this->assertSame(2, AutoAuditResult::whereNotNull('superseded_at')->count());
+    }
+
+    /** У двух филиалов в одном месяце не те файлы: две строки, ключи не сливаются. */
+    public function test_wrong_documents_of_two_branches_are_two_rows(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachLog($client, $this->item($client, $this->taxService, 'Первомайский'), 'чужое-1.pdf');
+        $this->attachLog($client, $this->item($client, $this->taxService, 'Октябрьский'), 'чужое-2.pdf');
+
+        $this->runAudit();
+        $results = $this->runAudit();
+
+        $this->assertCount(2, $results->where('outcome', AutoAuditResult::WRONG_DOCUMENT));
+        $this->assertSame(0, AutoAuditResult::whereNotNull('superseded_at')->count());
+    }
+
+    /** Прогон одной фирмы не закрывает строки другой. */
+    public function test_run_does_not_touch_results_of_another_firm(): void
+    {
+        $other = Tenant::create([
+            'name'   => 'Соседняя фирма ' . uniqid(),
+            'slug'   => 'neighbour-' . uniqid(),
+            'status' => Tenant::STATUS_ACTIVE,
+        ]);
+
+        $foreign = TenantContext::for($other, function () {
+            $client = Client::create(['name' => 'ООО Соседа ' . uniqid(), 'inn' => '02101202519999']);
+
+            return AutoAuditResult::create([
+                'client_id' => $client->id, 'rule' => '1', 'outcome' => AutoAuditResult::MATCHED,
+                'period_from' => '2026-07-01', 'period_to' => '2026-07-31',
+            ]);
+        });
+
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $this->runAudit();
+
+        $this->assertNull(AutoAuditResult::withoutGlobalScopes()->find($foreign->id)->superseded_at);
+    }
+
+    /** На странице только действующие строки: история туда не попадает. */
+    public function test_page_shows_only_current_rows(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 150.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $this->runAudit();
+
+        $this->sheets['осв.xls']['accounts']['3210'] = 100.00;
+        $this->runAudit();
+
+        $this->asVendor()->get(route('auto-audit.index'))
+            ->assertOk()
+            ->assertSee('Совпало')
+            ->assertDontSee('50,00');
+    }
+
     public function test_firm_staff_cannot_see_or_run_the_audit(): void
     {
         $this->actingAs($this->admin, 'employee')->get(route('auto-audit.index'))->assertNotFound();
@@ -1895,11 +2050,12 @@ class AutoAuditRunTest extends TestCase
         ]);
     }
 
+    /** Прогон и действующие строки после него. История в ответ не входит. */
     private function runAudit(): Collection
     {
         app(AutoAuditRunner::class)->run();
 
-        return AutoAuditResult::orderBy('id')->get();
+        return AutoAuditResult::current()->orderBy('id')->get();
     }
 
     private function service(string $name, int $referenceId, bool $splitsByBranch = false): Service

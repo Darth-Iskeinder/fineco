@@ -44,7 +44,8 @@ class AutoAuditController extends Controller
 
         // Список периодов из базы, а строки только выбранного: история растёт с каждым
         // месяцем, и тянуть её в память целиком ради одного периода незачем.
-        $periods = AutoAuditResult::query()
+        // Везде только действующие строки: история лежит в той же таблице.
+        $periods = AutoAuditResult::current()
             ->select(['period_from', 'period_to'])
             ->distinct()
             ->get()
@@ -89,7 +90,9 @@ class AutoAuditController extends Controller
             'status'        => $status,
             // Счётчики без фильтра статуса: иначе при выборе одного статуса остальные обнулятся.
             'counts'        => $inPeriodAndRule->countBy('outcome'),
-            'checkedAt'     => AutoAuditResult::query()->latest('created_at')->value('created_at'),
+            // Прогон сдвигает время обновления у каждой действующей строки, даже если итог
+            // не поменялся. Время создания тут не годится: строка живёт много прогонов.
+            'checkedAt'     => AutoAuditResult::current()->latest('updated_at')->value('updated_at'),
             'state'         => $state,
             'running'       => $this->isRunning($state),
             'vendor'        => Impersonation::isActive(),
@@ -109,7 +112,8 @@ class AutoAuditController extends Controller
 
         [$from, $to] = explode('..', $period, 2);
 
-        return AutoAuditResult::with('client:id,name')
+        return AutoAuditResult::current()
+            ->with('client:id,name')
             ->when($from === '', fn ($q) => $q->whereNull('period_from'), fn ($q) => $q->whereDate('period_from', $from))
             ->when($to === '', fn ($q) => $q->whereNull('period_to'), fn ($q) => $q->whereDate('period_to', $to))
             ->get();
