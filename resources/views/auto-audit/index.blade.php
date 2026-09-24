@@ -49,6 +49,7 @@
             <p class="text-sm text-slate-600">
                 Система сама сверяет суммы в документах, которые бухгалтеры прикладывают к задачам.
                 «Не совпало» не значит ошибку: это повод попросить у бухгалтера пояснение.
+                <a href="{{ route('docs.section', 'auto-audit') }}" target="_blank" class="text-indigo-600 hover:underline">Подробнее о проверках и статусах</a>
             </p>
             <p class="text-sm text-slate-500 mt-1">
                 @if ($checkedAt)

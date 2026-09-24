@@ -449,6 +449,29 @@ class BalanceSheetReaderTest extends TestCase
         $this->assertStringContainsString('период', $result->reason);
     }
 
+    /** Ведомость за год вместо месяца: отказ с понятной причиной, а не «не разобрали период». */
+    public function test_yearly_balance_sheet_is_named_as_such(): void
+    {
+        $yearly = $this->writeBalanceSheet('Оборотно-сальдовая ведомость за 2024 г.');
+
+        $result = $this->reader()->turnover($yearly, '3210', 'credit');
+
+        @unlink($yearly);
+        $this->assertSame(DocumentValue::WRONG_DOC, $result->status);
+        $this->assertSame('Ведомость за 2024 год, а нужна за месяц', $result->reason);
+    }
+
+    /** Квартал словами годом не считается: «за 2 квартал 2026 г.» не превращается в «за 2026 год». */
+    public function test_quarter_in_words_is_not_taken_for_a_year(): void
+    {
+        $quarter = $this->writeBalanceSheet('Оборотно-сальдовая ведомость за 2 квартал 2026 г.');
+
+        $result = $this->reader()->turnover($quarter, '3210', 'credit');
+
+        @unlink($quarter);
+        $this->assertSame('В заголовке ведомости не разобрали период', $result->reason);
+    }
+
     /**
      * Таблица читается, но это не ведомость.
      *

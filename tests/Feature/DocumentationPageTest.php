@@ -53,6 +53,18 @@ class DocumentationPageTest extends TestCase
         $page->assertSee('Когда по строке появятся задачи', false);
     }
 
+    /** Справка по автоаудиту открыта, как и остальные разделы, и объясняет статусы. */
+    public function test_auto_audit_section_is_readable_without_login(): void
+    {
+        $page = $this->get('/documentation/kubik/auto-audit')->assertOk();
+
+        $page->assertSee('Кто видит страницу', false);
+        $page->assertSee('Что значит каждый статус', false);
+        $page->assertSee('Разница до одного сома', false);
+
+        $this->get('/documentation/kubik')->assertSee('/documentation/kubik/auto-audit', false);
+    }
+
     /** Ненаписанный и несуществующий разделы одинаково 404, а не пустая страница. */
     public function test_unknown_and_unwritten_sections_are_not_found(): void
     {

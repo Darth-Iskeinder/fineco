@@ -166,6 +166,11 @@ class AutoAuditRunTest extends TestCase
             return DocumentValue::wrongDocument('Это не отчёт по единому налогу');
         }
 
+        // Не тот документ со своей причиной, отличной от стандартной.
+        if (isset($report['wrong'])) {
+            return DocumentValue::wrongDocument($report['wrong']);
+        }
+
         $period = $report['period'] ?? DocumentPeriod::of(...$report['month']);
 
         // null в тесте: ИНН из шапки прочитать не удалось.
@@ -179,7 +184,8 @@ class AutoAuditRunTest extends TestCase
         $this->attachSheet($client, 'осв-апрель.xls', ['3210' => 100.00, '3410' => 4.00], month: 4);
         $this->attachSheet($client, 'осв-май.xls', ['3210' => 200.00, '3410' => 8.00], month: 5);
         $this->attachSheet($client, 'осв-июнь.xls', ['3210' => 300.00, '3410' => 12.00], month: 6);
-        $this->attachQuarterReport($client, 'отчёт-2кв.pdf', base: 600.00, tax: 25.00);
+        // Налог в отчёте больше суммы ведомостей на 6: это больше допуска, значит расхождение.
+        $this->attachQuarterReport($client, 'отчёт-2кв.pdf', base: 600.00, tax: 30.00);
 
         $results = $this->runAudit();
 
@@ -193,7 +199,7 @@ class AutoAuditRunTest extends TestCase
 
         $tax = $results->firstWhere('rule', '3');
         $this->assertSame(AutoAuditResult::MISMATCH, $tax->outcome);
-        $this->assertSame('-1.00', $tax->difference);
+        $this->assertSame('-6.00', $tax->difference);
     }
 
     /** Нет ведомости за месяц квартала: оборот не сложить, но видно, какого месяца не хватает. */
@@ -415,13 +421,14 @@ class AutoAuditRunTest extends TestCase
 
         $results = $this->runAudit();
 
-        // Чужая форма ломает все четыре проверки по ней.
-        $this->assertSame(['4', '5', '6', '7'], $results->pluck('rule')->sort()->values()->all());
-        $this->assertSame([AutoAuditResult::WRONG_DOCUMENT], $results->pluck('outcome')->unique()->values()->all());
+        // Чужая форма ломает все четыре проверки по ней. Строка одна, в ней номера всех четырёх.
+        $this->assertCount(1, $results);
+        $row = $results->first();
+        $this->assertSame('4,5,6,7', $row->rule);
+        $this->assertSame(AutoAuditResult::WRONG_DOCUMENT, $row->outcome);
 
         // Раньше в строке писалось «Среди файлов задачи нет формы 161», и человек шёл искать
         // файл, который лежит на месте. Настоящая причина была спрятана внутри источника.
-        $row = $results->firstWhere('rule', '4');
         $expected = 'ИНН не совпадает: в документе 02101202510267, в карточке клиента 00907202510583. Документ чужой или ошибка в карточке';
         $this->assertSame($expected, $row->reason);
         $this->assertSame($expected, $row->sources[0]['reason']);
@@ -824,13 +831,16 @@ class AutoAuditRunTest extends TestCase
         $this->assertCount(2, $checks);
         $this->assertSame([$fine->id], $checks->pluck('client_id')->unique()->values()->all());
 
-        // Кассовый метод и полное обслуживание: файл ломает обе проверки, строка под каждой.
+        // Кассовый метод и полное обслуживание: файл ломает обе проверки. Строка одна на
+        // беду, в ней номера обеих, а не копия под каждой.
         $issues = $results->where('outcome', AutoAuditResult::WRONG_DOCUMENT);
-        $this->assertSame(['1', '3'], $issues->pluck('rule')->sort()->values()->all());
-        $this->assertSame([$broken->id], $issues->pluck('client_id')->unique()->values()->all());
+        $this->assertCount(1, $issues);
 
         $issue = $issues->first();
-        $this->assertSame('Среди файлов задачи нет отчёта по единому налогу', $issue->reason);
+        $this->assertSame($broken->id, $issue->client_id);
+        $this->assertSame('1,3', $issue->rule);
+        // Причина из самого файла, а не «Среди файлов задачи нет отчёта»: файл-то лежит.
+        $this->assertSame('Это не отчёт по единому налогу', $issue->reason);
         $this->assertSame('форма-161.pdf', $issue->sources[0]['name']);
         $this->assertSame('Это не отчёт по единому налогу', $issue->sources[0]['reason']);
         $this->assertSame('08.2026', $issue->sources[0]['task_month']);
@@ -877,7 +887,7 @@ class AutoAuditRunTest extends TestCase
         $this->assertSame($accrual->id, $issue->client_id);
         $this->assertSame('3', $issue->rule);
         $this->assertSame(AutoAuditResult::WRONG_DOCUMENT, $issue->outcome);
-        $this->assertSame('Среди файлов задачи нет оборотно-сальдовой ведомости', $issue->reason);
+        $this->assertSame('Это не оборотно-сальдовая ведомость', $issue->reason);
     }
 
     /** Фото вместо PDF: документ может быть и тем, поэтому не «не тот документ», а скан. */
@@ -889,8 +899,9 @@ class AutoAuditRunTest extends TestCase
 
         $results = $this->runAudit();
 
-        $this->assertSame(['1', '3'], $results->pluck('rule')->sort()->values()->all());
-        $this->assertSame([AutoAuditResult::SCAN], $results->pluck('outcome')->unique()->values()->all());
+        $this->assertCount(1, $results);
+        $this->assertSame('1,3', $results->first()->rule);
+        $this->assertSame(AutoAuditResult::SCAN, $results->first()->outcome);
         $this->assertSame(DocumentValue::SCAN, $results->first()->sources[0]['status']);
 
         $this->asVendor()->get(route('auto-audit.index'))
@@ -1624,6 +1635,80 @@ class AutoAuditRunTest extends TestCase
         $lock->release();
     }
 
+    /**
+     * Допуск 1 сом: копейки округления дают «Совпало», но разница видна.
+     *
+     * На бою 0,01 и 0,02 давали красные строки: 1С и налоговая форма округляют по-разному.
+     */
+    public function test_difference_within_one_som_is_a_match_with_a_note(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.02, '3410' => 5.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $results = $this->runAudit();
+
+        $base = $results->firstWhere('rule', '1');
+        $this->assertSame(AutoAuditResult::MATCHED, $base->outcome);
+        $this->assertSame('0.02', $base->difference);
+        $this->assertSame('Разница 0,02 на округлении', $base->reason);
+
+        // Ровно сом ещё в допуске.
+        $tax = $results->firstWhere('rule', '3');
+        $this->assertSame(AutoAuditResult::MATCHED, $tax->outcome);
+        $this->assertSame('1.00', $tax->difference);
+    }
+
+    /** Больше сома, даже на копейку, это уже расхождение. */
+    public function test_difference_over_one_som_is_a_mismatch(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 5.01]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $tax = $this->runAudit()->firstWhere('rule', '3');
+
+        $this->assertSame(AutoAuditResult::MISMATCH, $tax->outcome);
+        $this->assertSame('1.01', $tax->difference);
+        $this->assertNull($tax->reason);
+    }
+
+    /** Два файла в задаче, и беды у них разные: одной причины нет, пишем общими словами. */
+    public function test_different_problems_of_two_files_fall_back_to_a_general_reason(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 1.00, '3410' => 1.00]);
+        $this->attachLog($client, $this->item($client, $this->taxService), 'форма-161.pdf');
+
+        $log  = BuhTaskLog::orderByDesc('id')->first();
+        $path = "buh_task_documents/{$log->id}/ещё-одна.pdf";
+        Storage::disk('local')->put($path, 'x');
+        $log->documents()->create(['path' => $path, 'name' => 'ещё-одна.pdf']);
+        // Подменённая читалка отвечает по имени файла: второй файл не отчёт по другой причине.
+        $this->reports['ещё-одна.pdf'] = ['wrong' => 'Это не отчёт: не нашли строку отчётного периода'];
+
+        $issue = $this->runAudit()->firstWhere('outcome', AutoAuditResult::WRONG_DOCUMENT);
+
+        $this->assertSame('Среди файлов задачи нет отчёта по единому налогу', $issue->reason);
+        $this->assertCount(2, $issue->sources);
+    }
+
+    /** Общая строка беды видна при фильтре по любой из своих проверок. */
+    public function test_one_problem_row_is_found_by_each_of_its_checks(): void
+    {
+        $client = $this->client(['name' => 'ООО Не тот файл ' . uniqid()]);
+        $this->attachSheet($client, 'осв.xls', ['3210' => 1.00, '3410' => 1.00]);
+        $this->attachLog($client, $this->item($client, $this->taxService), 'форма-161.pdf');
+        $this->runAudit();
+
+        foreach (['1', '3'] as $rule) {
+            $this->asVendor()->get(route('auto-audit.index', ['rule' => $rule]))
+                ->assertOk()
+                ->assertSee($client->name)
+                ->assertSee('data-status="wrong_document" data-count="1"', false);
+        }
+    }
+
     /** Руководитель фирмы, которой страницу не открыли: ни пункта меню, ни страницы. */
     public function test_manager_does_not_see_the_page_while_the_firm_flag_is_off(): void
     {
@@ -1658,7 +1743,8 @@ class AutoAuditRunTest extends TestCase
             ->assertSee('Не совпало')
             ->assertSee($employee)
             // Подсказка про видимость только для вендора.
-            ->assertDontSee('Руководитель фирмы');
+            ->assertDontSee('Руководитель фирмы')
+            ->assertSee(route('docs.section', 'auto-audit'), false);
 
         $document = \App\Models\BuhTaskDocument::where('name', 'отчёт.pdf')->firstOrFail();
         $this->actingAs($manager, 'employee')->get(route('documents.task', $document))->assertOk();

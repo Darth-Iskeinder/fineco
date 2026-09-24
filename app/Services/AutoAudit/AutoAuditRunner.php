@@ -151,8 +151,14 @@ class AutoAuditRunner
     /** Задачи, документам которых верим: работа закрыта или сдана на проверку. */
     private const DONE_STATUSES = ['completed', 'review'];
 
-    /** Меньше копейки: числа приходят из разбора текста, и float может дать хвост. */
-    private const EPSILON = 0.005;
+    /**
+     * Допуск на округление, в сомах. Разница до него включительно считается совпадением.
+     *
+     * До 24.09.2026 сравнивали до копейки, и на бою две строки стали красными из-за 0,01 и
+     * 0,02: 1С и налоговая форма округляют по-разному. Руководитель, увидев красное из-за
+     * копеек, перестал бы верить странице. Сом выбрал Искендер.
+     */
+    private const TOLERANCE = 1.00;
 
     /** Прочитанное за прогон: один файл разбираем один раз на каждое число. */
     private array $cache = [];
@@ -245,22 +251,24 @@ class AutoAuditRunner
             return $rows;
         }
 
-        // Беда с документом ломает каждую проверку, которая берёт из него число, поэтому и
-        // стоит под каждой. Второй стороны может не быть вовсе: беда от этого не пропадает.
-        $problems = [];
-
+        // Беда с документом ломает каждую проверку, которая берёт из него число. Строка одна,
+        // в ней номера этих проверок, как у «нет документа». Раньше строка повторялась под
+        // каждой проверкой, и одна неверная форма 161 на бою давала шесть красных строк.
+        // Второй стороны может не быть вовсе: беда от этого не пропадает.
         foreach ($documents as $side => $found) {
-            $problems[$side] = $this->documentProblems($client, $side, $found);
+            $numbers = $side === 'osv'
+                ? array_keys($rules)
+                : array_keys(array_filter($rules, fn (array $rule) => $rule['document'] === $side));
+
+            foreach ($this->documentProblems($client, $side, $found) as $row) {
+                $rows[] = array_merge($row, ['rule' => implode(',', $numbers)]);
+            }
         }
 
         $logs = [];
 
         foreach ($rules as $number => $rule) {
             $side = $rule['document'];
-
-            foreach (array_merge($problems['osv'], $problems[$side]) as $row) {
-                $rows[] = array_merge($row, ['rule' => (string) $number]);
-            }
 
             $logs[$side] ??= $this->taskLogs($client, $services[$side]);
 
@@ -473,9 +481,13 @@ class AutoAuditRunner
                 ],
                 default => [
                     AutoAuditResult::WRONG_DOCUMENT,
-                    // Чужой документ мы узнали по ИНН: так и напишем. Иначе человек читает
-                    // «нет формы 161» и идёт искать файл, который лежит на месте.
-                    $this->innMismatchReason($sources) ?? 'Среди файлов задачи нет ' . self::SIDES[$side]['genitive'],
+                    // Причину берём из самого файла: чужой ИНН, ведомость за год, форма не
+                    // сходится внутри. Иначе человек читает «нет формы 161» и идёт искать
+                    // файл, который лежит на месте. Общие слова только когда файлов несколько
+                    // и беды у них разные.
+                    $this->innMismatchReason($sources)
+                        ?? $this->commonReason($sources)
+                        ?? 'Среди файлов задачи нет ' . self::SIDES[$side]['genitive'],
                 ],
             };
 
@@ -510,6 +522,14 @@ class AutoAuditRunner
         }
 
         return null;
+    }
+
+    /** Причина, общая для всех файлов задачи, если она у них одна. */
+    private function commonReason(array $sources): ?string
+    {
+        $reasons = array_unique(array_filter(array_map(fn (array $source) => $source['reason'] ?? null, $sources)));
+
+        return count($reasons) === 1 ? reset($reasons) : null;
     }
 
     private function checkRule(
@@ -693,7 +713,8 @@ class AutoAuditRunner
             ];
         }
 
-        $matched = abs($left - $right) < self::EPSILON;
+        $difference = round($left - $right, 2);
+        $matched    = abs($difference) <= self::TOLERANCE;
 
         // Сошлось, но одна из сторон не прочитана, а взята нулём: «Совпало» тут собралось бы
         // из двух нулей, а не из проверенных чисел. Расхождение при этом остаётся
@@ -714,11 +735,16 @@ class AutoAuditRunner
             $notes[] = mb_strtoupper(mb_substr($note, 0, 1)) . mb_substr($note, 1) . ', считаем его нулевым';
         }
 
+        // Совпало в пределах допуска, но не до копейки: разницу не прячем.
+        if ($matched && $difference != 0.0) {
+            $notes[] = 'Разница ' . number_format(abs($difference), 2, ',', ' ') . ' на округлении';
+        }
+
         return $row + [
             'outcome'     => $matched ? AutoAuditResult::MATCHED : AutoAuditResult::MISMATCH,
             'left_value'  => $left,
             'right_value' => $right,
-            'difference'  => round($left - $right, 2),
+            'difference'  => $difference,
             'reason'      => $notes ? implode('. ', $notes) : null,
         ];
     }
