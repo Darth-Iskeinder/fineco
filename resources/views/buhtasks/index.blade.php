@@ -193,8 +193,10 @@
                 <span class="text-xs opacity-80" x-text="teamRows.length"></span>
             </button>
 
-            {{-- Вопросы автоаудита: они и так стоят первыми в списке, кнопка оставляет только их.
-                 Видна, только когда вопросы есть. --}}
+            {{-- Вопросы автоаудита показываются только по этой кнопке. В обычном списке их нет:
+                 это разбор прошлых месяцев без срока, и два десятка строк над задачами мешали бы
+                 ежедневной работе. О новых вопросах говорит карточка уведомлений. Кнопка видна,
+                 только когда вопросы есть. --}}
             <button type="button" x-show="auditQuestions.length > 0"
                     @click="auditOnly = !auditOnly"
                     :class="auditOnly
@@ -296,7 +298,7 @@
 
 
     {{-- Нет задач --}}
-    <div x-show="viewMode !== 'completed' && viewMode !== 'assigned' && tasks.length === 0 && auditQuestions.length === 0"
+    <div x-show="viewMode !== 'completed' && viewMode !== 'assigned' && tasks.length === 0 && !auditOnly"
          class="bg-white rounded-2xl border border-slate-200/50 shadow-sm px-6 py-16 text-center">
         <div class="w-14 h-14 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <svg class="w-7 h-7 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
@@ -344,9 +346,10 @@
                         ])
                     </tr>
                 </thead>
-                    {{-- Вопросы автоаудита: самой первой группой. Это не задачи: у них нет таймера
-                         и статуса, поэтому строка своя и живёт отдельно от tasks. Клик открывает
-                         окно, где можно объяснить или заменить файл. --}}
+                    {{-- Вопросы автоаудита: видны только при нажатой кнопке «Автоаудит», и тогда
+                         вместо задач. Это не задачи: у них нет таймера и статуса, поэтому строка
+                         своя и живёт отдельно от tasks. Клик открывает окно, где можно объяснить
+                         или заменить файл. --}}
                     <tbody x-show="auditRows.length > 0" class="divide-y divide-slate-100">
                         <tr class="bg-violet-50/70 text-violet-700">
                             <td colspan="8" class="px-4 py-2 text-xs font-semibold uppercase tracking-wider">
@@ -3001,13 +3004,13 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         // ─── Вопросы автоаудита ───────────────────────────────────────────────
 
         /**
-         * Вопросы в списке. Слушаются поиска и воронки «Компания», как задачи. Остальные
-         * отборы (срок, «Поручено мне», воронки по задаче и стадии) их прячут: это отбор
-         * задач, а вопрос не задача.
+         * Вопросы в списке: только при нажатой кнопке «Автоаудит», и тогда вместо задач.
+         * Слушаются поиска и воронки «Компания». Остальные отборы (срок, «Поручено мне»,
+         * воронки по задаче и стадии) про задачи, на вопросы они не действуют: иначе нажатое
+         * «Просрочено» молча давало бы пустой экран.
          */
         get auditRows() {
-            if (this.dueFilter !== 'all' || this.assignedOnly) return [];
-            if (Object.entries(this.filters).some(([key, chosen]) => key !== 'client' && chosen.length)) return [];
+            if (!this.auditOnly) return [];
 
             const words = this.listSearch.toLowerCase().split(/\s+/).filter(Boolean);
             const clients = this.filters.client || [];
