@@ -1574,7 +1574,7 @@
                         <textarea x-model="auditModal.body" rows="3" maxlength="2000"
                                   placeholder="Например: разница из-за возврата, так и должно быть"
                                   class="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-none"></textarea>
-                        <p class="mt-1 text-xs text-slate-400">Ответ увидит руководитель и решит, принять его или нет.</p>
+                        <p class="mt-1 text-xs text-slate-400">Ответ увидит руководитель и решит, принять его или нет. <a href="{{ route('docs.section', 'auto-audit') }}" target="_blank" class="text-indigo-600 hover:underline">Как отвечать на вопросы</a></p>
                     </div>
 
                     <div x-show="auditModal.mode === 'fix'" class="space-y-2">
