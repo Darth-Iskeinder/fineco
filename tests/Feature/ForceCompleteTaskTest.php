@@ -102,10 +102,47 @@ class ForceCompleteTaskTest extends TestCase
         $log = $this->makeLog(requiresDocument: true, requiresReview: false);
 
         $this->actingAs($this->accountant, 'employee')
-            ->postJson(route('buhtasks.logs.force-complete', $log), ['comment' => ''])
-            ->assertStatus(422);
+            ->postJson(route('buhtasks.logs.force-complete', $log), ['reason' => 'other', 'comment' => ''])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('comment');
 
         $this->assertSame('pending', $log->fresh()->status);
+    }
+
+    /** Без выбора причины не закрыть, даже с комментарием: по выбору работает автоаудит. */
+    public function test_force_complete_requires_reason(): void
+    {
+        $log = $this->makeLog(requiresDocument: true, requiresReview: false);
+
+        foreach ([['comment' => 'Операций не было'], ['reason' => 'нулевой', 'comment' => 'x']] as $payload) {
+            $this->actingAs($this->accountant, 'employee')
+                ->postJson(route('buhtasks.logs.force-complete', $log), $payload)
+                ->assertStatus(422)
+                ->assertJsonValidationErrors('reason');
+        }
+
+        $this->assertSame('pending', $log->fresh()->status);
+    }
+
+    /** Кроме «Другое» комментарий не нужен, а в списках причина видна словом. */
+    public function test_reason_without_comment_is_shown_by_its_label(): void
+    {
+        $zero = $this->makeLog(requiresDocument: true, requiresReview: false);
+
+        $this->actingAs($this->accountant, 'employee')
+            ->postJson(route('buhtasks.logs.force-complete', $zero), ['reason' => 'zero'])
+            ->assertOk()
+            ->assertJsonPath('log.force_close_comment', 'Нулевой');
+
+        $this->assertSame(BuhTaskLog::FORCE_ZERO, $zero->fresh()->force_close_reason);
+        $this->assertNull($zero->fresh()->force_close_comment);
+
+        $quarterly = $this->makeLog(requiresDocument: true, requiresReview: false);
+
+        $this->actingAs($this->accountant, 'employee')
+            ->postJson(route('buhtasks.logs.force-complete', $quarterly), ['reason' => 'quarterly', 'comment' => ' сдаёт в октябре '])
+            ->assertOk()
+            ->assertJsonPath('log.force_close_comment', 'Раз в квартал. сдаёт в октябре');
     }
 
     public function test_force_complete_bypasses_document_requirement(): void
@@ -113,7 +150,7 @@ class ForceCompleteTaskTest extends TestCase
         $log = $this->makeLog(requiresDocument: true, requiresReview: false);
 
         $this->actingAs($this->accountant, 'employee')
-            ->postJson(route('buhtasks.logs.force-complete', $log), ['comment' => 'Операций не было'])
+            ->postJson(route('buhtasks.logs.force-complete', $log), ['reason' => 'other', 'comment' => 'Операций не было'])
             ->assertOk()
             ->assertJsonPath('success', true)
             ->assertJsonPath('log.status', 'completed')
@@ -131,7 +168,7 @@ class ForceCompleteTaskTest extends TestCase
         $log = $this->makeLog(requiresDocument: true, requiresReview: true);
 
         $this->actingAs($this->accountant, 'employee')
-            ->postJson(route('buhtasks.logs.force-complete', $log), ['comment' => 'Документа не будет'])
+            ->postJson(route('buhtasks.logs.force-complete', $log), ['reason' => 'other', 'comment' => 'Документа не будет'])
             ->assertOk()
             ->assertJsonPath('log.status', 'review')
             ->assertJsonPath('log.force_closed', true);
@@ -144,7 +181,7 @@ class ForceCompleteTaskTest extends TestCase
         $log = $this->makeLog(requiresDocument: false, requiresReview: false, doer: $this->accountant);
 
         $this->actingAs($this->head, 'employee')
-            ->postJson(route('buhtasks.logs.force-complete', $log), ['comment' => 'чужая задача'])
+            ->postJson(route('buhtasks.logs.force-complete', $log), ['reason' => 'other', 'comment' => 'чужая задача'])
             ->assertForbidden();
     }
 
@@ -153,7 +190,7 @@ class ForceCompleteTaskTest extends TestCase
         $log = $this->makeLog(requiresDocument: true, requiresReview: false);
         $log->update([
             'status' => 'completed', 'completed_at' => now(),
-            'force_closed' => true, 'force_close_comment' => 'причина',
+            'force_closed' => true, 'force_close_reason' => BuhTaskLog::FORCE_ZERO, 'force_close_comment' => 'причина',
         ]);
 
         $this->actingAs($this->accountant, 'employee')
@@ -162,6 +199,7 @@ class ForceCompleteTaskTest extends TestCase
 
         $fresh = $log->fresh();
         $this->assertFalse($fresh->force_closed);
+        $this->assertNull($fresh->force_close_reason);
         $this->assertNull($fresh->force_close_comment);
     }
 

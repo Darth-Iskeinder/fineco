@@ -385,7 +385,7 @@ class EventTriggeredTaskTest extends TestCase
         $log = $this->plannedParentLog($this->childService());
 
         $this->actingAs($this->accountant, 'employee')
-            ->postJson(route('buhtasks.logs.force-complete', $log), ['comment' => 'Операций не было'])
+            ->postJson(route('buhtasks.logs.force-complete', $log), ['reason' => 'other', 'comment' => 'Операций не было'])
             ->assertOk()
             ->assertJsonPath('log.status', 'completed')
             ->assertJsonPath('log.force_closed', true)
@@ -403,7 +403,7 @@ class EventTriggeredTaskTest extends TestCase
         $log = $this->plannedParentLog($this->childService(), ['requires_review' => true]);
 
         $this->actingAs($this->accountant, 'employee')
-            ->postJson(route('buhtasks.logs.force-complete', $log), ['comment' => 'Документа не будет'])
+            ->postJson(route('buhtasks.logs.force-complete', $log), ['reason' => 'other', 'comment' => 'Документа не будет'])
             ->assertOk()
             ->assertJsonPath('log.status', 'review');
 
@@ -426,7 +426,7 @@ class EventTriggeredTaskTest extends TestCase
         $log = $this->plannedParentLog($this->childService());
 
         $this->actingAs($this->accountant, 'employee')
-            ->postJson(route('buhtasks.logs.force-complete', $log), ['comment' => 'Поспешил'])->assertOk();
+            ->postJson(route('buhtasks.logs.force-complete', $log), ['reason' => 'other', 'comment' => 'Поспешил'])->assertOk();
         $this->assertNull($this->spawnedFor($log));
 
         $this->actingAs($this->accountant, 'employee')
@@ -448,7 +448,7 @@ class EventTriggeredTaskTest extends TestCase
         $log = $this->plannedParentLog($this->childService(), ['requires_review' => true]);
 
         $this->actingAs($this->accountant, 'employee')
-            ->postJson(route('buhtasks.logs.force-complete', $log), ['comment' => 'Нет документа'])->assertOk();
+            ->postJson(route('buhtasks.logs.force-complete', $log), ['reason' => 'other', 'comment' => 'Нет документа'])->assertOk();
 
         $this->actingAs($this->head, 'employee')
             ->postJson(route('buhtasks.logs.review-reject', $log), ['comment' => 'Документ всё-таки нужен'])

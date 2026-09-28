@@ -21,6 +21,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 
 class BuhTasksController extends Controller
 {
@@ -465,7 +466,7 @@ class BuhTasksController extends Controller
                         'autoaudit' => (bool) ($service?->reference_id),
                         'documents'        => $log ? $this->docs($log) : [],
                         'force_closed'        => (bool) ($log?->force_closed),
-                        'force_close_comment' => $log?->force_close_comment,
+                        'force_close_comment' => $log?->forceCloseNote(),
                         'children'        => $item->children->map(function ($child) use ($logs, $wy, $wm, $slotKey, $slot, $employee) {
                             $childLog = $this->logForEmployee($logs->get($wy . '-' . $wm . '-' . $child->id . $slotKey), $employee->id);
 
@@ -639,7 +640,7 @@ class BuhTasksController extends Controller
                     'autoaudit' => (bool) ($service?->reference_id),
                     'documents'       => $this->docs($log),
                     'force_closed'        => (bool) $log->force_closed,
-                    'force_close_comment' => $log->force_close_comment,
+                    'force_close_comment' => $log->forceCloseNote(),
                     'children'        => [],
                 ];
             }
@@ -739,7 +740,7 @@ class BuhTasksController extends Controller
                     'autoaudit' => (bool) ($service?->reference_id),
                     'documents'        => $this->docs($l),
                     'force_closed'        => (bool) $l->force_closed,
-                    'force_close_comment' => $l->force_close_comment,
+                    'force_close_comment' => $l->forceCloseNote(),
                     'children'         => ($item?->children ?? collect())->map(function ($child) use ($logs, $l) {
                         $cSlotKey = $l->due_date ? '-' . $l->due_date->toDateString() : '';
                         $childLog = $this->logForEmployee($logs->get($l->year . '-' . $l->month . '-' . $child->id . $cSlotKey), $l->employee_id);
@@ -833,7 +834,7 @@ class BuhTasksController extends Controller
                         'autoaudit' => (bool) ($service?->reference_id),
                         'documents'        => $this->docs($l),
                         'force_closed'        => (bool) $l->force_closed,
-                        'force_close_comment' => $l->force_close_comment,
+                        'force_close_comment' => $l->forceCloseNote(),
                         'children'         => ($item?->children ?? collect())->map(function ($child) use ($logs, $l) {
                             $cSlotKey = $l->due_date ? '-' . $l->due_date->toDateString() : '';
                             $childLog = $this->logForEmployee($logs->get($l->year . '-' . $l->month . '-' . $child->id . $cSlotKey), $l->employee_id);
@@ -1298,6 +1299,7 @@ class BuhTasksController extends Controller
         // Нормальное закрытие снимает след принудительного (актуально после доработки:
         // задача была force-closed, вернулась с проверки и теперь сдана как положено).
         $log->force_closed        = false;
+        $log->force_close_reason  = null;
         $log->force_close_comment = null;
 
         $log->save();
@@ -1317,10 +1319,15 @@ class BuhTasksController extends Controller
     {
         $this->authorizeLog($log);
 
+        // Причина выбором из списка обязательна: по ней автоаудит решает, считать ли
+        // документ нулевым. Комментарий нужен только к «Другое», иначе причины не понять.
         $validated = $request->validate([
-            'comment' => 'required|string|max:2000',
+            'reason'  => ['required', Rule::in(array_keys(BuhTaskLog::FORCE_REASONS))],
+            'comment' => 'nullable|string|max:2000|required_if:reason,' . BuhTaskLog::FORCE_OTHER,
         ], [
-            'comment.required' => 'Укажите причину принудительного закрытия',
+            'reason.required'     => 'Выберите, почему задача закрывается без документа',
+            'reason.in'           => 'Выберите, почему задача закрывается без документа',
+            'comment.required_if' => 'Для «Другое» напишите причину',
         ]);
 
         $now = now();
@@ -1330,7 +1337,8 @@ class BuhTasksController extends Controller
         }
 
         $log->force_closed        = true;
-        $log->force_close_comment = $validated['comment'];
+        $log->force_close_reason  = $validated['reason'];
+        $log->force_close_comment = trim((string) ($validated['comment'] ?? '')) ?: null;
 
         $needsReview = $this->needsReview($log);
 
@@ -1364,6 +1372,7 @@ class BuhTasksController extends Controller
         $log->reviewed_at    = null;
         $log->reviewed_by    = null;
         $log->force_closed        = false;
+        $log->force_close_reason  = null;
         $log->force_close_comment = null;
         $log->save();
 
@@ -2151,7 +2160,7 @@ class BuhTasksController extends Controller
             'actual_quantity' => $log->actual_quantity,
             'documents'       => $this->docs($log->load('documents')),
             'force_closed'        => (bool) $log->force_closed,
-            'force_close_comment' => $log->force_close_comment,
+            'force_close_comment' => $log->forceCloseNote(),
         ];
     }
 

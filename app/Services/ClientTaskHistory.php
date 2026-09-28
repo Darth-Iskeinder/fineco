@@ -152,7 +152,7 @@ class ClientTaskHistory
             'reviewed_at'         => $log->reviewed_at?->toDateTimeString(),
             'rework_count'        => (int) $log->rework_count,
             'force_closed'        => (bool) $log->force_closed,
-            'force_close_comment' => $log->force_close_comment,
+            'force_close_comment' => $log->forceCloseNote(),
             'employee_comment'    => $log->employee_comment,
             'review_comment'      => $log->review_comment,
             'description'         => $item->service?->description,

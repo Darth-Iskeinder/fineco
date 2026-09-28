@@ -1465,9 +1465,22 @@
                 </div>
             </div>
             <div class="mt-4">
-                <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Причина (обязательно)</label>
+                {{-- Выбор обязателен и без пункта по умолчанию: по нему автоаудит решает, считать
+                     ли документ нулевым, а первый пункт по привычке жали бы не глядя. --}}
+                <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Почему без документа</label>
+                <div class="space-y-1.5 mb-3">
+                    @foreach (\App\Models\BuhTaskLog::FORCE_REASONS as $reason => [$reasonLabel])
+                        <label class="flex items-start gap-2 text-sm text-slate-700 cursor-pointer">
+                            <input type="radio" value="{{ $reason }}" x-model="forceCloseModal.reason"
+                                   class="mt-0.5 text-amber-600 focus:ring-amber-400">
+                            <span>{{ $reasonLabel }}</span>
+                        </label>
+                    @endforeach
+                </div>
+                <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1"
+                       x-text="forceCloseModal.reason === '{{ \App\Models\BuhTaskLog::FORCE_OTHER }}' ? 'Комментарий (обязательно)' : 'Комментарий'"></label>
                 <textarea x-model="forceCloseModal.comment" rows="3"
-                          placeholder="Почему задача закрывается без документа/подпунктов?"
+                          placeholder="Что стоит знать проверяющему"
                           class="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent resize-none"></textarea>
                 <p x-show="forceCloseModal.error" class="mt-1 text-xs text-rose-500" x-text="forceCloseModal.error"></p>
             </div>
@@ -2396,7 +2409,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         taskModalIdx: null,
         docRequiredModal: { show: false, taskIdx: null },
         checklistRequiredModal: { show: false, taskIdx: null },
-        forceCloseModal: { show: false, taskIdx: null, comment: '', error: '', saving: false }, // принудительное закрытие (обязательная причина)
+        forceCloseModal: { show: false, taskIdx: null, reason: '', comment: '', error: '', saving: false }, // принудительное закрытие (обязательная причина)
 
         showCreateModal: false,
         startConfirm: { show: false, idx: null },
@@ -4092,20 +4105,25 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
 
         // ===== Принудительное закрытие: в обход документа и подпунктов, причина обязательна =====
         openForceClose(idx) {
-            this.forceCloseModal = { show: true, taskIdx: idx, comment: '', error: '', saving: false };
+            this.forceCloseModal = { show: true, taskIdx: idx, reason: '', comment: '', error: '', saving: false };
         },
 
         closeForceClose() {
-            this.forceCloseModal = { show: false, taskIdx: null, comment: '', error: '', saving: false };
+            this.forceCloseModal = { show: false, taskIdx: null, reason: '', comment: '', error: '', saving: false };
         },
 
         async submitForceClose() {
             const idx = this.forceCloseModal.taskIdx;
             if (idx === null || this.forceCloseModal.saving) return;
 
+            const reason  = this.forceCloseModal.reason;
             const comment = (this.forceCloseModal.comment ?? '').trim();
-            if (!comment) {
-                this.forceCloseModal.error = 'Укажите причину принудительного закрытия';
+            if (!reason) {
+                this.forceCloseModal.error = 'Выберите, почему задача закрывается без документа';
+                return;
+            }
+            if (reason === 'other' && !comment) {
+                this.forceCloseModal.error = 'Для «Другое» напишите причину';
                 return;
             }
 
@@ -4121,7 +4139,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 return;
             }
 
-            const data = await this.post(this.actionUrl(this.tasks[idx], 'force-complete'), { comment });
+            const data = await this.post(this.actionUrl(this.tasks[idx], 'force-complete'), { reason, comment });
             if (data.success) {
                 this.closeForceClose();
                 this.applyResult(idx, data.log);
