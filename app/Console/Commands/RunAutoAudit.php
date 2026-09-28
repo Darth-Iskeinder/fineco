@@ -4,7 +4,9 @@ namespace App\Console\Commands;
 
 use App\Jobs\RunAutoAuditJob;
 use App\Models\AutoAuditResult;
+use App\Models\Client;
 use App\Services\AutoAudit\AutoAuditRunner;
+use App\Support\TenantContext;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
 use Throwable;
@@ -28,7 +30,9 @@ use Throwable;
  */
 class RunAutoAudit extends Command
 {
-    protected $signature = 'autoaudit:run {--tenant= : Фирма (id)}';
+    protected $signature = 'autoaudit:run
+        {--tenant= : Фирма (id)}
+        {--dry-run : Посчитать и показать, что изменится, ничего не записывая}';
 
     protected $description = 'Прогнать автоаудит по фирме и записать результат';
 
@@ -56,6 +60,10 @@ class RunAutoAudit extends Command
         }
 
         $started = microtime(true);
+
+        if ($this->option('dry-run')) {
+            return $this->preview($tenant, $runner, $started);
+        }
 
         try {
             $counts = RunAutoAuditJob::perform($tenant, $runner);
@@ -92,5 +100,75 @@ class RunAutoAudit extends Command
         $this->line(sprintf('Заняло %.1f с', microtime(true) - $started));
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Пробный прогон: ни строк, ни находок, ни состояния для страницы не пишет, замок не
+     * берёт. Печатает только разницу с тем, что сейчас на странице.
+     */
+    private function preview(int $tenant, AutoAuditRunner $runner, float $started): int
+    {
+        TenantContext::for($tenant, function () use ($runner) {
+            $diff    = $runner->preview();
+            $clients = Client::withTrashed()->pluck('name', 'id');
+
+            $this->line(sprintf(
+                'Пробный прогон, ничего не записано. Без изменений %d, сменится %d, новых %d, уйдёт %d',
+                $diff['kept'], count($diff['changed']), count($diff['added']), count($diff['gone']),
+            ));
+
+            foreach ($diff['added'] as $row) {
+                $this->line('');
+                $this->line('+ ' . $this->describe($row, $clients));
+            }
+
+            foreach ($diff['changed'] as [$previous, $row]) {
+                $this->line('');
+                $this->line('~ ' . $this->describe($row, $clients));
+                $this->line('  было: ' . (AutoAuditResult::LABELS[$previous->outcome] ?? $previous->outcome)
+                    . $this->values($previous->left_value, $previous->right_value));
+            }
+
+            foreach ($diff['gone'] as $previous) {
+                $this->line('');
+                $this->line('- ' . $this->describe($previous->only([
+                    'client_id', 'rule', 'period_from', 'period_to', 'outcome', 'left_value', 'right_value', 'reason',
+                ]), $clients));
+            }
+        });
+
+        $this->line('');
+        $this->line(sprintf('Заняло %.1f с', microtime(true) - $started));
+
+        return self::SUCCESS;
+    }
+
+    /** «Иванов ИП, №3, 2026-07-01..2026-07-31: Не совпало (1 200,00 и 0,00), вопрос бухгалтеру. Причина». */
+    private function describe(array $row, $clients): string
+    {
+        $from = substr((string) $row['period_from'], 0, 10);
+        $to   = substr((string) $row['period_to'], 0, 10);
+
+        return sprintf(
+            '%s, №%s, %s: %s%s%s%s',
+            $clients[$row['client_id']] ?? "клиент {$row['client_id']}",
+            $row['rule'],
+            $from === $to ? $from : "{$from}..{$to}",
+            AutoAuditResult::LABELS[$row['outcome']] ?? $row['outcome'],
+            $this->values($row['left_value'] ?? null, $row['right_value'] ?? null),
+            in_array($row['outcome'], AutoAuditResult::FINDING_OUTCOMES, true) ? ', вопрос бухгалтеру' : '',
+            empty($row['reason']) ? '' : ". {$row['reason']}",
+        );
+    }
+
+    private function values(mixed $left, mixed $right): string
+    {
+        if ($left === null && $right === null) {
+            return '';
+        }
+
+        $format = fn ($v) => $v === null ? '?' : number_format((float) $v, 2, ',', ' ');
+
+        return " ({$format($left)} и {$format($right)})";
     }
 }

@@ -1516,6 +1516,35 @@ class AutoAuditRunTest extends TestCase
     }
 
     /**
+     * Пробный прогон показывает разницу с тем, что на странице, и ничего не пишет: ни строк,
+     * ни находок, ни состояния для страницы.
+     */
+    public function test_dry_run_shows_the_difference_and_writes_nothing(): void
+    {
+        $client = $this->client(['name' => 'ООО Пробное']);
+        $this->attachSheet($client, 'осв.xls', ['3210' => 150.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $this->runAudit();
+        $findings = \App\Models\AutoAuditFinding::count();
+        \Illuminate\Support\Facades\Cache::forget(\App\Jobs\RunAutoAuditJob::stateKey($this->tenant->id));
+
+        // Бухгалтер исправил ведомость: №1 сойдётся.
+        $this->sheets['осв.xls']['accounts']['3210'] = 100.00;
+
+        $this->artisan('autoaudit:run', ['--tenant' => $this->tenant->id, '--dry-run' => true])
+            ->expectsOutputToContain('Без изменений 1, сменится 1, новых 0, уйдёт 0')
+            ->expectsOutputToContain('~ ООО Пробное, №1')
+            ->expectsOutputToContain('было: Не совпало (150,00 и 100,00)')
+            ->assertSuccessful();
+
+        $this->assertSame(2, AutoAuditResult::count());
+        $this->assertSame(AutoAuditResult::MISMATCH, AutoAuditResult::current()->where('rule', '1')->first()->outcome);
+        $this->assertSame($findings, \App\Models\AutoAuditFinding::count());
+        $this->assertNull(\Illuminate\Support\Facades\Cache::get(\App\Jobs\RunAutoAuditJob::stateKey($this->tenant->id)));
+    }
+
+    /**
      * Пока прогон идёт, страница показывает это и обновляется сама. Что второй прогон не
      * начнётся, проверяют тесты замка ниже.
      */

@@ -191,7 +191,66 @@ class AutoAuditRunner
      */
     public function run(): array
     {
-        // Без фирмы в контексте удаление ниже снесло бы результаты всех фирм разом.
+        $rows = $this->collect();
+
+        // Одна транзакция на весь прогон: либо записалось всё, либо ничего, и половинчатой
+        // страницы не бывает. Находки в той же: без неё строка и её находка могли бы разойтись.
+        $this->changes = DB::transaction(function () use ($rows) {
+            $changes = $this->store($rows);
+            $this->syncFindings();
+
+            return $changes;
+        });
+
+        return collect($rows)->countBy('outcome')->all();
+    }
+
+    /**
+     * Пробный прогон: посчитать всё как обычно и ничего не записать.
+     *
+     * Сверяет строки прогона с действующими по тем же ключу и вердикту, что store, и
+     * отдаёт только разницу. Нужен, чтобы увидеть на боевых данных, что поменяет правка
+     * правил, до того как строки и вопросы увидят люди.
+     *
+     * @return array{
+     *     added: array<int, array>,
+     *     changed: array<int, array{0: AutoAuditResult, 1: array}>,
+     *     gone: array<int, AutoAuditResult>,
+     *     kept: int
+     * }
+     */
+    public function preview(): array
+    {
+        $rows    = $this->collect();
+        $current = AutoAuditResult::current()->orderBy('id')->get()->keyBy(fn (AutoAuditResult $r) => $r->key());
+        $diff    = ['added' => [], 'changed' => [], 'gone' => [], 'kept' => 0];
+
+        foreach ($rows as $row) {
+            $key      = AutoAuditResult::keyOf($row);
+            $previous = $current->pull($key);
+
+            if (!$previous) {
+                $diff['added'][] = $row;
+            } elseif ($previous->sameVerdict($row)) {
+                $diff['kept']++;
+            } else {
+                $diff['changed'][] = [$previous, $row];
+            }
+        }
+
+        $diff['gone'] = $current->values()->all();
+
+        return $diff;
+    }
+
+    /**
+     * Строки прогона по текущей фирме, без записи.
+     *
+     * @return array<int, array>
+     */
+    private function collect(): array
+    {
+        // Без фирмы в контексте запись после сбора снесла бы результаты всех фирм разом.
         if (!TenantContext::has()) {
             throw new RuntimeException('Автоаудит запускается только внутри фирмы');
         }
@@ -226,16 +285,7 @@ class AutoAuditRunner
             array_push($rows, ...$this->checkClient($client, $services, $rules));
         }
 
-        // Одна транзакция на весь прогон: либо записалось всё, либо ничего, и половинчатой
-        // страницы не бывает. Находки в той же: без неё строка и её находка могли бы разойтись.
-        $this->changes = DB::transaction(function () use ($rows) {
-            $changes = $this->store($rows);
-            $this->syncFindings();
-
-            return $changes;
-        });
-
-        return collect($rows)->countBy('outcome')->all();
+        return $rows;
     }
 
     /**
