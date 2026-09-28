@@ -813,6 +813,43 @@ class AutoAuditRunTest extends TestCase
         $this->assertCount(0, $this->runAudit());
     }
 
+    /**
+     * Разметка старых закрытий: без --apply ничего не пишет, с --apply проставляет только
+     * пустым. Выбор человека и задачи других БП не трогает.
+     */
+    public function test_classify_command_marks_only_empty_reasons_of_reference_services(): void
+    {
+        $client = $this->client();
+        $make   = fn (Service $service, int $month, string $comment, ?string $reason = null) => BuhTaskLog::create([
+            'employee_id' => $this->admin->id, 'client_id' => $client->id,
+            'estimate_item_id' => $this->item($client, $service)->id,
+            'year' => 2026, 'month' => $month, 'status' => 'completed',
+            'force_closed' => true, 'force_close_comment' => $comment, 'force_close_reason' => $reason,
+        ]);
+
+        $zero      = $make($this->taxService, 6, 'нулевой отчет не принимается');
+        $quarterly = $make($this->taxService, 7, 'ежеквартально');
+        $unknown   = $make($this->taxService, 8, 'База не открывается');
+        $chosen    = $make($this->taxService, 9, 'нулевой', BuhTaskLog::FORCE_OTHER);
+        $foreign   = $make(Service::create(['name' => 'Прочий БП ' . uniqid(), 'is_active' => true]), 6, 'нулевой');
+
+        $this->artisan('buhtasks:classify-force-closed', ['--tenant' => $this->tenant->id])
+            ->expectsOutputToContain('Ничего не записано')
+            ->assertSuccessful();
+
+        $this->assertNull($zero->fresh()->force_close_reason);
+
+        $this->artisan('buhtasks:classify-force-closed', ['--tenant' => $this->tenant->id, '--apply' => true])
+            ->expectsOutputToContain('Записано: 2')
+            ->assertSuccessful();
+
+        $this->assertSame(BuhTaskLog::FORCE_ZERO, $zero->fresh()->force_close_reason);
+        $this->assertSame(BuhTaskLog::FORCE_QUARTERLY, $quarterly->fresh()->force_close_reason);
+        $this->assertNull($unknown->fresh()->force_close_reason);
+        $this->assertSame(BuhTaskLog::FORCE_OTHER, $chosen->fresh()->force_close_reason);
+        $this->assertNull($foreign->fresh()->force_close_reason);
+    }
+
     /** Ведомость за июнь и отчёт за июль в пару не встают. */
     public function test_documents_for_different_periods_do_not_pair(): void
     {
