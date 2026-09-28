@@ -9,7 +9,12 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 // Воркер напоминаний о сроках БП: раз в сутки утром. Идемпотентно — повторный запуск безопасен.
+// Часовой пояс явно: приложение и сервер живут по UTC, без него 06:00 было бы 12:00 по Бишкеку.
+//
+// Автоаудита здесь нет намеренно: ему нужен www-data, а schedule:run идёт от client. Он стоит
+// отдельной строкой в crontab www-data на сервере, см. RunAutoAudit.
 Schedule::command('tasks:generate')
+    ->timezone('Asia/Bishkek')
     ->dailyAt('06:00')
     ->withoutOverlapping()
     ->onOneServer();
