@@ -2,9 +2,7 @@
 
 namespace App\Services\AutoAudit;
 
-use App\Models\AutoAuditFinding;
 use App\Models\AutoAuditResult;
-use App\Models\BuhTaskDocument;
 use App\Models\BuhTaskLog;
 use App\Models\Client;
 use App\Models\Service;
@@ -12,9 +10,7 @@ use App\Support\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
 use RuntimeException;
-use Throwable;
 
 /**
  * Автоаудит: ОСВ против отчёта по единому налогу и против формы 161.
@@ -42,7 +38,10 @@ use Throwable;
  * Принудительно закрытые задачи ни документа, ни пропуска не дают: человек записал причину,
  * почему документа не будет («ежеквартально», «нет движений», «только один район»).
  *
- * Прогон проверяет всех клиентов, но прошлое не стирает, а сравнивает с ним (store).
+ * Работа поделена на три класса (с 28.09.2026): AutoAuditSources находит задачи и документы
+ * и читает числа, здесь пары и вердикт, AutoAuditStore записывает итог и вопросы.
+ *
+ * Прогон проверяет всех клиентов, но прошлое не стирает, а сравнивает с ним (AutoAuditStore).
  * Новая строка появляется, только когда итог стал другим, прежняя остаётся историей.
  *
  * Проверять только изменившихся клиентов сознательно не стали. Итог зависит от многого:
@@ -55,28 +54,8 @@ class AutoAuditRunner
     public const REF_FORM_161      = 7;
     public const REF_BALANCE_SHEET = 11;
 
-    /**
-     * Документы, из которых берутся числа. Ключ: сторона сверки.
-     *
-     * ref:      эталонный номер БП, к задачам которого документ прикладывают;
-     * label:    как подписать файл на странице;
-     * genitive: «нет …» в причине;
-     * probe:    чем проверить, что файл вообще нужная форма. Форму и период читалка
-     *           проверяет до того, как искать число, поэтому годится любое поле;
-     * has_inn:  есть ли в шапке формы ИНН организации. У ведомости его нет по природе, и без
-     *           этого признака требование «сверь ИНН» выключило бы автоаудит целиком.
-     */
-    private const SIDES = [
-        'osv'  => ['ref' => self::REF_BALANCE_SHEET, 'label' => 'ОСВ',         'genitive' => 'оборотно-сальдовой ведомости', 'probe' => '3210',  'has_inn' => false],
-        'tax'  => ['ref' => self::REF_TAX_REPORT,    'label' => 'Отчёт по ЕН', 'genitive' => 'отчёта по единому налогу',     'probe' => 'base',  'has_inn' => true],
-        'f161' => ['ref' => self::REF_FORM_161,      'label' => 'Форма 161',   'genitive' => 'формы 161',                    'probe' => 'income', 'has_inn' => true],
-    ];
-
-    /** Статус источника «задача закрыта без файла», см. missingSource. */
+    /** Статус источника «задача закрыта без файла», см. AutoAuditSources::missingSource. */
     public const SOURCE_MISSING = 'missing';
-
-    /** Начало причины «документ чужой». Собираем и узнаём её в одном месте, чтобы не разошлись. */
-    private const INN_MISMATCH = 'ИНН не совпадает';
 
     /**
      * Проверки.
@@ -85,7 +64,7 @@ class AutoAuditRunner
      * меняем и не переиспользуем: по нему связаны результаты и фильтр на странице.
      *
      * account:   счёт в ОСВ, берём оборот за период по кредиту;
-     * document:  сторона второго документа, см. SIDES;
+     * document:  сторона второго документа, см. AutoAuditSources::SIDES;
      * field:     число из него: 'base' и 'tax' у отчёта по налогу; 'income', 'income_tax',
      *            'contributions' и 'pension' у формы 161;
      * cash_only: только для кассового метода. Полное обслуживание нужно всем.
@@ -154,12 +133,6 @@ class AutoAuditRunner
         ],
     ];
 
-    /** Картинки вместо PDF или Excel: скан или фото, без распознавания прочитать нечем. */
-    private const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tif', 'tiff', 'webp', 'heic'];
-
-    /** Задачи, документам которых верим: работа закрыта или сдана на проверку. */
-    private const DONE_STATUSES = ['completed', 'review'];
-
     /**
      * Допуск на округление, в сомах. Разница до него включительно считается совпадением.
      *
@@ -169,19 +142,15 @@ class AutoAuditRunner
      */
     private const TOLERANCE = 1.00;
 
-    /** Прочитанное за прогон: один файл разбираем один раз на каждое число. */
-    private array $cache = [];
-
-    /** Что изменил последний прогон, см. store. */
+    /** Что изменил последний прогон, см. AutoAuditStore::store. */
     private array $changes = [];
 
-    /** Что прогон сделал с находками, см. syncFindings. */
+    /** Что прогон сделал с находками, см. AutoAuditStore::syncFindings. */
     private array $findingChanges = [];
 
     public function __construct(
-        private readonly BalanceSheetReader $balanceSheet,
-        private readonly SingleTaxReportReader $taxReport,
-        private readonly Form161Reader $form161,
+        private readonly AutoAuditSources $sources,
+        private readonly AutoAuditStore $store,
     ) {}
 
     /**
@@ -196,8 +165,8 @@ class AutoAuditRunner
         // Одна транзакция на весь прогон: либо записалось всё, либо ничего, и половинчатой
         // страницы не бывает. Находки в той же: без неё строка и её находка могли бы разойтись.
         $this->changes = DB::transaction(function () use ($rows) {
-            $changes = $this->store($rows);
-            $this->syncFindings();
+            $changes = $this->store->store($rows);
+            $this->findingChanges = $this->store->syncFindings();
 
             return $changes;
         });
@@ -221,26 +190,7 @@ class AutoAuditRunner
      */
     public function preview(): array
     {
-        $rows    = $this->collect();
-        $current = AutoAuditResult::current()->orderBy('id')->get()->keyBy(fn (AutoAuditResult $r) => $r->key());
-        $diff    = ['added' => [], 'changed' => [], 'gone' => [], 'kept' => 0];
-
-        foreach ($rows as $row) {
-            $key      = AutoAuditResult::keyOf($row);
-            $previous = $current->pull($key);
-
-            if (!$previous) {
-                $diff['added'][] = $row;
-            } elseif ($previous->sameVerdict($row)) {
-                $diff['kept']++;
-            } else {
-                $diff['changed'][] = [$previous, $row];
-            }
-        }
-
-        $diff['gone'] = $current->values()->all();
-
-        return $diff;
+        return $this->store->preview($this->collect());
     }
 
     /**
@@ -255,12 +205,12 @@ class AutoAuditRunner
             throw new RuntimeException('Автоаудит запускается только внутри фирмы');
         }
 
-        $this->cache = [];
+        $this->sources->reset();
 
-        $byRef    = Service::whereIn('reference_id', array_column(self::SIDES, 'ref'))->get()->keyBy('reference_id');
+        $byRef    = Service::whereIn('reference_id', array_column(AutoAuditSources::SIDES, 'ref'))->get()->keyBy('reference_id');
         $services = [];   // сторона => БП этой фирмы
 
-        foreach (self::SIDES as $side => $definition) {
+        foreach (AutoAuditSources::SIDES as $side => $definition) {
             if ($byRef->has($definition['ref'])) {
                 $services[$side] = $byRef[$definition['ref']];
             }
@@ -311,145 +261,6 @@ class AutoAuditRunner
     }
 
     /**
-     * Открыть и закрыть находки по действующим строкам. Идёт сразу после store, в той же
-     * транзакции.
-     *
-     * По ключу строки:
-     *   - итог проблемный (FINDING_OUTCOMES), открытой находки нет: открываем. Висит она с
-     *     того дня, когда появилась строка: при первом прогоне после выкатки это честнее,
-     *     чем день выкатки;
-     *   - итог проблемный, находка открыта: не трогаем, даже если итог сменился с одного
-     *     проблемного на другой. Разговор тот же;
-     *   - итог стал другим (совпало, скан, не удалось проверить) или строки нет: закрываем.
-     *     Ничего не удаляем, переписка остаётся.
-     */
-    private function syncFindings(): void
-    {
-        $now     = now();
-        $changes = ['opened' => 0, 'closed' => 0, 'open' => 0];
-
-        // Ключ у действующих строк один на строку, это держит store.
-        $current = AutoAuditResult::current()->orderBy('id')->get()->keyBy(fn (AutoAuditResult $r) => $r->key());
-
-        $open = [];
-
-        foreach (AutoAuditFinding::open()->orderBy('id')->get() as $finding) {
-            // Двух открытых с одним ключом быть не должно. Если вышло, оставляем старшую: у
-            // неё переписка. Младшую закрываем, иначе строка показала бы чужой разговор.
-            if (isset($open[$finding->key])) {
-                $finding->update(['closed_at' => $now]);
-
-                continue;
-            }
-
-            $open[$finding->key] = $finding;
-        }
-
-        foreach ($current as $key => $result) {
-            if (!in_array($result->outcome, AutoAuditResult::FINDING_OUTCOMES, true)) {
-                continue;
-            }
-
-            $changes['open']++;
-
-            if (isset($open[$key])) {
-                unset($open[$key]);
-
-                continue;
-            }
-
-            AutoAuditFinding::create([
-                'client_id' => $result->client_id,
-                'key'       => $key,
-                'opened_at' => $result->created_at,
-            ]);
-            $changes['opened']++;
-        }
-
-        // Остались находки, у которых проблемной строки больше нет.
-        foreach ($open as $key => $finding) {
-            $finding->update(['closed_at' => $now, 'closed_outcome' => $current[$key]->outcome ?? null]);
-            $changes['closed']++;
-        }
-
-        $this->findingChanges = $changes;
-    }
-
-    /**
-     * Сверить строки прогона с действующими и записать разницу.
-     *
-     * По ключу строки (AutoAuditResult::keyOf):
-     *   - итог тот же: строку обновляем на месте. Причина, файлы и ФИО могли поменяться,
-     *     а после замены файла ссылка иначе вела бы на удалённый. Время обновления при этом
-     *     сдвигается всегда: по нему страница пишет «Данные на»;
-     *   - итог другой: прежней ставим superseded_at, новую пишем рядом;
-     *   - строки больше нет (исправили, клиента удалили, сняли с полного обслуживания):
-     *     прежней ставим superseded_at. Ничего не удаляем;
-     *   - строка новая: пишем.
-     */
-    private function store(array $rows): array
-    {
-        $now     = now();
-        $changes = ['kept' => 0, 'changed' => 0, 'added' => 0, 'gone' => 0];
-
-        // Правило фирмы на модели: строки других фирм сюда не попадают.
-        $current = [];
-
-        foreach (AutoAuditResult::current()->orderBy('id')->get() as $result) {
-            $key = $result->key();
-
-            // Двух действующих с одним ключом быть не должно. Если всё же вышло, лишнюю
-            // закрываем, иначе она висела бы на странице вечно.
-            if (isset($current[$key])) {
-                $current[$key]->update(['superseded_at' => $now]);
-            }
-
-            $current[$key] = $result;
-        }
-
-        $seen = [];
-
-        foreach ($rows as $row) {
-            $key = AutoAuditResult::keyOf($row);
-
-            // Два одинаковых ключа в одном прогоне значат ошибку в ключе: строки перепутались
-            // бы между прогонами. Лучше упасть, ничего не записав, чем тихо копить путаницу.
-            if (isset($seen[$key])) {
-                throw new RuntimeException("Две строки автоаудита с одним ключом {$key}. Результаты прошлого прогона не тронуты");
-            }
-
-            $seen[$key] = true;
-            $previous   = $current[$key] ?? null;
-            unset($current[$key]);
-
-            if ($previous && $previous->sameVerdict($row)) {
-                $previous->fill($row);
-                $previous->updated_at = $now;
-                $previous->save();
-                $changes['kept']++;
-
-                continue;
-            }
-
-            if ($previous) {
-                $previous->update(['superseded_at' => $now]);
-                $changes['changed']++;
-            } else {
-                $changes['added']++;
-            }
-
-            AutoAuditResult::create($row);
-        }
-
-        foreach ($current as $gone) {
-            $gone->update(['superseded_at' => $now]);
-            $changes['gone']++;
-        }
-
-        return $changes;
-    }
-
-    /**
      * @param array<string, Service> $services сторона => БП
      * @param array<int, array>      $rules    проверки, для которых в фирме есть оба БП
      */
@@ -469,7 +280,7 @@ class AutoAuditRunner
         $documents = [];
 
         foreach (array_unique(['osv', ...array_column($rules, 'document')]) as $side) {
-            $documents[$side] = $this->documents($client, $services[$side]);
+            $documents[$side] = $this->sources->documents($client, $services[$side]);
         }
 
         $rows = $this->missingDocuments($client, $services, $documents, $rules);
@@ -497,7 +308,7 @@ class AutoAuditRunner
         foreach ($rules as $number => $rule) {
             $side = $rule['document'];
 
-            $logs[$side] ??= $this->taskLogs($client, $services[$side]);
+            $logs[$side] ??= $this->sources->taskLogs($client, $services[$side]);
 
             array_push($rows, ...$this->checkRule($client, $number, $rule, $documents['osv'], $documents[$side], $logs[$side]));
         }
@@ -533,7 +344,7 @@ class AutoAuditRunner
 
         foreach ($documents as $side => $found) {
             foreach ($found as [$log, $document]) {
-                $value = $this->read($client, $side, self::SIDES[$side]['probe'], $document);
+                $value = $this->sources->read($client, $side, AutoAuditSources::SIDES[$side]['probe'], $document);
 
                 if (!$value->period) {
                     continue;
@@ -541,7 +352,7 @@ class AutoAuditRunner
 
                 $label = $value->period->label();
                 $recognized[$side][$label]['period']    = $value->period;
-                $recognized[$side][$label]['sources'][] = array_merge($this->source($side, $log, $document, $value), ['value' => null]);
+                $recognized[$side][$label]['sources'][] = array_merge($this->sources->source($side, $log, $document, $value), ['value' => null]);
             }
         }
 
@@ -549,7 +360,7 @@ class AutoAuditRunner
         $rows = [];
 
         foreach (array_keys($documents) as $side) {
-            foreach ($this->closedWithoutFiles($client, $services[$side]) as $log) {
+            foreach ($this->sources->closedWithoutFiles($client, $services[$side]) as $log) {
                 // С первого числа, иначе «31 августа минус месяц» перельётся мимо июля.
                 $month  = CarbonImmutable::create($log->year, $log->month, 1)->subMonth();
                 $period = DocumentPeriod::of($month->year, $month->month);
@@ -559,7 +370,7 @@ class AutoAuditRunner
                 array_push($rows[$label]['numbers'], ...$affects[$side]);
                 $rows[$label]['notes'][] = $this->closedWithoutFileNote($log, $services[$side]);
                 // Сама задача без файла: по ней видно, с кого спросить и куда приложить файл.
-                $rows[$label]['extra'][] = $this->missingSource($side, $log);
+                $rows[$label]['extra'][] = $this->sources->missingSource($side, $log);
             }
         }
 
@@ -630,44 +441,6 @@ class AutoAuditRunner
         return $result;
     }
 
-    /**
-     * Источник «задача закрыта без файла». Файла нет, поэтому document_id и name пустые,
-     * а status missing. Страница по нему пишет, чья задача, а исполнитель получает вопрос.
-     */
-    private function missingSource(string $side, BuhTaskLog $log): array
-    {
-        return [
-            'side'        => $side,
-            'label'       => self::SIDES[$side]['label'],
-            'log_id'      => $log->id,
-            'branch_id'   => $log->estimate_item_id,
-            'task_month'  => sprintf('%02d.%d', $log->month, $log->year),
-            'employee'    => $this->shortName($log->employee?->full_name),
-            'document_id' => null,
-            'name'        => null,
-            'status'      => self::SOURCE_MISSING,
-            'value'       => null,
-            'reason'      => 'файл не приложен',
-        ];
-    }
-
-    /**
-     * Закрытые или сданные на проверку задачи клиента по БП, где нет ни одного файла.
-     *
-     * Принудительно закрытые не берём: человек записал причину, почему файла не будет.
-     */
-    private function closedWithoutFiles(Client $client, Service $service): Collection
-    {
-        return BuhTaskLog::where('client_id', $client->id)
-            ->whereIn('status', self::DONE_STATUSES)
-            ->where(fn ($q) => $q->where('force_closed', false)->orWhereNull('force_closed'))
-            ->whereHas('estimateItem', fn ($q) => $q->where('service_id', $service->id))
-            ->whereDoesntHave('documents')
-            ->with('employee:id,full_name')
-            ->orderBy('year')->orderBy('month')
-            ->get();
-    }
-
     /** «Задача «Закрытие месяца и ОСВ» за 08.2026: исполнитель Иванова А., закрыта 05.08.2026 без файла». */
     private function closedWithoutFileNote(BuhTaskLog $log, Service $service): string
     {
@@ -709,11 +482,11 @@ class AutoAuditRunner
             $recognized = false;
 
             foreach ($pairs as [$log, $document]) {
-                $value = $this->read($client, $side, self::SIDES[$side]['probe'], $document);
+                $value = $this->sources->read($client, $side, AutoAuditSources::SIDES[$side]['probe'], $document);
 
                 // Период читалка отдаёт, только когда форма опознана.
                 $recognized = $recognized || $value->period !== null;
-                $sources[]  = $this->source($side, $log, $document, $value);
+                $sources[]  = $this->sources->source($side, $log, $document, $value);
             }
 
             if ($recognized) {
@@ -739,7 +512,7 @@ class AutoAuditRunner
                     // и беды у них разные.
                     $this->innMismatchReason($sources)
                         ?? $this->commonReason($sources)
-                        ?? 'Среди файлов задачи нет ' . self::SIDES[$side]['genitive'],
+                        ?? 'Среди файлов задачи нет ' . AutoAuditSources::SIDES[$side]['genitive'],
                 ],
             };
 
@@ -768,7 +541,7 @@ class AutoAuditRunner
     private function innMismatchReason(array $sources): ?string
     {
         foreach ($sources as $source) {
-            if (str_starts_with((string) ($source['reason'] ?? ''), self::INN_MISMATCH)) {
+            if (str_starts_with((string) ($source['reason'] ?? ''), AutoAuditSources::INN_MISMATCH)) {
                 return $source['reason'];
             }
         }
@@ -799,7 +572,7 @@ class AutoAuditRunner
             $field = $slot === 'osv' ? $rule['account'] : $rule['field'];
 
             foreach ($documents as [$log, $document]) {
-                $value = $this->read($client, $side, $field, $document);
+                $value = $this->sources->read($client, $side, $field, $document);
 
                 // Не тот документ, скан или не открылся: в пару его не поставить.
                 if (!$value->period) {
@@ -808,7 +581,7 @@ class AutoAuditRunner
 
                 $label = $value->period->label();
                 $periods[$label]['period'] = $value->period;
-                $periods[$label][$slot][]  = $this->source($side, $log, $document, $value);
+                $periods[$label][$slot][]  = $this->sources->source($side, $log, $document, $value);
             }
         }
 
@@ -1001,31 +774,7 @@ class AutoAuditRunner
         ];
     }
 
-    /**
-     * Документы закрытых задач клиента по одному БП, последние загруженные первыми.
-     *
-     * @return Collection<int, array{0: BuhTaskLog, 1: BuhTaskDocument}>
-     */
-    private function documents(Client $client, Service $service): Collection
-    {
-        return BuhTaskLog::where('client_id', $client->id)
-            ->whereIn('status', self::DONE_STATUSES)
-            ->whereHas('estimateItem', fn ($q) => $q->where('service_id', $service->id))
-            ->with(['documents', 'employee:id,full_name'])
-            ->get()
-            ->flatMap(fn (BuhTaskLog $log) => $log->documents->map(fn (BuhTaskDocument $document) => [$log, $document]))
-            ->sortByDesc(fn (array $pair) => $pair[1]->id)
-            ->values();
-    }
-
     /** Все задачи клиента по БП в любом статусе: по ним считаем, от скольких филиалов ждать документ. */
-    private function taskLogs(Client $client, Service $service): Collection
-    {
-        return BuhTaskLog::where('client_id', $client->id)
-            ->whereHas('estimateItem', fn ($q) => $q->where('service_id', $service->id))
-            ->get(['id', 'estimate_item_id', 'year', 'month', 'force_closed']);
-    }
-
     /**
      * Филиалы, от которых ждём документ за период: по строке сметы на каждый.
      *
@@ -1064,161 +813,5 @@ class AutoAuditRunner
             ->all();
     }
 
-    /**
-     * Одно число из документа клиента.
-     *
-     * @param string $field для ОСВ номер счёта, для второго документа его поле
-     */
-    private function read(Client $client, string $side, string $field, BuhTaskDocument $document): DocumentValue
-    {
-        return $this->cache["{$side}:{$field}:{$document->id}"] ??= $this->checkInn($client, $side, $this->readFile($side, $field, $document));
-    }
-
-    /**
-     * ИНН в шапке документа против ИНН в карточке клиента.
-     *
-     * Без этой проверки чужая форма дала бы «не совпало» по числам, и расхождение искали бы
-     * в учёте, хотя перепутан файл. Так нашлась форма 161 «Нова Трек» у «Нова трек плюс».
-     *
-     * Кто ошибся, документ или карточка, мы не знаем: у ИНАМ отчёт и форма 161 показывают
-     * один и тот же ИНН, а в карточке записан другой. Поэтому причину пишем без обвинения.
-     *
-     * Раньше сверка молча выключалась в трёх случаях: ИНН не прочитался из документа, в
-     * карточке не 14 цифр, в карточке заглушка вроде «00000000000003» (клиентов заводили,
-     * пока ИНН не знали). Во всех трёх чужой документ проходил как свой, а строка выглядела
-     * проверенной. Теперь это «не удалось проверить»: защиты не было, и делать вид, что она
-     * сработала, нельзя. Настоящий ИНН не начинается с пяти нулей: у организации там ноль и
-     * дата регистрации, у человека единица или двойка.
-     *
-     * В ведомости ИНН нет вовсе, а у скана, чужого бланка и битого файла есть свой, более
-     * точный исход. И то, и другое проходит мимо сверки нетронутым.
-     */
-    private function checkInn(Client $client, string $side, DocumentValue $value): DocumentValue
-    {
-        // Период читалка отдаёт, только когда форма опознана: это и есть признак, что перед
-        // нами нужный бланк и разговор про его ИНН вообще имеет смысл.
-        if (!self::SIDES[$side]['has_inn'] || $value->period === null) {
-            return $value;
-        }
-
-        $clientInn = preg_replace('/\D+/', '', (string) $client->inn);
-        $cardIsOk  = strlen($clientInn) === 14 && !str_starts_with($clientInn, '00000');
-
-        if ($value->inn !== null && $cardIsOk) {
-            return $value->inn === $clientInn ? $value : DocumentValue::wrongDocument(sprintf(
-                '%s: в документе %s, в карточке клиента %s. Документ чужой или ошибка в карточке',
-                self::INN_MISMATCH,
-                $value->inn,
-                $clientInn,
-            ));
-        }
-
-        // Число и так не прочитано: своя причина у строки точнее нашей.
-        if ($value->status === DocumentValue::UNCERTAIN) {
-            return $value;
-        }
-
-        return DocumentValue::uncertain(
-            $value->inn === null
-                ? 'ИНН в документе не прочитан: проверить, что документ принадлежит этому клиенту, нельзя'
-                : "В карточке клиента нет ИНН из 14 цифр (записано «{$client->inn}»): сверить документ с клиентом не с чем",
-            $value->trace,
-            $value->period,
-            $value->inn,
-        );
-    }
-
-    private function readFile(string $side, string $field, BuhTaskDocument $document): DocumentValue
-    {
-        $path = Storage::disk('local')->path($document->path);
-
-        if (!is_readable($path)) {
-            // Файл, до которого нет прав, снаружи выглядит так же, как удалённый. Но это
-            // поломка запуска, а не документа: прогон не от того пользователя честно записал бы
-            // всем «Файл не открылся» и стёр настоящие результаты. Так было на бою 23.09.2026.
-            if ($this->accessDenied($path)) {
-                throw new RuntimeException(
-                    "Нет прав на чтение файлов документов (первый: «{$document->name}»). "
-                    . 'Запускайте проверку от пользователя веб-сервера (www-data). Прошлые результаты не тронуты',
-                );
-            }
-
-            return DocumentValue::unreadable('Файла нет на диске');
-        }
-
-        // Картинку не открыть ни как таблицу, ни как PDF. Документ на ней может быть и тем,
-        // просто прочитать его без распознавания нечем.
-        if (in_array(strtolower(pathinfo($document->path, PATHINFO_EXTENSION)), self::IMAGE_EXTENSIONS, true)) {
-            return DocumentValue::scan('Это картинка, а не PDF или Excel');
-        }
-
-        try {
-            return match ($side) {
-                'osv'  => $this->balanceSheet->turnover($path, $field, 'credit'),
-                'tax'  => $field === 'tax' ? $this->taxReport->totalTax($path) : $this->taxReport->taxableBase($path),
-                'f161' => $this->form161->read($path, $field),
-            };
-        } catch (Throwable $e) {
-            // Один кривой файл не должен ронять проверку всей фирмы.
-            return DocumentValue::unreadable(class_basename($e) . ': ' . $e->getMessage());
-        }
-    }
-
-    /**
-     * Файл не читается из-за прав, а не потому, что его нет.
-     *
-     * Сам файл в закрытой папке не виден вовсе, поэтому идём вверх до первой папки, которая
-     * существует. Войти в неё нельзя, значит, дело в правах. Можно, значит, файла и правда нет.
-     */
-    private function accessDenied(string $path): bool
-    {
-        if (file_exists($path)) {
-            return true;
-        }
-
-        $dir = dirname($path);
-
-        while (!file_exists($dir) && dirname($dir) !== $dir) {
-            $dir = dirname($dir);
-        }
-
-        return !is_executable($dir);
-    }
-
     /** Откуда взято число: по этому человек откроет файл и проверит вывод сам. */
-    private function source(string $side, BuhTaskLog $log, BuhTaskDocument $document, DocumentValue $value): array
-    {
-        return [
-            'side'        => $side,
-            'label'       => self::SIDES[$side]['label'],
-            'log_id'      => $log->id,
-            // Филиал: у филиального БП своя строка сметы на каждый налоговый орган. По ней
-            // сверка понимает, кто из филиалов сдал, а кто нет.
-            'branch_id'   => $log->estimate_item_id,
-            'task_month'  => sprintf('%02d.%d', $log->month, $log->year),
-            'employee'    => $this->shortName($log->employee?->full_name),
-            'document_id' => $document->id,
-            'name'        => $document->name,
-            'status'      => $value->status,
-            'value'       => $value->value,
-            'reason'      => $value->reason,
-        ];
-    }
-
-    /**
-     * Исполнитель задачи коротко: «Обозова Айзада Алмасбековна» становится «Обозова А. А.».
-     * Полные ФИО раздувают колонку с документами.
-     */
-    private function shortName(?string $fullName): ?string
-    {
-        $parts = preg_split('/\s+/u', trim((string) $fullName), -1, PREG_SPLIT_NO_EMPTY);
-
-        if (!$parts) {
-            return null;
-        }
-
-        $initials = array_map(fn (string $part) => mb_strtoupper(mb_substr($part, 0, 1)) . '.', array_slice($parts, 1));
-
-        return trim($parts[0] . ' ' . implode(' ', $initials));
-    }
 }
