@@ -74,6 +74,10 @@ class AutoAuditRunner
      *            'contributions' и 'pension' у формы 161;
      * method:    метод учёта клиента из карточки, null = любой. Клиент с незаполненным
      *            методом проверки с методом не проходит. Полное обслуживание нужно всем.
+     * from:      первый отчётный период ('2026-09'), который проверка смотрит; null = все.
+     *            Новая проверка не лезет в прошлое: иначе в день выкатки бухгалтеры получают
+     *            вопросы про давно сданные месяцы. Так было с №2 29.09.2026: два вопроса из
+     *            трёх пришли про июнь. Периоды берём из документа, квартал по первому месяцу.
      *
      * Все проверки берут обороты, поэтому ведомости за квартал складываются. У будущих
      * проверок по сальдо так нельзя: там нужен последний месяц.
@@ -91,6 +95,7 @@ class AutoAuditRunner
             'document'  => 'tax',
             'field'     => 'base',
             'method'    => Client::ACCOUNTING_CASH,
+            'from'      => null,
         ],
         2 => [
             'name'      => 'Налоговая база сходится с учётом (метод начисления)',
@@ -100,6 +105,7 @@ class AutoAuditRunner
             'document'  => 'tax',
             'field'     => 'base',
             'method'    => Client::ACCOUNTING_ACCRUAL,
+            'from'      => '2026-09',
         ],
         3 => [
             'name'      => 'Начисленный единый налог сходится с учётом',
@@ -109,6 +115,7 @@ class AutoAuditRunner
             'document'  => 'tax',
             'field'     => 'tax',
             'method'    => null,
+            'from'      => null,
         ],
         4 => [
             'name'      => 'Начисленный доход сходится с учётом',
@@ -118,6 +125,7 @@ class AutoAuditRunner
             'document'  => 'f161',
             'field'     => 'income',
             'method'    => null,
+            'from'      => null,
         ],
         5 => [
             'name'      => 'Подоходный налог к уплате сходится с учётом',
@@ -127,6 +135,7 @@ class AutoAuditRunner
             'document'  => 'f161',
             'field'     => 'income_tax',
             'method'    => null,
+            'from'      => null,
         ],
         6 => [
             'name'      => 'Страховые взносы сходятся с учётом',
@@ -136,6 +145,7 @@ class AutoAuditRunner
             'document'  => 'f161',
             'field'     => 'contributions',
             'method'    => null,
+            'from'      => null,
         ],
         7 => [
             'name'      => 'Взносы в НПФ сходятся с учётом',
@@ -145,6 +155,7 @@ class AutoAuditRunner
             'document'  => 'f161',
             'field'     => 'pension',
             'method'    => null,
+            'from'      => null,
         ],
     ];
 
@@ -311,7 +322,7 @@ class AutoAuditRunner
         $isEmpty = fn (Collection $found) => $found->isEmpty();
 
         if (collect($documents)->every($isEmpty) && collect($forced)->every($isEmpty)) {
-            return $rows;
+            return $this->withoutEarlyPeriods($rows, $rules);
         }
 
         // Беда с документом ломает каждую проверку, которая берёт из него число. Строка одна,
@@ -340,7 +351,30 @@ class AutoAuditRunner
             ));
         }
 
-        return $rows;
+        return $this->withoutEarlyPeriods($rows, $rules);
+    }
+
+    /**
+     * Убрать из строк проверки, чей период раньше их «from». Строка с несколькими номерами
+     * («2,3») теряет только лишний номер, строка без номеров уходит целиком.
+     */
+    private function withoutEarlyPeriods(array $rows, array $rules): array
+    {
+        $result = [];
+
+        foreach ($rows as $row) {
+            $month   = substr($row['period_from'], 0, 7);
+            $numbers = array_filter(
+                explode(',', (string) $row['rule']),
+                fn (string $number) => ($rules[(int) $number]['from'] ?? null) === null || $month >= $rules[(int) $number]['from'],
+            );
+
+            if ($numbers) {
+                $result[] = array_merge($row, ['rule' => implode(',', $numbers)]);
+            }
+        }
+
+        return $result;
     }
 
     /**

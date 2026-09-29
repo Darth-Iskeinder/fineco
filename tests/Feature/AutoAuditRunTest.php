@@ -221,7 +221,7 @@ class AutoAuditRunTest extends TestCase
 
         $row = $results->first();
         $this->assertSame(AutoAuditResult::MISSING_DOCUMENT, $row->outcome);
-        $this->assertSame('2,3', $row->rule);
+        $this->assertSame('3', $row->rule);
         $this->assertSame('Нет ведомости за май 2026', $row->reason);
         $this->assertNull($row->left_value);
         $this->assertNull($row->right_value);
@@ -1050,7 +1050,7 @@ class AutoAuditRunTest extends TestCase
 
         $issue = $results->first();
         $this->assertSame($accrual->id, $issue->client_id);
-        $this->assertSame('2,3', $issue->rule);
+        $this->assertSame('3', $issue->rule);
         $this->assertSame(AutoAuditResult::WRONG_DOCUMENT, $issue->outcome);
         $this->assertSame('Это не оборотно-сальдовая ведомость', $issue->reason);
     }
@@ -1262,8 +1262,8 @@ class AutoAuditRunTest extends TestCase
     public function test_accrual_client_gets_rules_2_and_3(): void
     {
         $client = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL]);
-        $this->attachSheet($client, 'осв.xls', ['3210' => 90.00, '6110' => 100.00, '3410' => 4.00]);
-        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $this->attachSheet($client, 'осв.xls', ['3210' => 90.00, '6110' => 100.00, '3410' => 4.00], month: 9, taskMonth: 10);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00, month: 9, taskMonth: 10);
 
         $results = $this->runAudit();
 
@@ -1271,12 +1271,45 @@ class AutoAuditRunTest extends TestCase
         $this->assertSame(AutoAuditResult::MATCHED, $results->firstWhere('rule', '2')->outcome);
     }
 
+    /**
+     * №2 появилась 29.09.2026 и смотрит отчёты с сентября: вопросы про давно сданные
+     * месяцы бухгалтерам ни к чему. Август с расхождением молчит, сентябрь сверяется.
+     */
+    public function test_rule_2_skips_periods_before_its_start(): void
+    {
+        $client = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL]);
+        $this->attachSheet($client, 'осв-август.xls', ['6110' => 999.00, '3410' => 4.00], month: 8, taskMonth: 9);
+        $this->attachReport($client, 'отчёт-август.pdf', base: 100.00, tax: 4.00, month: 8, taskMonth: 9);
+        $this->attachSheet($client, 'осв-сентябрь.xls', ['6110' => 100.00, '3410' => 4.00], month: 9, taskMonth: 10);
+        $this->attachReport($client, 'отчёт-сентябрь.pdf', base: 100.00, tax: 4.00, month: 9, taskMonth: 10);
+
+        $results = $this->runAudit()->where('rule', '2');
+
+        $this->assertCount(1, $results);
+        $this->assertSame(AutoAuditResult::MATCHED, $results->first()->outcome);
+        $this->assertSame('2026-09-01', $results->first()->period_from->toDateString());
+    }
+
+    /** Ведомость закрыта без файла: за июль в строке «Нет документа» только №3, с сентября и №2. */
+    public function test_missing_sheet_names_rule_2_only_from_september(): void
+    {
+        $client = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL]);
+        $july   = $this->closeWithoutFile($client, $this->osvService);
+
+        // Задача октября по той же строке сметы, работа за сентябрь.
+        $july->replicate()->fill(['month' => 10, 'completed_at' => '2026-10-05 10:00:00'])->save();
+
+        $rules = $this->runAudit()->sortBy('period_from')->pluck('rule')->values()->all();
+
+        $this->assertSame(['3', '2,3'], $rules);
+    }
+
     /** Оборот 6110 разошёлся с базой из отчёта: «Не совпало» с разницей. */
     public function test_accrual_base_mismatch_with_6110(): void
     {
         $client = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL]);
-        $this->attachSheet($client, 'осв.xls', ['6110' => 120.00, '3410' => 4.00]);
-        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $this->attachSheet($client, 'осв.xls', ['6110' => 120.00, '3410' => 4.00], month: 9, taskMonth: 10);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00, month: 9, taskMonth: 10);
 
         $base = $this->runAudit()->firstWhere('rule', '2');
 
@@ -1289,8 +1322,8 @@ class AutoAuditRunTest extends TestCase
     public function test_cash_client_skips_rule_2(): void
     {
         $client = $this->client(['accounting_method' => Client::ACCOUNTING_CASH]);
-        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '6110' => 50.00, '3410' => 4.00]);
-        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '6110' => 50.00, '3410' => 4.00], month: 9, taskMonth: 10);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00, month: 9, taskMonth: 10);
 
         $this->assertSame(['1', '3'], $this->runAudit()->pluck('rule')->sort()->values()->all());
     }
@@ -1299,8 +1332,8 @@ class AutoAuditRunTest extends TestCase
     public function test_client_without_method_skips_both_base_checks(): void
     {
         $client = $this->client(['accounting_method' => null]);
-        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '6110' => 100.00, '3410' => 4.00]);
-        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '6110' => 100.00, '3410' => 4.00], month: 9, taskMonth: 10);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00, month: 9);
 
         $this->assertSame(['3'], $this->runAudit()->pluck('rule')->all());
     }
@@ -3289,10 +3322,11 @@ class AutoAuditRunTest extends TestCase
         ]);
     }
 
-    private function attachSheet(Client $client, string $file, array $accounts, int $month = 7, string $status = 'completed'): void
+    /** $taskMonth: месяц задачи. Работа за месяц документа идёт в следующем, по задаче считаются филиалы. */
+    private function attachSheet(Client $client, string $file, array $accounts, int $month = 7, string $status = 'completed', int $taskMonth = 8): void
     {
         $this->sheets[$file] = ['month' => [2026, $month], 'accounts' => $accounts];
-        $this->attachLog($client, $this->item($client, $this->osvService), $file, $status);
+        $this->attachLog($client, $this->item($client, $this->osvService), $file, $status, $taskMonth);
     }
 
     private function attachReport(
@@ -3304,6 +3338,7 @@ class AutoAuditRunTest extends TestCase
         string $status = 'completed',
         ?EstimateItem $item = null,
         ?string $inn = null,
+        int $taskMonth = 8,
     ): void {
         // По умолчанию документ свой: ИНН тот же, что в карточке. Чужой передают явно.
         $this->reports[$file] = [
@@ -3312,7 +3347,7 @@ class AutoAuditRunTest extends TestCase
             'tax'   => $tax,
             'inn'   => $inn ?? $client->inn,
         ];
-        $this->attachLog($client, $item ?? $this->item($client, $this->taxService), $file, $status);
+        $this->attachLog($client, $item ?? $this->item($client, $this->taxService), $file, $status, $taskMonth);
     }
 
     /** Задача за август (отчитываются в следующем месяце) с приложенным файлом. */
