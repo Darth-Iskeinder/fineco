@@ -208,10 +208,11 @@
                             <td class="px-4 py-3 text-xs space-y-1">
                                 @foreach ($result->sources ?? [] as $source)
                                     @if (empty($source['document_id']))
-                                        {{-- Задача закрыта без файла: открывать нечего, видно только чья. --}}
+                                        {{-- Задача без файла: открывать нечего, видно чья и почему. Закрытая
+                                             как нулевая пишет «закрыта принудительно: «Нулевой»». --}}
                                         <div class="text-slate-400">
                                             <span title="Задача за {{ $source['task_month'] }}">{{ $source['label'] }}@if (!empty($source['employee'])), <span class="font-medium text-slate-500">{{ $source['employee'] }}</span>@endif:</span>
-                                            файл не приложен
+                                            {{ $source['reason'] ?? 'файл не приложен' }}
                                         </div>
                                         @continue
                                     @endif

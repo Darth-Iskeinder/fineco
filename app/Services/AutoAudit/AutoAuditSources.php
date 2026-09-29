@@ -6,6 +6,7 @@ use App\Models\BuhTaskDocument;
 use App\Models\BuhTaskLog;
 use App\Models\Client;
 use App\Models\Service;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
@@ -81,6 +82,51 @@ class AutoAuditSources
             ->values();
     }
 
+    /**
+     * Принудительно закрытые без файла задачи, где бухгалтер выбрал «Нулевой» или
+     * «Освобождён»: документа нет, потому что по нему ноль. Такую задачу сверка берёт
+     * нулём и сравнивает со второй стороной по факту (Искендер, 28.09.2026).
+     *
+     * «Раз в квартал», «Другое» и старые задачи без выбора сюда не попадают: там ноль не
+     * заявлен. Квартал проверит квартальный отчёт, а про «Другое» мы не знаем ничего.
+     */
+    public function forcedZeros(Client $client, Service $service): Collection
+    {
+        return BuhTaskLog::where('client_id', $client->id)
+            ->whereIn('status', self::DONE_STATUSES)
+            ->where('force_closed', true)
+            ->whereIn('force_close_reason', [BuhTaskLog::FORCE_ZERO, BuhTaskLog::FORCE_EXEMPT])
+            ->whereHas('estimateItem', fn ($q) => $q->where('service_id', $service->id))
+            ->whereDoesntHave('documents')
+            ->with('employee:id,full_name')
+            ->orderBy('year')->orderBy('month')
+            ->get();
+    }
+
+    /**
+     * Период принудительно закрытой задачи: месяц перед месяцем задачи, как у задачи без
+     * файла. Файла нет, прочитать период больше неоткуда.
+     */
+    public static function periodOfTask(BuhTaskLog $log): DocumentPeriod
+    {
+        // С первого числа, иначе «31 августа минус месяц» перельётся мимо июля.
+        $month = CarbonImmutable::create($log->year, $log->month, 1)->subMonth();
+
+        return DocumentPeriod::of($month->year, $month->month);
+    }
+
+    /** Источник «закрыта принудительно: нулевой». Число 0, файла нет, видно чья задача. */
+    public function forcedSource(string $side, BuhTaskLog $log): array
+    {
+        return array_merge($this->missingSource($side, $log), [
+            'status' => AutoAuditRunner::SOURCE_FORCED_ZERO,
+            'value'  => 0.0,
+            'reason' => 'закрыта принудительно: «'
+                . (BuhTaskLog::FORCE_REASONS[$log->force_close_reason][1] ?? 'Нулевой') . '»',
+        ]);
+    }
+
+    /** Все задачи клиента по БП в любом статусе: по ним считаем, от скольких филиалов ждать документ. */
     public function taskLogs(Client $client, Service $service): Collection
     {
         return BuhTaskLog::where('client_id', $client->id)
@@ -247,6 +293,7 @@ class AutoAuditSources
         return !is_executable($dir);
     }
 
+    /** Откуда взято число: по этому человек откроет файл и проверит вывод сам. */
     public function source(string $side, BuhTaskLog $log, BuhTaskDocument $document, DocumentValue $value): array
     {
         return [

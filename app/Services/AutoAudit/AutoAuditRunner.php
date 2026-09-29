@@ -35,8 +35,10 @@ use RuntimeException;
  *   - беда с документом: не тот документ, скан или файл не открылся. Стоит под каждой
  *     проверкой клиента, которая берёт числа из этого документа.
  *
- * Принудительно закрытые задачи ни документа, ни пропуска не дают: человек записал причину,
- * почему документа не будет («ежеквартально», «нет движений», «только один район»).
+ * Принудительно закрытые задачи «нет документа» не дают: человек записал причину. Если он
+ * выбрал «Нулевой» (или «Освобождён» для налога), задача встаёт в пару нулём и сверяется со
+ * второй стороной по факту: там цифры, значит «Не совпало»; там тоже ноль, значит «Совпало».
+ * «Раз в квартал», «Другое» и старые задачи без выбора в сверку не идут, как раньше.
  *
  * Работа поделена на три класса (с 28.09.2026): AutoAuditSources находит задачи и документы
  * и читает числа, здесь пары и вердикт, AutoAuditStore записывает итог и вопросы.
@@ -56,6 +58,9 @@ class AutoAuditRunner
 
     /** Статус источника «задача закрыта без файла», см. AutoAuditSources::missingSource. */
     public const SOURCE_MISSING = 'missing';
+
+    /** Статус источника «задача закрыта принудительно как нулевая»: файла нет, число 0. */
+    public const SOURCE_FORCED_ZERO = 'forced_zero';
 
     /**
      * Проверки.
@@ -283,9 +288,19 @@ class AutoAuditRunner
             $documents[$side] = $this->sources->documents($client, $services[$side]);
         }
 
-        $rows = $this->missingDocuments($client, $services, $documents, $rules);
+        // Принудительно закрытые как нулевые: документа нет, число 0, см. forcedZeros.
+        $forced = [];
 
-        if (collect($documents)->every(fn (Collection $found) => $found->isEmpty())) {
+        foreach (array_keys($documents) as $side) {
+            $forced[$side] = $this->sources->forcedZeros($client, $services[$side]);
+        }
+
+        $rows = $this->missingDocuments($client, $services, $documents, $rules, $forced['osv']);
+
+        // Проверяем по отдельности: ключи у обоих одни (osv, tax), и слияние их затёрло бы.
+        $isEmpty = fn (Collection $found) => $found->isEmpty();
+
+        if (collect($documents)->every($isEmpty) && collect($forced)->every($isEmpty)) {
             return $rows;
         }
 
@@ -310,7 +325,9 @@ class AutoAuditRunner
 
             $logs[$side] ??= $this->sources->taskLogs($client, $services[$side]);
 
-            array_push($rows, ...$this->checkRule($client, $number, $rule, $documents['osv'], $documents[$side], $logs[$side]));
+            array_push($rows, ...$this->checkRule(
+                $client, $number, $rule, $documents['osv'], $documents[$side], $logs[$side], $forced['osv'], $forced[$side],
+            ));
         }
 
         return $rows;
@@ -331,7 +348,7 @@ class AutoAuditRunner
      *
      * Числа в такой строке не показываем: строка общая для проверок, а числа у них разные.
      */
-    private function missingDocuments(Client $client, array $services, array $documents, array $rules): array
+    private function missingDocuments(Client $client, array $services, array $documents, array $rules, Collection $sheetForced): array
     {
         $affects = ['osv' => array_keys($rules)];
 
@@ -354,6 +371,15 @@ class AutoAuditRunner
                 $recognized[$side][$label]['period']    = $value->period;
                 $recognized[$side][$label]['sources'][] = array_merge($this->sources->source($side, $log, $document, $value), ['value' => null]);
             }
+        }
+
+        // Ведомость, закрытая как нулевая, закрывает свой месяц в квартале: оборот ноль.
+        foreach ($sheetForced as $log) {
+            $period = AutoAuditSources::periodOfTask($log);
+            $label  = $period->label();
+
+            $recognized['osv'][$label]['period']    ??= $period;
+            $recognized['osv'][$label]['sources'][] = array_merge($this->sources->forcedSource('osv', $log), ['value' => null]);
         }
 
         // Подпись периода => период, номера проверок, причины и файлы, найденные сверх опознанных.
@@ -564,6 +590,8 @@ class AutoAuditRunner
         Collection $sheetDocuments,
         Collection $reportDocuments,
         Collection $reportLogs,
+        Collection $sheetForced,
+        Collection $reportForced,
     ): array {
         $periods = [];   // подпись периода => ['period' => DocumentPeriod, 'osv' => [...], 'report' => [...]]
 
@@ -585,6 +613,10 @@ class AutoAuditRunner
             }
         }
 
+        $this->addForcedZeros($periods, 'osv', 'osv', $sheetForced, false);
+        // «Освобождён» заявляет ноль только по налогу: выручка у селлера ВБ есть, отчёта нет.
+        $this->addForcedZeros($periods, 'report', $rule['document'], $reportForced, $rule['field'] === 'tax');
+
         $rows = [];
 
         foreach ($periods as $entry) {
@@ -605,6 +637,34 @@ class AutoAuditRunner
         }
 
         return $rows;
+    }
+
+    /**
+     * Принудительно закрытые как нулевые задачи встают в пары нулём.
+     *
+     * Если за тот же период от той же строки сметы (филиала) есть настоящий документ, верим
+     * документу: ноль нужен там, где сравнивать иначе не с чем.
+     *
+     * @param bool $exemptCounts «Освобождён» тоже ноль (только налог), иначе только «Нулевой»
+     */
+    private function addForcedZeros(array &$periods, string $slot, string $side, Collection $logs, bool $exemptCounts): void
+    {
+        foreach ($logs as $log) {
+            if ($log->force_close_reason === BuhTaskLog::FORCE_EXEMPT && !$exemptCounts) {
+                continue;
+            }
+
+            $period = AutoAuditSources::periodOfTask($log);
+            $label  = $period->label();
+            $filed  = array_column($periods[$label][$slot] ?? [], 'branch_id');
+
+            if (in_array($log->estimate_item_id, $filed)) {
+                continue;
+            }
+
+            $periods[$label]['period'] ??= $period;
+            $periods[$label][$slot][]    = $this->sources->forcedSource($side, $log);
+        }
     }
 
     /**
@@ -672,6 +732,16 @@ class AutoAuditRunner
             array_push($sources, ...$osv);
         }
 
+        // Ноль, который заявил человек, закрыв задачу как нулевую. С ним «ноль против нуля»
+        // уже проверенный итог, а не два нуля из пустых ячеек.
+        $forced = [];
+
+        foreach ([...$sources, ...$reports] as $source) {
+            if ($source['status'] === self::SOURCE_FORCED_ZERO) {
+                $forced[] = "{$source['label']}: задача {$source['reason']}";
+            }
+        }
+
         foreach ($reports as $report) {
             if ($report['status'] === DocumentValue::UNCERTAIN) {
                 $unknown[] = $report['reason'];
@@ -680,40 +750,9 @@ class AutoAuditRunner
             }
         }
 
-        // Филиалы считаем множествами, а не числами. Раньше сравнивалось количество файлов с
-        // количеством филиалов, и два файла от одного филиала закрывали дыру за второй: суммы
-        // складывались, выходило «Совпало» по половине оборота, и ни одной пометки рядом.
-        $expected = $this->expectedBranches($reportLogs, $period);
-        $filed    = [];
-
-        foreach ($reports as $report) {
-            $filed[(int) $report['branch_id']][] = $report['name'];
-        }
-
-        if (!$expected) {
-            $unknown[] = 'не нашли задачу за этот период, и сколько филиалов должны были сдать, неизвестно';
-        } elseif ($missing = array_diff($expected, array_keys($filed))) {
-            $unknown[] = sprintf(
-                'отчёт сдали не все филиалы, %d из %d',
-                count($expected) - count($missing),
-                count($expected),
-            );
-        }
-
-        foreach ($filed as $files) {
-            if (count($files) > 1) {
-                $unknown[] = sprintf(
-                    'у одного филиала несколько документов за период (%s)',
-                    implode(', ', $files),
-                );
-            }
-        }
-
-        // Документ от филиала, которого мы не ждали: его задачу закрыли принудительно, а файл
-        // всё же приложили. Сумму это не портит, но человеку стоит знать, откуда лишний файл.
-        if ($expected && array_diff(array_keys($filed), $expected)) {
-            $notes[] = 'Среди документов есть отчёт филиала, чья задача закрыта принудительно';
-        }
+        [$branchUnknown, $branchNotes] = $this->branchIssues($reportLogs, $period, $reports);
+        array_push($unknown, ...$branchUnknown);
+        array_push($notes, ...$branchNotes);
 
         $left  = round($left, 2);
         $right = round((float) array_sum(array_column($reports, 'value')), 2);
@@ -745,7 +784,7 @@ class AutoAuditRunner
         // из двух нулей, а не из проверенных чисел. Расхождение при этом остаётся
         // расхождением и показывается как раньше: если оборот не напечатан, он почти
         // наверняка нулевой, и красное по ненулевому документу это настоящая находка.
-        if ($matched && $assumedZero) {
+        if ($matched && $assumedZero && !$forced) {
             return $row + [
                 'outcome'     => AutoAuditResult::UNVERIFIED,
                 'left_value'  => null,
@@ -755,6 +794,8 @@ class AutoAuditRunner
                     . implode(', ', array_unique($assumedZero)) . ', а второе число тоже нулевое',
             ];
         }
+
+        array_push($notes, ...array_unique($forced));
 
         foreach (array_unique($assumedZero) as $note) {
             $notes[] = mb_strtoupper(mb_substr($note, 0, 1)) . mb_substr($note, 1) . ', считаем его нулевым';
@@ -774,7 +815,60 @@ class AutoAuditRunner
         ];
     }
 
-    /** Все задачи клиента по БП в любом статусе: по ним считаем, от скольких филиалов ждать документ. */
+    /**
+     * Все ли филиалы сдали отчёт за период и нет ли у кого лишнего.
+     *
+     * Филиалы считаем множествами, а не числами. Раньше сравнивалось количество файлов с
+     * количеством филиалов, и два файла от одного филиала закрывали дыру за второй: суммы
+     * складывались, выходило «Совпало» по половине оборота, и ни одной пометки рядом.
+     *
+     * Задача, закрытая как нулевая, тоже сдача: её ноль стоит среди отчётов.
+     *
+     * @return array{0: string[], 1: string[]} почему число неизвестно, и пометки к строке
+     */
+    private function branchIssues(Collection $reportLogs, DocumentPeriod $period, array $reports): array
+    {
+        $counted = array_column(
+            array_filter($reports, fn (array $report) => $report['status'] === self::SOURCE_FORCED_ZERO),
+            'log_id',
+        );
+        $expected = $this->expectedBranches($reportLogs, $period, $counted);
+        $filed    = [];
+        $unknown  = [];
+        $notes    = [];
+
+        foreach ($reports as $report) {
+            $filed[(int) $report['branch_id']][] = $report['name'] ?? $report['reason'];
+        }
+
+        if (!$expected) {
+            $unknown[] = 'не нашли задачу за этот период, и сколько филиалов должны были сдать, неизвестно';
+        } elseif ($missing = array_diff($expected, array_keys($filed))) {
+            $unknown[] = sprintf(
+                'отчёт сдали не все филиалы, %d из %d',
+                count($expected) - count($missing),
+                count($expected),
+            );
+        }
+
+        foreach ($filed as $files) {
+            if (count($files) > 1) {
+                $unknown[] = sprintf(
+                    'у одного филиала несколько документов за период (%s)',
+                    implode(', ', $files),
+                );
+            }
+        }
+
+        // Документ от филиала, которого мы не ждали: его задачу закрыли принудительно, а файл
+        // всё же приложили. Сумму это не портит, но человеку стоит знать, откуда лишний файл.
+        if ($expected && array_diff(array_keys($filed), $expected)) {
+            $notes[] = 'Среди документов есть отчёт филиала, чья задача закрыта принудительно';
+        }
+
+        return [$unknown, $notes];
+    }
+
     /**
      * Филиалы, от которых ждём документ за период: по строке сметы на каждый.
      *
@@ -786,11 +880,12 @@ class AutoAuditRunner
      * откатывался на единицу, и недостающий филиал переставал замечаться.
      *
      * Принудительно закрытую задачу не считаем: человек записал, почему документа не будет
-     * («только один район», «ежеквартально»).
+     * («только один район», «ежеквартально»). Кроме закрытых как нулевые, которые встали в
+     * сверку нулём ($counted): они сдали свой ноль.
      *
      * @return int[] номера строк сметы
      */
-    private function expectedBranches(Collection $logs, DocumentPeriod $period): array
+    private function expectedBranches(Collection $logs, DocumentPeriod $period, array $counted = []): array
     {
         $months = [];
         $end    = $period->to->startOfMonth();
@@ -800,7 +895,7 @@ class AutoAuditRunner
         }
 
         return $logs
-            ->reject(fn (BuhTaskLog $log) => (bool) $log->force_closed)
+            ->reject(fn (BuhTaskLog $log) => $log->force_closed && !in_array($log->id, $counted))
             ->filter(fn (BuhTaskLog $log) => in_array(
                 CarbonImmutable::create($log->year, $log->month, 1)->format('Y-m'),
                 $months,
@@ -812,6 +907,4 @@ class AutoAuditRunner
             ->values()
             ->all();
     }
-
-    /** Откуда взято число: по этому человек откроет файл и проверит вывод сам. */
 }

@@ -813,6 +813,122 @@ class AutoAuditRunTest extends TestCase
         $this->assertCount(0, $this->runAudit());
     }
 
+    /** Задача за август, закрытая принудительно без файла с выбранной причиной. */
+    private function forceClose(Client $client, EstimateItem $item, string $reason, int $month = 8): BuhTaskLog
+    {
+        return BuhTaskLog::create([
+            'employee_id' => $this->admin->id, 'client_id' => $client->id,
+            'estimate_item_id' => $item->id, 'year' => 2026, 'month' => $month, 'status' => 'completed',
+            'force_closed' => true, 'force_close_reason' => $reason, 'force_close_comment' => 'нулевой',
+        ]);
+    }
+
+    /** Отчёт закрыт как нулевой, а в ведомости оборот есть: это находка, вопрос обоим. */
+    public function test_report_closed_as_zero_against_turnover_is_a_mismatch(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 150.00, '3410' => 6.00]);
+        $log = $this->forceClose($client, $this->item($client, $this->taxService), BuhTaskLog::FORCE_ZERO);
+
+        $rows = $this->runAudit();
+        $tax  = $rows->firstWhere('rule', '3');
+
+        $this->assertSame(AutoAuditResult::MISMATCH, $tax->outcome);
+        $this->assertSame('6.00', $tax->left_value);
+        $this->assertSame('0.00', $tax->right_value);
+        $this->assertSame('2026-07-01', $tax->period_from->toDateString());
+        $this->assertStringContainsString('закрыта принудительно: «Нулевой»', $tax->reason);
+        $this->assertContains($log->id, AutoAuditQuestions::logIds($tax));
+        $this->assertSame(AutoAuditResult::MISMATCH, $rows->firstWhere('rule', '1')->outcome);
+    }
+
+    /** Ноль, заявленный человеком, против пустого оборота в ведомости: проверено, сошлось. */
+    public function test_report_closed_as_zero_against_empty_turnover_matches(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 0.00]);
+        $this->forceClose($client, $this->item($client, $this->taxService), BuhTaskLog::FORCE_ZERO);
+
+        $tax = $this->runAudit()->firstWhere('rule', '3');
+
+        $this->assertSame(AutoAuditResult::MATCHED, $tax->outcome);
+        $this->assertStringContainsString('Отчёт по ЕН: задача закрыта принудительно: «Нулевой»', $tax->reason);
+        $this->assertStringContainsString('нет оборота по счёту 3410, считаем его нулевым', $tax->reason);
+    }
+
+    /** В обратную сторону: ведомость закрыта как нулевая, а в отчёте налог есть. */
+    public function test_sheet_closed_as_zero_against_a_report_is_a_mismatch(): void
+    {
+        $client = $this->client();
+        $this->forceClose($client, $this->item($client, $this->osvService), BuhTaskLog::FORCE_ZERO);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $tax = $this->runAudit()->firstWhere('rule', '3');
+
+        $this->assertSame(AutoAuditResult::MISMATCH, $tax->outcome);
+        $this->assertSame('0.00', $tax->left_value);
+        $this->assertSame('4.00', $tax->right_value);
+    }
+
+    /** «Раз в квартал» и «Другое» ноль не заявляют: строки нет, как раньше. */
+    public function test_quarterly_and_other_reasons_are_not_zero(): void
+    {
+        foreach ([BuhTaskLog::FORCE_QUARTERLY, BuhTaskLog::FORCE_OTHER] as $reason) {
+            $client = $this->client();
+            $this->attachSheet($client, "осв-{$reason}.xls", ['3210' => 150.00, '3410' => 6.00]);
+            $this->forceClose($client, $this->item($client, $this->taxService), $reason);
+        }
+
+        $this->assertCount(0, $this->runAudit());
+    }
+
+    /** «Освобождён» это ноль по налогу (№3), но не по выручке (№1): выручка у селлера есть. */
+    public function test_exempt_is_zero_only_for_the_tax(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 150.00, '3410' => 6.00]);
+        $this->forceClose($client, $this->item($client, $this->taxService), BuhTaskLog::FORCE_EXEMPT);
+
+        $rows = $this->runAudit();
+
+        $this->assertNull($rows->firstWhere('rule', '1'));
+        $this->assertSame(AutoAuditResult::MISMATCH, $rows->firstWhere('rule', '3')->outcome);
+        $this->assertStringContainsString('«Освобождён»', $rows->firstWhere('rule', '3')->reason);
+    }
+
+    /** Филиал закрыт как нулевой: он сдал свой ноль, остальные складываются как обычно. */
+    public function test_branch_closed_as_zero_counts_as_filed(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 60.00, '3410' => 2.40]);
+
+        $first  = $this->item($client, $this->taxService, 'Бишкек');
+        $second = $this->item($client, $this->taxService, 'Ош');
+        $this->attachReport($client, 'отчёт-бишкек.pdf', base: 60.00, tax: 2.40, item: $first);
+        $this->forceClose($client, $second, BuhTaskLog::FORCE_ZERO);
+
+        $base = $this->runAudit()->firstWhere('rule', '1');
+
+        $this->assertSame(AutoAuditResult::MATCHED, $base->outcome);
+        $this->assertSame('60.00', $base->right_value);
+        $this->assertStringNotContainsString('чья задача закрыта принудительно', (string) $base->reason);
+    }
+
+    /** Ведомость, закрытая как нулевая, закрывает свой месяц в квартале. */
+    public function test_sheet_closed_as_zero_fills_its_month_in_a_quarter(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв-апрель.xls', ['3210' => 30.00, '3410' => 1.20], month: 4);
+        $this->forceClose($client, $this->item($client, $this->osvService), BuhTaskLog::FORCE_ZERO, month: 6);
+        $this->attachSheet($client, 'осв-июнь.xls', ['3210' => 70.00, '3410' => 2.80], month: 6);
+        $this->attachQuarterReport($client, 'отчёт-кв2.pdf', base: 100.00, tax: 4.00);
+
+        $rows = $this->runAudit();
+
+        $this->assertNull($rows->firstWhere('outcome', AutoAuditResult::MISSING_DOCUMENT));
+        $this->assertSame(AutoAuditResult::MATCHED, $rows->firstWhere('rule', '1')->outcome);
+    }
+
     /**
      * Разметка старых закрытий: без --apply ничего не пишет, с --apply проставляет только
      * пустым. Выбор человека и задачи других БП не трогает.
