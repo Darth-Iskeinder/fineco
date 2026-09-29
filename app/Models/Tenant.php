@@ -30,6 +30,9 @@ class Tenant extends Model
     /** Ключ в settings: руководитель фирмы видит ответы по находкам автоаудита. */
     public const SETTING_AUTO_AUDIT_FINDINGS = 'auto_audit_findings';
 
+    /** Ключ в settings: первый отчётный месяц, который автоаудит проверяет в фирме, '2026-09'. */
+    public const SETTING_AUTO_AUDIT_FROM = 'auto_audit_from';
+
     protected $fillable = [
         'name', 'slug', 'status', 'plan', 'settings', 'is_template',
         // Профиль фирмы: правится в настройках, уходит в акты и сметы.
@@ -126,6 +129,23 @@ class Tenant extends Model
     public function setAutoAuditFindingsEnabled(bool $enabled): void
     {
         $this->settings = array_merge($this->settings ?? [], [self::SETTING_AUTO_AUDIT_FINDINGS => $enabled]);
+        $this->save();
+    }
+
+    /**
+     * С какого отчётного месяца автоаудит проверяет фирму, '2026-09'; null = все месяцы.
+     *
+     * Фирма, подключённая позже, не получает в первый же день вопросы бухгалтерам за полгода
+     * назад. У Fineco не задан: там автоаудит с самого начала.
+     */
+    public function autoAuditFrom(): ?string
+    {
+        return $this->settings[self::SETTING_AUTO_AUDIT_FROM] ?? null;
+    }
+
+    public function setAutoAuditFrom(?string $month): void
+    {
+        $this->settings = array_merge($this->settings ?? [], [self::SETTING_AUTO_AUDIT_FROM => $month]);
         $this->save();
     }
 

@@ -1290,6 +1290,32 @@ class AutoAuditRunTest extends TestCase
         $this->assertSame('2026-09-01', $results->first()->period_from->toDateString());
     }
 
+    /**
+     * Фирма подключена с августа: июль не проверяется ни одной проверкой. Старт проверки
+     * позже старта фирмы остаётся своим: №2 и тут с сентября.
+     */
+    public function test_firm_start_hides_earlier_months(): void
+    {
+        $this->tenant->setAutoAuditFrom('2026-08');
+
+        $cash = $this->client();
+        $this->attachSheet($cash, 'осв-июль.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachReport($cash, 'отчёт-июль.pdf', base: 999.00, tax: 4.00);
+        $this->attachSheet($cash, 'осв-август.xls', ['3210' => 100.00, '3410' => 4.00], month: 8, taskMonth: 9);
+        $this->attachReport($cash, 'отчёт-август.pdf', base: 100.00, tax: 4.00, month: 8, taskMonth: 9);
+
+        $accrual = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL]);
+        $this->attachSheet($accrual, 'осв-август-2.xls', ['6110' => 999.00, '3410' => 4.00], month: 8, taskMonth: 9);
+        $this->attachReport($accrual, 'отчёт-август-2.pdf', base: 100.00, tax: 4.00, month: 8, taskMonth: 9);
+
+        $results = $this->runAudit();
+
+        $this->assertSame(['2026-08-01'], $results->map(fn ($r) => $r->period_from->toDateString())->unique()->values()->all());
+        $this->assertSame(['1', '3'], $results->where('client_id', $cash->id)->pluck('rule')->sort()->values()->all());
+        $this->assertSame(['3'], $results->where('client_id', $accrual->id)->pluck('rule')->all());
+        $this->assertTrue($results->every(fn ($r) => $r->outcome === AutoAuditResult::MATCHED));
+    }
+
     /** Ведомость закрыта без файла: за июль в строке «Нет документа» только №3, с сентября и №2. */
     public function test_missing_sheet_names_rule_2_only_from_september(): void
     {

@@ -6,6 +6,7 @@ use App\Models\AutoAuditResult;
 use App\Models\BuhTaskLog;
 use App\Models\Client;
 use App\Models\Service;
+use App\Models\Tenant;
 use App\Support\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -78,6 +79,7 @@ class AutoAuditRunner
      *            Новая проверка не лезет в прошлое: иначе в день выкатки бухгалтеры получают
      *            вопросы про давно сданные месяцы. Так было с №2 29.09.2026: два вопроса из
      *            трёх пришли про июнь. Периоды берём из документа, квартал по первому месяцу.
+     *            Старт фирмы (Tenant::autoAuditFrom) сдвигает его ещё позже, но не раньше.
      *
      * Все проверки берут обороты, поэтому ведомости за квартал складываются. У будущих
      * проверок по сальдо так нельзя: там нужен последний месяц.
@@ -253,6 +255,14 @@ class AutoAuditRunner
             throw new RuntimeException(
                 'В фирме не размечены эталонные БП, проверять нечего. Результаты прошлого прогона не тронуты',
             );
+        }
+
+        // У фирмы свой старт: проверка смотрит с того месяца, что позже, её или фирмы.
+        // Строки 'ГГГГ-ММ' сравниваются как числа.
+        $start = Tenant::find(TenantContext::id())?->autoAuditFrom();
+
+        if ($start) {
+            $rules = array_map(fn (array $rule) => array_merge($rule, ['from' => max($rule['from'] ?? '', $start)]), $rules);
         }
 
         $rows = [];

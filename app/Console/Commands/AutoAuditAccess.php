@@ -11,6 +11,9 @@ use Illuminate\Console\Command;
  * --findings-on и --findings-off отдельно открывают руководителю ответы по находкам и
  * кнопки «Принять» и «Не принято». Без открытой страницы от них толку нет.
  *
+ * --from=2026-09 задаёт первый отчётный месяц, который автоаудит проверяет в фирме, --from=all
+ * снимает ограничение. Ставится до первого прогона у фирмы, подключённой не с начала.
+ *
  * Без --on и --off только показывает, как сейчас: команда меняет то, что видят люди
  * в фирме, и случайный запуск ничего не должен трогать. Повторный --on или --off
  * безвреден.
@@ -24,7 +27,8 @@ class AutoAuditAccess extends Command
         {--on : Открыть страницу руководителю}
         {--off : Закрыть страницу руководителю}
         {--findings-on : Показать руководителю ответы по находкам}
-        {--findings-off : Спрятать от руководителя ответы по находкам}';
+        {--findings-off : Спрятать от руководителя ответы по находкам}
+        {--from= : С какого отчётного месяца проверять фирму, 2026-09; all = все месяцы}';
 
     protected $description = 'Показать или поменять, видит ли руководитель фирмы страницу автоаудита';
 
@@ -50,12 +54,24 @@ class AutoAuditAccess extends Command
             return self::FAILURE;
         }
 
+        $from = $this->option('from');
+
+        if ($from !== null && $from !== 'all' && !preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $from)) {
+            $this->error('Месяц пишется так: --from=2026-09, или --from=all для всех месяцев');
+
+            return self::FAILURE;
+        }
+
         $tenant = Tenant::find($id);
 
         if (!$tenant) {
             $this->error("Фирмы {$id} нет");
 
             return self::FAILURE;
+        }
+
+        if ($from !== null) {
+            $tenant->setAutoAuditFrom($from === 'all' ? null : $from);
         }
 
         if ($this->option('on') || $this->option('off')) {
@@ -73,6 +89,7 @@ class AutoAuditAccess extends Command
             $tenant->autoAuditEnabled() ? 'открыт' : 'закрыт',
         ));
         $this->line('Ответы по находкам руководителю: ' . ($tenant->autoAuditFindingsEnabled() ? 'видны' : 'скрыты'));
+        $this->line('Проверяет отчёты: ' . ($tenant->autoAuditFrom() ? 'с ' . $tenant->autoAuditFrom() : 'за все месяцы'));
 
         return self::SUCCESS;
     }

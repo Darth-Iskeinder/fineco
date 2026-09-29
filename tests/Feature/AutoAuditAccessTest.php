@@ -111,6 +111,33 @@ class AutoAuditAccessTest extends TestCase
         $this->assertFalse($this->tenant->fresh()->autoAuditEnabled());
     }
 
+    /** Старт фирмы: ставится и снимается, кривой месяц не принимается, соседние ключи целы. */
+    public function test_from_sets_and_clears_the_start_month(): void
+    {
+        $this->assertNull($this->tenant->autoAuditFrom());
+
+        $this->artisan('autoaudit:access', ['--tenant' => $this->tenant->id, '--from' => '2026-09'])
+            ->expectsOutputToContain('Проверяет отчёты: с 2026-09')
+            ->assertSuccessful();
+
+        $tenant = $this->tenant->fresh();
+        $this->assertSame('2026-09', $tenant->autoAuditFrom());
+        $this->assertFalse($tenant->autoAuditEnabled());
+        $this->assertSame('keep me', $tenant->settings['other']);
+
+        foreach (['2026-9', '2026-13', 'сентябрь'] as $bad) {
+            $this->artisan('autoaudit:access', ['--tenant' => $this->tenant->id, '--from' => $bad])->assertFailed();
+        }
+
+        $this->assertSame('2026-09', $this->tenant->fresh()->autoAuditFrom());
+
+        $this->artisan('autoaudit:access', ['--tenant' => $this->tenant->id, '--from' => 'all'])
+            ->expectsOutputToContain('за все месяцы')
+            ->assertSuccessful();
+
+        $this->assertNull($this->tenant->fresh()->autoAuditFrom());
+    }
+
     /** Флаг находок отдельный: не трогает флаг страницы и остальные настройки. */
     public function test_findings_flag_is_separate(): void
     {
