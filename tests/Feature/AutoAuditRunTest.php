@@ -221,7 +221,7 @@ class AutoAuditRunTest extends TestCase
 
         $row = $results->first();
         $this->assertSame(AutoAuditResult::MISSING_DOCUMENT, $row->outcome);
-        $this->assertSame('3', $row->rule);
+        $this->assertSame('2,3', $row->rule);
         $this->assertSame('Нет ведомости за май 2026', $row->reason);
         $this->assertNull($row->left_value);
         $this->assertNull($row->right_value);
@@ -1050,7 +1050,7 @@ class AutoAuditRunTest extends TestCase
 
         $issue = $results->first();
         $this->assertSame($accrual->id, $issue->client_id);
-        $this->assertSame('3', $issue->rule);
+        $this->assertSame('2,3', $issue->rule);
         $this->assertSame(AutoAuditResult::WRONG_DOCUMENT, $issue->outcome);
         $this->assertSame('Это не оборотно-сальдовая ведомость', $issue->reason);
     }
@@ -1258,11 +1258,48 @@ class AutoAuditRunTest extends TestCase
         $this->assertStringContainsString('income_tax', $tax->reason);
     }
 
-    /** Налоговая база и оборот 3210 сходятся только при кассовом методе. */
-    public function test_accrual_client_gets_only_rule_3(): void
+    /** При методе начисления база сверяется с оборотом 6110, а не 3210: №2 вместо №1. */
+    public function test_accrual_client_gets_rules_2_and_3(): void
     {
         $client = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL]);
-        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachSheet($client, 'осв.xls', ['3210' => 90.00, '6110' => 100.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $results = $this->runAudit();
+
+        $this->assertSame(['2', '3'], $results->pluck('rule')->sort()->values()->all());
+        $this->assertSame(AutoAuditResult::MATCHED, $results->firstWhere('rule', '2')->outcome);
+    }
+
+    /** Оборот 6110 разошёлся с базой из отчёта: «Не совпало» с разницей. */
+    public function test_accrual_base_mismatch_with_6110(): void
+    {
+        $client = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL]);
+        $this->attachSheet($client, 'осв.xls', ['6110' => 120.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $base = $this->runAudit()->firstWhere('rule', '2');
+
+        $this->assertSame(AutoAuditResult::MISMATCH, $base->outcome);
+        $this->assertSame('120.00', $base->left_value);
+        $this->assertSame('100.00', $base->right_value);
+    }
+
+    /** Кассовому методу №2 не положена, как методу начисления №1. */
+    public function test_cash_client_skips_rule_2(): void
+    {
+        $client = $this->client(['accounting_method' => Client::ACCOUNTING_CASH]);
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '6110' => 50.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $this->assertSame(['1', '3'], $this->runAudit()->pluck('rule')->sort()->values()->all());
+    }
+
+    /** Метод в карточке не заполнен: базу не с чем сверять, остаётся только налог. */
+    public function test_client_without_method_skips_both_base_checks(): void
+    {
+        $client = $this->client(['accounting_method' => null]);
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '6110' => 100.00, '3410' => 4.00]);
         $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
 
         $this->assertSame(['3'], $this->runAudit()->pluck('rule')->all());

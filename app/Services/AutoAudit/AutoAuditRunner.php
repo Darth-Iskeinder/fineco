@@ -72,7 +72,8 @@ class AutoAuditRunner
      * document:  сторона второго документа, см. AutoAuditSources::SIDES;
      * field:     число из него: 'base' и 'tax' у отчёта по налогу; 'income', 'income_tax',
      *            'contributions' и 'pension' у формы 161;
-     * cash_only: только для кассового метода. Полное обслуживание нужно всем.
+     * method:    метод учёта клиента из карточки, null = любой. Клиент с незаполненным
+     *            методом проверки с методом не проходит. Полное обслуживание нужно всем.
      *
      * Все проверки берут обороты, поэтому ведомости за квартал складываются. У будущих
      * проверок по сальдо так нельзя: там нужен последний месяц.
@@ -89,7 +90,16 @@ class AutoAuditRunner
             'account'   => '3210',
             'document'  => 'tax',
             'field'     => 'base',
-            'cash_only' => true,
+            'method'    => Client::ACCOUNTING_CASH,
+        ],
+        2 => [
+            'name'      => 'Налоговая база сходится с учётом (метод начисления)',
+            'formula'   => 'ОСВ, оборот Кт 6110 = налоговая база из отчёта по единому налогу',
+            'condition' => 'Метод начисления, полное обслуживание',
+            'account'   => '6110',
+            'document'  => 'tax',
+            'field'     => 'base',
+            'method'    => Client::ACCOUNTING_ACCRUAL,
         ],
         3 => [
             'name'      => 'Начисленный единый налог сходится с учётом',
@@ -98,7 +108,7 @@ class AutoAuditRunner
             'account'   => '3410',
             'document'  => 'tax',
             'field'     => 'tax',
-            'cash_only' => false,
+            'method'    => null,
         ],
         4 => [
             'name'      => 'Начисленный доход сходится с учётом',
@@ -107,7 +117,7 @@ class AutoAuditRunner
             'account'   => '3520',
             'document'  => 'f161',
             'field'     => 'income',
-            'cash_only' => false,
+            'method'    => null,
         ],
         5 => [
             'name'      => 'Подоходный налог к уплате сходится с учётом',
@@ -116,7 +126,7 @@ class AutoAuditRunner
             'account'   => '3420',
             'document'  => 'f161',
             'field'     => 'income_tax',
-            'cash_only' => false,
+            'method'    => null,
         ],
         6 => [
             'name'      => 'Страховые взносы сходятся с учётом',
@@ -125,7 +135,7 @@ class AutoAuditRunner
             'account'   => '3531',
             'document'  => 'f161',
             'field'     => 'contributions',
-            'cash_only' => false,
+            'method'    => null,
         ],
         7 => [
             'name'      => 'Взносы в НПФ сходятся с учётом',
@@ -134,7 +144,7 @@ class AutoAuditRunner
             'account'   => '3534',
             'document'  => 'f161',
             'field'     => 'pension',
-            'cash_only' => false,
+            'method'    => null,
         ],
     ];
 
@@ -278,7 +288,7 @@ class AutoAuditRunner
 
         $rules = array_filter(
             $rules,
-            fn (array $rule) => !$rule['cash_only'] || $client->accounting_method === Client::ACCOUNTING_CASH,
+            fn (array $rule) => $rule['method'] === null || $client->accounting_method === $rule['method'],
         );
 
         // Ведомость нужна всем проверкам, вторые документы только своим.
