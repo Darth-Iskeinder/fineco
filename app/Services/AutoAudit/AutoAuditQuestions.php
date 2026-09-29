@@ -180,6 +180,11 @@ class AutoAuditQuestions
                 fn (int $n) => '№' . $n . ' ' . (AutoAuditRunner::RULES[$n]['name'] ?? ''),
                 $result->ruleNumbers(),
             ),
+            // Подсказка к каждой проверке, по порядку rules: что с чем сверяли, со счётом.
+            'rule_hints'    => array_map(
+                fn (int $n) => AutoAuditRunner::RULES[$n]['hint'] ?? '',
+                $result->ruleNumbers(),
+            ),
             'left_value'    => $result->left_value,
             'right_value'   => $result->right_value,
             'difference'    => $result->difference,

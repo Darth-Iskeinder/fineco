@@ -263,8 +263,8 @@ class AutoAuditRunTest extends TestCase
 
         $this->asVendor()->get(route('auto-audit.index'))
             ->assertSeeInOrder([
-                '№1 Налоговая база сходится с учётом',
-                '№3 Начисленный единый налог сходится с учётом',
+                '№1 Доход в отчёте по ЕН = полученные деньги',
+                '№3 Единый налог в отчёте = начислен в учёте',
                 $client->name,
                 'по месяцу задачи',
                 'файл не приложен',
@@ -371,7 +371,7 @@ class AutoAuditRunTest extends TestCase
         $this->assertSame(AutoAuditResult::MATCHED, $results['6']->outcome);
         $this->assertSame(AutoAuditResult::MISMATCH, $results['7']->outcome);
         $this->assertSame('-288.00', $results['7']->difference);
-        $this->assertSame('Взносы в НПФ сходятся с учётом', $results['7']->ruleName());
+        $this->assertSame('Взносы ГНПФ в Форме 161 = в учёте', $results['7']->ruleName());
     }
 
     /** Нет формы 161: «нет документа» ломает сразу все четыре проверки по ней. */
@@ -410,7 +410,7 @@ class AutoAuditRunTest extends TestCase
 
         $this->asVendor()->get(route('auto-audit.index'))
             ->assertSeeInOrder([
-                '№4 Начисленный доход сходится с учётом',
+                '№4 Зарплата в Форме 161 = начислена в учёте',
                 $client->name,
                 'Задача за 08.2026',
                 'ОСВ',
@@ -597,7 +597,7 @@ class AutoAuditRunTest extends TestCase
         $this->assertSame('87513.60', $base->right_value);
         $this->assertSame('0.00', $base->difference);
         $this->assertSame('июль 2026', $base->periodLabel());
-        $this->assertSame('Налоговая база сходится с учётом', $base->ruleName());
+        $this->assertSame('Доход в отчёте по ЕН = полученные деньги', $base->ruleName());
         $this->assertCount(2, $base->sources);
     }
 
@@ -1574,8 +1574,9 @@ class AutoAuditRunTest extends TestCase
             ->get(route('auto-audit.index'))
             ->assertOk()
             ->assertSee('Период')
-            ->assertSee('№1 Налоговая база сходится с учётом')
-            ->assertSee('№3 Начисленный единый налог сходится с учётом')
+            ->assertSee('№1 Доход в отчёте по ЕН = полученные деньги')
+            ->assertSee('title="ОСВ: 3410 единый налог, оборот по кредиту ↔ Отчёт по ЕН: сумма налога"', false)
+            ->assertSee('№3 Единый налог в отчёте = начислен в учёте')
             ->assertSee($client->name)
             ->assertSee('50,00')
             ->assertSee('Не совпало')
@@ -2725,7 +2726,8 @@ class AutoAuditRunTest extends TestCase
         $page = $this->actingAs($osvDoer, 'employee')->get(route('buhtasks.index'))->assertOk()->getContent();
         $onPage = $this->auditQuestionsOnPage($page);
         $this->assertCount(1, $onPage);
-        $this->assertSame('№1 Налоговая база сходится с учётом', $onPage[0]['rules'][0]);
+        $this->assertSame('№1 Доход в отчёте по ЕН = полученные деньги', $onPage[0]['rules'][0]);
+        $this->assertSame('ОСВ: 3210 полученные деньги, оборот по кредиту ↔ Отчёт по ЕН: налогооблагаемая база (кассовый метод)', $onPage[0]['rule_hints'][0]);
         $this->assertSame($client->name, $onPage[0]['client_name']);
         $this->assertSame('replace', $onPage[0]['fix'][0]['action']);
     }

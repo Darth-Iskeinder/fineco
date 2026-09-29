@@ -1515,8 +1515,8 @@
                         <div class="min-w-0">
                             <p class="text-xs font-semibold text-violet-600 uppercase tracking-wider">Вопрос автоаудита</p>
                             <h3 class="mt-1 text-base font-semibold text-slate-800" x-text="auditModal.q.client_name + ', ' + auditModal.q.period_label"></h3>
-                            <template x-for="rule in auditModal.q.rules" :key="rule">
-                                <p class="text-sm text-slate-500" x-text="rule"></p>
+                            <template x-for="(rule, i) in auditModal.q.rules" :key="rule">
+                                <p class="text-sm text-slate-500 cursor-help" :title="auditModal.q.rule_hints?.[i] ?? ''" x-text="rule"></p>
                             </template>
                         </div>
                         <button type="button" @click="closeAuditQuestion()" title="Закрыть"
