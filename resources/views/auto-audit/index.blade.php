@@ -74,6 +74,15 @@
             @endif
         </div>
 
+        @if ($nightlyLate)
+            {{-- Только вендору: ночной прогон, похоже, не сработал. --}}
+            <div class="mx-6 mb-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                Ночной прогон по этой фирме не проходил больше полутора суток
+                ({{ $nightlyLate['last'] ? 'последний ' . $nightlyLate['last']->format('d.m.Y H:i') : 'не было ни одного' }}).
+                Проверьте crontab пользователя www-data и storage/logs/autoaudit-cron.log.
+            </div>
+        @endif
+
         @if ($running)
             {{-- Прогон идёт в терминале: показываем это и обновляем страницу, пока не закончится. --}}
             <div class="mx-6 mb-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">

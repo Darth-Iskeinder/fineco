@@ -47,6 +47,12 @@ class AutoAuditController extends Controller
      */
     private const STALE_MINUTES = 15;
 
+    /**
+     * Ночной прогон раз в сутки. Если удачного не было дольше этого, крон, похоже, не
+     * сработал: сам по себе такой сбой ничем не виден, страница просто стоит на старом.
+     */
+    private const NIGHTLY_LATE_HOURS = 36;
+
     public function index(Request $request): View
     {
         $this->allowedOnly();
@@ -98,7 +104,8 @@ class AutoAuditController extends Controller
             ->sort(fn (AutoAuditResult $a, AutoAuditResult $b) => $this->sortKey($a) <=> $this->sortKey($b))
             ->values();
 
-        $state = $this->state();
+        $state     = $this->state();
+        $checkedAt = AutoAuditResult::current()->latest('updated_at')->value('updated_at');
 
         return view('auto-audit.index', [
             'results'       => $results,
@@ -110,7 +117,9 @@ class AutoAuditController extends Controller
             'counts'        => $inPeriodAndRule->countBy('outcome'),
             // Прогон сдвигает время обновления у каждой действующей строки, даже если итог
             // не поменялся. Время создания тут не годится: строка живёт много прогонов.
-            'checkedAt'     => AutoAuditResult::current()->latest('updated_at')->value('updated_at'),
+            'checkedAt'     => $checkedAt,
+            // Только вендору: крон на сервере чинит он, руководителю это ничего не скажет.
+            'nightlyLate'   => Impersonation::isActive() ? $this->nightlyLate($state, $checkedAt) : null,
             'state'         => $state,
             'running'       => $this->isRunning($state),
             'vendor'        => Impersonation::isActive(),
@@ -242,6 +251,34 @@ class AutoAuditController extends Controller
     private function state(): ?array
     {
         return Cache::get(RunAutoAuditJob::stateKey(TenantContext::id()));
+    }
+
+    /**
+     * Фирма в ночном прогоне, а удачного прогона не было дольше NIGHTLY_LATE_HOURS: отдаём
+     * время последнего (null, если не было ни одного). Иначе, и вне ночного прогона, null.
+     *
+     * Время берём из состояния прогона в кеше, а если его нет (кеш живёт неделю и может
+     * быть сброшен), из последнего обновления строк: прогон трогает каждую действующую.
+     *
+     * @return array{last: ?CarbonImmutable}|null
+     */
+    private function nightlyLate(?array $state, mixed $checkedAt): ?array
+    {
+        if (!Tenant::find(TenantContext::id())?->autoAuditNightly()) {
+            return null;
+        }
+
+        $finished = ($state['status'] ?? null) === RunAutoAuditJob::DONE && !empty($state['finished_at'])
+            ? CarbonImmutable::parse($state['finished_at'])
+            : null;
+        $updated = $checkedAt ? CarbonImmutable::parse($checkedAt) : null;
+        $last    = collect([$finished, $updated])->filter()->max();
+
+        if ($last && $last->greaterThan(now()->subHours(self::NIGHTLY_LATE_HOURS))) {
+            return null;
+        }
+
+        return ['last' => $last?->setTimezone(config('app.timezone'))];
     }
 
     private function isRunning(?array $state): bool

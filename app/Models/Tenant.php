@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Collection;
 
 /**
  * Аккаунт — бухфирма, которая пользуется системой. В интерфейсе так и зовём,
@@ -32,6 +33,9 @@ class Tenant extends Model
 
     /** Ключ в settings: первый отчётный месяц, который автоаудит проверяет в фирме, '2026-09'. */
     public const SETTING_AUTO_AUDIT_FROM = 'auto_audit_from';
+
+    /** Ключ в settings: фирма идёт в ночной прогон автоаудита (autoaudit:run --all). */
+    public const SETTING_AUTO_AUDIT_NIGHTLY = 'auto_audit_nightly';
 
     protected $fillable = [
         'name', 'slug', 'status', 'plan', 'settings', 'is_template',
@@ -147,6 +151,41 @@ class Tenant extends Model
     {
         $this->settings = array_merge($this->settings ?? [], [self::SETTING_AUTO_AUDIT_FROM => $month]);
         $this->save();
+    }
+
+    /**
+     * Идёт ли фирма в ночной прогон автоаудита.
+     *
+     * Отдельный флаг, а не «размечены эталонные БП»: разметка ещё не значит, что фирма готова.
+     * Без старта (autoAuditFrom) первый же прогон прошёл бы по всем её прошлым месяцам.
+     */
+    public function autoAuditNightly(): bool
+    {
+        return (bool) ($this->settings[self::SETTING_AUTO_AUDIT_NIGHTLY] ?? false);
+    }
+
+    public function setAutoAuditNightly(bool $enabled): void
+    {
+        $this->settings = array_merge($this->settings ?? [], [self::SETTING_AUTO_AUDIT_NIGHTLY => $enabled]);
+        $this->save();
+    }
+
+    /**
+     * Фирмы ночного прогона, по порядку номера. Образец и приостановленные не берём, даже
+     * с флагом: в образце работы нет, приостановленную никто не смотрит.
+     *
+     * Флаг отбираем в PHP, а не запросом к JSON: фирм единицы, а запрос к полю settings
+     * пишется в MySQL (тесты) и PostgreSQL (бой) по-разному.
+     *
+     * @return Collection<int, self>
+     */
+    public static function forNightlyAutoAudit(): Collection
+    {
+        return self::whereNotIn('status', [self::STATUS_TEMPLATE, self::STATUS_SUSPENDED])
+            ->orderBy('id')
+            ->get()
+            ->filter(fn (self $tenant) => $tenant->autoAuditNightly() && !$tenant->isTemplate())
+            ->values();
     }
 
     /** Образец, из которого новые аккаунты получают стартовый набор. */

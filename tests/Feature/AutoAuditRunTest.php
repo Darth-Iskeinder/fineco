@@ -1560,6 +1560,117 @@ class AutoAuditRunTest extends TestCase
             ->assertDontSee(route('auto-audit.index'));
     }
 
+    /**
+     * Ночной прогон одной командой: идут только фирмы с флагом, по порядку номера. Упавшая
+     * фирма (без разметки БП) не останавливает следующую, а команда сообщает о сбое.
+     */
+    public function test_all_runs_nightly_firms_and_survives_a_failed_one(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $this->tenant->setAutoAuditNightly(true);
+
+        $firm = fn (string $name, string $status = Tenant::STATUS_ACTIVE) => Tenant::create([
+            'name' => $name . ' ' . uniqid(), 'slug' => 'autoaudit-all-' . uniqid(), 'status' => $status,
+        ]);
+
+        // Флаг есть, а эталонные БП не размечены: прогон этой фирмы падает.
+        $broken = $firm('Без разметки');
+        $broken->setAutoAuditNightly(true);
+
+        // Размечена и с флагом, идёт после упавшей: до неё обход должен дойти.
+        $empty = $firm('Пустая');
+        $empty->setAutoAuditNightly(true);
+        TenantContext::for($empty, function () {
+            $this->service('ОСВ', AutoAuditRunner::REF_BALANCE_SHEET);
+            $this->service('Отчёт по ЕН', AutoAuditRunner::REF_TAX_REPORT);
+        });
+
+        $off      = $firm('Без флага');
+        $template = $firm('Образец', Tenant::STATUS_TEMPLATE);
+        $template->setAutoAuditNightly(true);
+        $paused   = $firm('Приостановлена', Tenant::STATUS_SUSPENDED);
+        $paused->setAutoAuditNightly(true);
+
+        $this->artisan('autoaudit:run', ['--all' => true])
+            ->expectsOutputToContain("== Фирма {$this->tenant->id} «{$this->tenant->name}»")
+            ->expectsOutputToContain("== Фирма {$broken->id} «{$broken->name}»")
+            ->expectsOutputToContain('Проверка не прошла: В фирме не размечены эталонные БП')
+            ->expectsOutputToContain("== Фирма {$empty->id} «{$empty->name}»")
+            ->expectsOutputToContain("Фирм 3, прошли 2, не прошли 1 ({$broken->id})")
+            ->doesntExpectOutputToContain($off->name)
+            ->doesntExpectOutputToContain($template->name)
+            ->doesntExpectOutputToContain($paused->name)
+            ->assertFailed();
+
+        $this->assertSame(['1', '3'], AutoAuditResult::current()->pluck('rule')->sort()->values()->all());
+        $this->assertSame(RunAutoAuditJob::DONE, Cache::get(RunAutoAuditJob::stateKey($empty->id))['status']);
+        $this->assertSame(RunAutoAuditJob::FAILED, Cache::get(RunAutoAuditJob::stateKey($broken->id))['status']);
+    }
+
+    /** Пробный прогон по всем фирмам ничего не пишет: ни строк, ни состояния. */
+    public function test_all_dry_run_writes_nothing(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 150.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $this->tenant->setAutoAuditNightly(true);
+
+        $this->artisan('autoaudit:run', ['--all' => true, '--dry-run' => true])
+            ->expectsOutputToContain("== Фирма {$this->tenant->id}")
+            ->expectsOutputToContain('Пробный прогон, ничего не записано. Без изменений 0, сменится 0, новых 2, уйдёт 0')
+            ->assertSuccessful();
+
+        $this->assertSame(0, AutoAuditResult::count());
+        $this->assertNull(Cache::get(RunAutoAuditJob::stateKey($this->tenant->id)));
+    }
+
+    public function test_run_needs_exactly_one_of_tenant_or_all(): void
+    {
+        $this->artisan('autoaudit:run')->assertFailed();
+        $this->artisan('autoaudit:run', ['--all' => true, '--tenant' => $this->tenant->id])->assertFailed();
+
+        $this->assertSame(0, AutoAuditResult::count());
+    }
+
+    /**
+     * Сторож для вендора: фирма в ночном прогоне, а удачного прогона не было больше полутора
+     * суток. Руководителю не показываем, после прогона предупреждение уходит.
+     */
+    public function test_vendor_is_warned_when_the_nightly_run_is_late(): void
+    {
+        $warning = 'Ночной прогон по этой фирме не проходил больше полутора суток';
+
+        // Без ночного флага молчим: фирму гоняют руками, опаздывать нечему.
+        $this->asVendor()->get(route('auto-audit.index'))->assertDontSee($warning);
+
+        $this->tenant->setAutoAuditNightly(true);
+        $this->asVendor()->get(route('auto-audit.index'))->assertSee($warning)->assertSee('не было ни одного');
+
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $this->artisan('autoaudit:run', ['--tenant' => $this->tenant->id])->assertSuccessful();
+
+        $this->asVendor()->get(route('auto-audit.index'))->assertDontSee($warning);
+
+        // Прошло двое суток: кеш состояния сброшен, строки старые.
+        Cache::forget(RunAutoAuditJob::stateKey($this->tenant->id));
+        AutoAuditResult::query()->update(['updated_at' => now()->subDays(2)]);
+
+        $this->asVendor()->get(route('auto-audit.index'))->assertSee($warning)->assertSee('последний');
+
+        // Сессия вендора в тесте живёт между запросами: сбрасываем, иначе руководитель стал бы вендором.
+        $this->flushSession();
+        $this->tenant->setAutoAuditEnabled(true);
+        $this->actingAs($this->employee(Role::MANAGER), 'employee')
+            ->get(route('auto-audit.index'))
+            ->assertOk()
+            ->assertSee('Данные на')
+            ->assertDontSee($warning);
+    }
+
     public function test_vendor_inside_the_firm_sees_the_result_of_the_command(): void
     {
         $client = $this->client();

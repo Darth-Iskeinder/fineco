@@ -138,6 +138,33 @@ class AutoAuditAccessTest extends TestCase
         $this->assertNull($this->tenant->fresh()->autoAuditFrom());
     }
 
+    /** Ночной прогон: отдельный флаг, ставится и снимается, соседние ключи целы. */
+    public function test_nightly_flag_is_separate(): void
+    {
+        $this->assertFalse($this->tenant->autoAuditNightly());
+
+        $this->artisan('autoaudit:access', ['--tenant' => $this->tenant->id, '--nightly-on' => true])
+            ->expectsOutputToContain('Ночной прогон: включён')
+            ->assertSuccessful();
+
+        $tenant = $this->tenant->fresh();
+        $this->assertTrue($tenant->autoAuditNightly());
+        $this->assertFalse($tenant->autoAuditEnabled());
+        $this->assertSame('keep me', $tenant->settings['other']);
+        $this->assertTrue(Tenant::forNightlyAutoAudit()->contains('id', $tenant->id));
+
+        $this->artisan('autoaudit:access', ['--tenant' => $this->tenant->id, '--nightly-on' => true, '--nightly-off' => true])
+            ->assertFailed();
+        $this->assertTrue($this->tenant->fresh()->autoAuditNightly());
+
+        $this->artisan('autoaudit:access', ['--tenant' => $this->tenant->id, '--nightly-off' => true])
+            ->expectsOutputToContain('Ночной прогон: выключен')
+            ->assertSuccessful();
+
+        $this->assertFalse($this->tenant->fresh()->autoAuditNightly());
+        $this->assertFalse(Tenant::forNightlyAutoAudit()->contains('id', $this->tenant->id));
+    }
+
     /** Флаг находок отдельный: не трогает флаг страницы и остальные настройки. */
     public function test_findings_flag_is_separate(): void
     {
