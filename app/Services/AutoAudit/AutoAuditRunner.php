@@ -73,7 +73,8 @@ class AutoAuditRunner
      *            из таблицы правил Искендера (колонка «Название») 29.09.2026;
      * hint:      подсказка при наведении на название (колонка «Подсказка при наведении»),
      *            со счётом: бухгалтер ищет строку в ведомости по номеру;
-     * account:   счёт в ОСВ, берём оборот за период по кредиту;
+     * account:   счёт в ОСВ по умолчанию, берём оборот за период по кредиту. Фирма может
+ *            задать вместо него свои счета, их обороты складываются (accountsFor);
      * document:  сторона второго документа, см. AutoAuditSources::SIDES;
      * field:     число из него: 'base' и 'tax' у отчёта по налогу; 'income', 'income_tax',
      *            'contributions' и 'pension' у формы 161;
@@ -167,6 +168,32 @@ class AutoAuditRunner
      */
     private const TOLERANCE = 1.00;
 
+    /**
+     * Счета ОСВ, которые проверка берёт в этой фирме: свои, если фирме их задали, иначе
+     * общий счёт правила.
+     *
+     * @return string[]
+     */
+    public static function accountsFor(int $rule, ?Tenant $tenant): array
+    {
+        return $tenant?->autoAuditAccounts()[$rule]['accounts'] ?? [self::RULES[$rule]['account']];
+    }
+
+    /**
+     * Подсказка проверки со счетами этой фирмы. Бухгалтер ищет строку в ведомости по
+     * номеру, и подсказка с общим счётом отправила бы его не туда.
+     */
+    public static function hintFor(int $rule, ?Tenant $tenant): string
+    {
+        $default = self::RULES[$rule]['account'];
+
+        return str_replace(
+            'ОСВ: ' . $default,
+            'ОСВ: ' . implode(' + ', self::accountsFor($rule, $tenant)),
+            self::RULES[$rule]['hint'],
+        );
+    }
+
     /** Что изменил последний прогон, см. AutoAuditStore::store. */
     private array $changes = [];
 
@@ -256,10 +283,15 @@ class AutoAuditRunner
 
         // У фирмы свой старт: проверка смотрит с того месяца, что позже, её или фирмы.
         // Строки 'ГГГГ-ММ' сравниваются как числа.
-        $start = Tenant::find(TenantContext::id())?->autoAuditFrom();
+        $tenant = Tenant::find(TenantContext::id());
+        $start  = $tenant?->autoAuditFrom();
 
         if ($start) {
             $rules = array_map(fn (array $rule) => array_merge($rule, ['from' => max($rule['from'] ?? '', $start)]), $rules);
+        }
+
+        foreach (array_keys($rules) as $number) {
+            $rules[$number]['accounts'] = self::accountsFor($number, $tenant);
         }
 
         $rows = [];
@@ -647,11 +679,12 @@ class AutoAuditRunner
         $periods = [];   // подпись периода => ['period' => DocumentPeriod, 'osv' => [...], 'report' => [...]]
 
         foreach (['osv' => $sheetDocuments, 'report' => $reportDocuments] as $slot => $documents) {
-            $side  = $slot === 'osv' ? 'osv' : $rule['document'];
-            $field = $slot === 'osv' ? $rule['account'] : $rule['field'];
+            $side = $slot === 'osv' ? 'osv' : $rule['document'];
 
             foreach ($documents as [$log, $document]) {
-                $value = $this->sources->read($client, $side, $field, $document);
+                $value = $slot === 'osv'
+                    ? $this->sources->readAccounts($client, $rule['accounts'], $document)
+                    : $this->sources->read($client, $side, $rule['field'], $document);
 
                 // Не тот документ, скан или не открылся: в пару его не поставить.
                 if (!$value->period) {
@@ -759,29 +792,7 @@ class AutoAuditRunner
             return null;
         }
 
-        $notes = [];
-
-        $left        = 0.0;
-        $sources     = [];
-        $unknown     = [];   // числа, которые прочитать не удалось
-        $assumedZero = [];   // обороты, которых в ведомости нет и которые взяты нулём
-
-        foreach ($sheets as $month => $osv) {
-            // Ведомость за месяц одна. Приложили несколько, берём последнюю загруженную.
-            if (count($osv) > 1) {
-                $notes[] = sprintf('Ведомостей за %s: %d, взята последняя', $month, count($osv));
-            }
-
-            if ($osv[0]['status'] === DocumentValue::UNCERTAIN) {
-                $unknown[] = $osv[0]['reason'];
-            } elseif ($osv[0]['status'] === DocumentValue::NOT_FOUND) {
-                // В ОСВ 1С не печатает счета без оборотов и сальдо: нет строки, значит ноль.
-                $assumedZero[] = "в ведомости за {$month} нет оборота по счёту {$rule['account']}";
-            }
-
-            $left += (float) ($osv[0]['value'] ?? 0);
-            array_push($sources, ...$osv);
-        }
+        [$left, $sources, $unknown, $assumedZero, $notes] = $this->sheetTotal($sheets, $rule['accounts']);
 
         // Ноль, который заявил человек, закрыв задачу как нулевую. С ним «ноль против нуля»
         // уже проверенный итог, а не два нуля из пустых ячеек.
@@ -864,6 +875,59 @@ class AutoAuditRunner
             'difference'  => $difference,
             'reason'      => $notes ? implode('. ', $notes) : null,
         ];
+    }
+
+    /**
+     * Левая сторона сверки: оборот по ведомостям всех месяцев периода.
+     *
+     * Ведомость за месяц одна; приложили несколько, берём последнюю загруженную. Когда
+     * счетов у проверки несколько, пишем раскладку суммы по ним: без неё бухгалтер не
+     * поймёт, откуда взялось число, которого нет ни в одной строке ведомости.
+     *
+     * @param array<string, array> $sheets   ведомости по месяцам периода
+     * @param string[]             $accounts счета проверки в этой фирме
+     * @return array{0: float, 1: array, 2: string[], 3: string[], 4: string[]}
+     *         сумма, источники, непрочитанное, взятое нулём, пометки
+     */
+    private function sheetTotal(array $sheets, array $accounts): array
+    {
+        $left        = 0.0;
+        $sources     = [];
+        $unknown     = [];   // числа, которые прочитать не удалось
+        $assumedZero = [];   // обороты, которых в ведомости нет и которые взяты нулём
+        $notes       = [];
+        $parts       = array_fill_keys($accounts, 0.0);
+
+        foreach ($sheets as $month => $osv) {
+            if (count($osv) > 1) {
+                $notes[] = sprintf('Ведомостей за %s: %d, взята последняя', $month, count($osv));
+            }
+
+            if ($osv[0]['status'] === DocumentValue::UNCERTAIN) {
+                $unknown[] = $osv[0]['reason'];
+            } elseif ($osv[0]['status'] === DocumentValue::NOT_FOUND) {
+                // В ОСВ 1С не печатает счета без оборотов и сальдо: нет строки, значит ноль.
+                $assumedZero[] = count($accounts) > 1
+                    ? "в ведомости за {$month} нет оборота по счетам " . implode(', ', $accounts)
+                    : "в ведомости за {$month} нет оборота по счёту {$accounts[0]}";
+            }
+
+            foreach ($osv[0]['parts'] ?? [] as $account => $value) {
+                $parts[$account] = ($parts[$account] ?? 0.0) + $value;
+            }
+
+            $left += (float) ($osv[0]['value'] ?? 0);
+            array_push($sources, ...$osv);
+        }
+
+        if (count($accounts) > 1 && !$unknown && !$assumedZero) {
+            $notes[] = 'Счета ОСВ: ' . implode('; ', array_map(
+                fn (string $account) => $account . ': ' . number_format($parts[$account], 2, ',', ' '),
+                array_keys($parts),
+            ));
+        }
+
+        return [$left, $sources, $unknown, $assumedZero, $notes];
     }
 
     /**

@@ -94,6 +94,13 @@
                       {{ request()->routeIs('settings.tax-authorities') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
                 Коды налоговых органов
             </a>
+            @if (\App\Http\Controllers\AutoAuditSettingsController::allowed())
+                <a href="{{ route('settings.auto-audit') }}"
+                   class="block px-3 py-2 rounded-lg text-sm transition-colors
+                          {{ request()->routeIs('settings.auto-audit') ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900' }}">
+                    Автоаудит
+                </a>
+            @endif
         </nav>
     </aside>
 

@@ -37,6 +37,9 @@ class Tenant extends Model
     /** Ключ в settings: фирма идёт в ночной прогон автоаудита (autoaudit:run --all). */
     public const SETTING_AUTO_AUDIT_NIGHTLY = 'auto_audit_nightly';
 
+    /** Ключ в settings: свои счета ОСВ у проверок автоаудита, см. autoAuditAccounts(). */
+    public const SETTING_AUTO_AUDIT_ACCOUNTS = 'auto_audit_accounts';
+
     protected $fillable = [
         'name', 'slug', 'status', 'plan', 'settings', 'is_template',
         // Профиль фирмы: правится в настройках, уходит в акты и сметы.
@@ -167,6 +170,61 @@ class Tenant extends Model
     public function setAutoAuditNightly(bool $enabled): void
     {
         $this->settings = array_merge($this->settings ?? [], [self::SETTING_AUTO_AUDIT_NIGHTLY => $enabled]);
+        $this->save();
+    }
+
+    /**
+     * Свои счета ОСВ у проверок автоаудита: номер проверки => счета, кто и когда задал.
+     *
+     * Проверки нет в списке, значит она берёт общий счёт (AutoAuditRunner::RULES). Так у
+     * всех фирм, пока им ничего не задали, и поэтому настройка ничего не меняет молча.
+     *
+     * @return array<int, array{accounts: string[], by: ?string, at: ?string}>
+     */
+    public function autoAuditAccounts(): array
+    {
+        $saved = $this->settings[self::SETTING_AUTO_AUDIT_ACCOUNTS] ?? [];
+        $rules = [];
+
+        foreach (is_array($saved) ? $saved : [] as $rule => $entry) {
+            $accounts = array_values(array_filter(array_map('strval', $entry['accounts'] ?? [])));
+
+            if ($accounts) {
+                $rules[(int) $rule] = [
+                    'accounts' => $accounts,
+                    'by'       => $entry['by'] ?? null,
+                    'at'       => $entry['at'] ?? null,
+                ];
+            }
+        }
+
+        return $rules;
+    }
+
+    /**
+     * Задать проверке свои счета; null или пустой список возвращает общий счёт.
+     *
+     * Меняем только свою проверку: остальные ключи settings и счета других проверок
+     * остаются как были.
+     *
+     * @param string[]|null $accounts
+     */
+    public function setAutoAuditAccounts(int $rule, ?array $accounts, ?string $by): void
+    {
+        $saved = $this->settings[self::SETTING_AUTO_AUDIT_ACCOUNTS] ?? [];
+        $saved = is_array($saved) ? $saved : [];
+
+        if ($accounts) {
+            $saved[(string) $rule] = [
+                'accounts' => array_values($accounts),
+                'by'       => $by,
+                'at'       => now()->toDateString(),
+            ];
+        } else {
+            unset($saved[(string) $rule]);
+        }
+
+        $this->settings = array_merge($this->settings ?? [], [self::SETTING_AUTO_AUDIT_ACCOUNTS => $saved]);
         $this->save();
     }
 

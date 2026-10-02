@@ -124,6 +124,8 @@ class AutoAuditController extends Controller
             'running'       => $this->isRunning($state),
             'vendor'        => Impersonation::isActive(),
             'openToManager' => (bool) Tenant::find(TenantContext::id())?->autoAuditEnabled(),
+            // Подсказки со счетами этой фирмы: у неё они могут быть свои.
+            'ruleHints'     => self::ruleHints(),
             'showFindings'  => $showFindings,
             'findings'      => $findings,
             'unanswered'    => $unanswered,
@@ -238,6 +240,17 @@ class AutoAuditController extends Controller
             ->when($from === '', fn ($q) => $q->whereNull('period_from'), fn ($q) => $q->whereDate('period_from', $from))
             ->when($to === '', fn ($q) => $q->whereNull('period_to'), fn ($q) => $q->whereDate('period_to', $to))
             ->get();
+    }
+
+    /** @return array<int, string> номер проверки => подсказка со счетами фирмы */
+    private static function ruleHints(): array
+    {
+        $tenant = Tenant::find(TenantContext::id());
+
+        return array_map(
+            fn (int $number) => AutoAuditRunner::hintFor($number, $tenant),
+            array_combine(array_keys(AutoAuditRunner::RULES), array_keys(AutoAuditRunner::RULES)),
+        );
     }
 
     private function allowedOnly(): void

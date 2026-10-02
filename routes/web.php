@@ -3,6 +3,7 @@
 use App\Http\Controllers\AuditController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\AutoAuditController;
+use App\Http\Controllers\AutoAuditSettingsController;
 use App\Http\Controllers\BuhSmetaController;
 use App\Http\Controllers\BuhTasksController;
 use App\Http\Controllers\ClientController;
@@ -373,6 +374,10 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/billings', [SettingsController::class, 'storeBilling'])->name('billings.store');
         Route::put('/billings/{billing}', [SettingsController::class, 'updateBilling'])->name('billings.update');
         Route::delete('/billings/{billing}', [SettingsController::class, 'destroyBilling'])->name('billings.destroy');
+
+        // Автоаудит: какие проверки идут в фирме и какие счета ведомости берут. Пока только
+        // просмотр; кому видно, решает контроллер (те же, кто видит страницу автоаудита).
+        Route::get('/auto-audit', [AutoAuditSettingsController::class, 'show'])->name('auto-audit');
 
         // Коды налоговых органов
         Route::get('/tax-authorities', [SettingsController::class, 'taxAuthoritiesPage'])->name('tax-authorities');

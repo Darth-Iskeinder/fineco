@@ -121,7 +121,7 @@
                             class="rounded-lg border border-slate-200 text-sm px-3 py-2">
                         <option value="">Все проверки</option>
                         @foreach (AutoAuditRunner::RULES as $number => $definition)
-                            <option value="{{ $number }}" title="{{ $definition['hint'] }}" @selected($rule === (string) $number)>№{{ $number }} {{ $definition['name'] }}</option>
+                            <option value="{{ $number }}" title="{{ $ruleHints[$number] }}" @selected($rule === (string) $number)>№{{ $number }} {{ $definition['name'] }}</option>
                         @endforeach
                     </select>
                     @if ($showFindings)
@@ -197,7 +197,7 @@
                             {{-- У «нет документа» строка общая для всех проверок клиента: номера столбиком. --}}
                             <td class="px-4 py-3 text-slate-700 space-y-1">
                                 @foreach ($result->ruleNumbers() as $number)
-                                    <div class="cursor-help" title="{{ AutoAuditRunner::RULES[$number]['hint'] ?? '' }}">№{{ $number }} {{ AutoAuditRunner::RULES[$number]['name'] ?? '' }}</div>
+                                    <div class="cursor-help" title="{{ $ruleHints[$number] ?? '' }}">№{{ $number }} {{ AutoAuditRunner::RULES[$number]['name'] ?? '' }}</div>
                                 @endforeach
                             </td>
                             <td class="px-4 py-3 font-medium text-slate-800">{{ $result->client?->name ?? 'клиент удалён' }}</td>

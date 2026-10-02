@@ -33,6 +33,8 @@ use Illuminate\Support\Collection;
  */
 class AutoAuditQuestions
 {
+    private ?Tenant $tenant = null;
+
     /** Открыты ли вопросы в текущей фирме. */
     public static function enabled(): bool
     {
@@ -180,9 +182,9 @@ class AutoAuditQuestions
                 fn (int $n) => '№' . $n . ' ' . (AutoAuditRunner::RULES[$n]['name'] ?? ''),
                 $result->ruleNumbers(),
             ),
-            // Подсказка к каждой проверке, по порядку rules: что с чем сверяли, со счётом.
+            // Подсказка к каждой проверке, по порядку rules: что с чем сверяли, со счетами фирмы.
             'rule_hints'    => array_map(
-                fn (int $n) => AutoAuditRunner::RULES[$n]['hint'] ?? '',
+                fn (int $n) => isset(AutoAuditRunner::RULES[$n]) ? AutoAuditRunner::hintFor($n, $this->tenant()) : '',
                 $result->ruleNumbers(),
             ),
             'left_value'    => $result->left_value,
@@ -224,6 +226,16 @@ class AutoAuditQuestions
      * О чём вопрос, коротко, для строки списка. У сверки это проверка, у беды с документом
      * сам документ: «Нет документа: Отчёт по ЕН» говорит больше, чем «2 проверки».
      */
+    /** Фирма текущего запроса: её счета идут в подсказки. Одна на все вопросы списка. */
+    private function tenant(): ?Tenant
+    {
+        if ($this->tenant?->id !== TenantContext::id()) {
+            $this->tenant = Tenant::find(TenantContext::id());
+        }
+
+        return $this->tenant;
+    }
+
     private function subject(AutoAuditResult $result): string
     {
         $sources = collect($result->sources ?? []);

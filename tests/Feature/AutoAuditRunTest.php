@@ -3371,6 +3371,172 @@ class AutoAuditRunTest extends TestCase
     }
 
     /** Бухгалтер с доступом к БухЗадачнику. */
+    /**
+     * Свои счета фирмы: у КЛВ единый налог лежит и на 3410, и на 3490. Обороты складываются,
+     * а раскладка суммы видна в строке, иначе число не найти ни в одной строке ведомости.
+     */
+    public function test_firm_accounts_are_summed_with_breakdown(): void
+    {
+        $this->tenant->setAutoAuditAccounts(3, ['3410', '3490'], 'вендор');
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 0.00, '3490' => 4200.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4200.00);
+
+        $tax = $this->runAudit()->firstWhere('rule', '3');
+
+        $this->assertSame(AutoAuditResult::MATCHED, $tax->outcome);
+        $this->assertEquals(4200.00, $tax->left_value);
+        $this->assertStringContainsString('3410: 0,00; 3490: 4 200,00', $tax->reason);
+    }
+
+    /** Счёта фирмы нет в ведомости: 1С не печатает счета без оборотов, значит ноль. */
+    public function test_absent_firm_account_counts_as_zero(): void
+    {
+        $this->tenant->setAutoAuditAccounts(3, ['3410', '3490'], 'вендор');
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3490' => 4200.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4200.00);
+
+        $this->assertSame(AutoAuditResult::MATCHED, $this->runAudit()->firstWhere('rule', '3')->outcome);
+    }
+
+    /** Нет ни одного счёта фирмы: как и с одним счётом, ноль против нуля не считаем проверкой. */
+    public function test_no_firm_account_in_sheet_is_not_a_match(): void
+    {
+        $this->tenant->setAutoAuditAccounts(3, ['3410', '3490'], 'вендор');
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 0.00);
+
+        $tax = $this->runAudit()->firstWhere('rule', '3');
+
+        $this->assertSame(AutoAuditResult::UNVERIFIED, $tax->outcome);
+        $this->assertStringContainsString('нет оборота по счетам 3410, 3490', $tax->reason);
+    }
+
+    /** Фирма без своих счетов: источник и пометки ровно прежние, прогон не видит изменений. */
+    public function test_default_accounts_leave_rows_as_before(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00, '3490' => 999.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $tax = $this->runAudit()->firstWhere('rule', '3');
+
+        $this->assertSame(AutoAuditResult::MATCHED, $tax->outcome);
+        $this->assertEquals(4.00, $tax->left_value, 'Чужой счёт 3490 попал в сумму фирмы без настройки');
+        $this->assertNull($tax->reason);
+        $this->assertArrayNotHasKey('parts', $tax->sources[0]);
+    }
+
+    /** Подсказка показывает счета фирмы: бухгалтер ищет строку ведомости по номеру. */
+    public function test_hint_shows_firm_accounts(): void
+    {
+        $this->assertStringStartsWith('ОСВ: 3410 единый налог', AutoAuditRunner::hintFor(3, $this->tenant));
+
+        $this->tenant->setAutoAuditAccounts(3, ['3410', '3490'], 'вендор');
+
+        $this->assertStringStartsWith('ОСВ: 3410 + 3490 единый налог', AutoAuditRunner::hintFor(3, $this->tenant->fresh()));
+    }
+
+    /** Настройка одной проверки не трогает другие и прочие ключи фирмы; сброс возвращает общий счёт. */
+    public function test_setting_accounts_keeps_other_settings(): void
+    {
+        $this->tenant->setAutoAuditFrom('2026-09');
+        $this->tenant->setAutoAuditAccounts(3, ['3410', '3490'], 'вендор');
+        $this->tenant->setAutoAuditAccounts(6, ['3531', '3532'], 'вендор');
+        $this->tenant->setAutoAuditAccounts(6, null, 'вендор');
+
+        $tenant = $this->tenant->fresh();
+
+        $this->assertSame('2026-09', $tenant->autoAuditFrom());
+        $this->assertSame(['3410', '3490'], AutoAuditRunner::accountsFor(3, $tenant));
+        $this->assertSame(['3531'], AutoAuditRunner::accountsFor(6, $tenant));
+    }
+
+    /** Страница настроек: вендор видит счета фирмы и метку «изменено». */
+    public function test_settings_page_shows_firm_accounts(): void
+    {
+        $this->tenant->setAutoAuditAccounts(3, ['3410', '3490'], 'вендор');
+
+        $this->asVendor()->get(route('settings.auto-audit'))
+            ->assertOk()
+            ->assertSee('Единый налог в отчёте = начислен в учёте')
+            ->assertSee('3490')
+            ->assertSee('изменено')
+            ->assertSee('Только просмотр');
+    }
+
+    /** Руководитель видит страницу, только когда фирме открыт автоаудит; бухгалтер никогда. */
+    public function test_settings_page_follows_auto_audit_access(): void
+    {
+        $manager = $this->employee(Role::MANAGER);
+
+        $this->actingAs($manager, 'employee')->get(route('settings.auto-audit'))->assertNotFound();
+
+        $this->tenant->setAutoAuditEnabled(true);
+
+        $this->actingAs($manager->fresh(), 'employee')->get(route('settings.auto-audit'))->assertOk();
+        $this->actingAs($manager->fresh(), 'employee')->get(route('settings.tax-systems'))
+            ->assertSee(route('settings.auto-audit'), false);
+
+        $accountant = $this->employee(Role::ACCOUNTANT);
+        $module     = \App\Models\Module::firstOrCreate(['name' => 'settings'], ['display_name' => 'Настройки', 'is_active' => true]);
+        $accountant->modules()->syncWithoutDetaching([$module->id]);
+
+        $this->actingAs($accountant, 'employee')->get(route('settings.auto-audit'))->assertNotFound();
+        $this->actingAs($accountant, 'employee')->get(route('settings.tax-systems'))
+            ->assertDontSee(route('settings.auto-audit'), false);
+    }
+
+    /** Проверка без отмеченного БП не идёт, и страница говорит это прямо. */
+    public function test_settings_page_tells_when_rule_cannot_run(): void
+    {
+        $this->asVendor()->get(route('settings.auto-audit'))
+            ->assertOk()
+            ->assertSee('Не идёт: в фирме не отмечен бизнес-процесс с документом «Форма 161»');
+    }
+
+    /** Команда: без --apply ничего не сохраняет, с ним сохраняет и показывает, где счёт есть. */
+    public function test_accounts_command_shows_then_saves(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3410' => 0.00, '3490' => 4200.00]);
+
+        $this->artisan('autoaudit:accounts', ['--tenant' => $this->tenant->id, '--rule' => 3, '--set' => '3410,3490'])
+            ->expectsOutputToContain('3490: есть у 1 клиентов из 1')
+            ->assertSuccessful();
+
+        $this->assertSame(['3410'], AutoAuditRunner::accountsFor(3, $this->tenant->fresh()), 'Показ без --apply сохранил');
+
+        $this->artisan('autoaudit:accounts', ['--tenant' => $this->tenant->id, '--rule' => 3, '--set' => '3410,3490', '--apply' => true])
+            ->assertSuccessful();
+
+        $this->assertSame(['3410', '3490'], AutoAuditRunner::accountsFor(3, $this->tenant->fresh()));
+
+        $this->artisan('autoaudit:accounts', ['--tenant' => $this->tenant->id, '--rule' => 3, '--reset' => true, '--apply' => true])
+            ->assertSuccessful();
+
+        $this->assertSame(['3410'], AutoAuditRunner::accountsFor(3, $this->tenant->fresh()));
+    }
+
+    /** Счёт, которого нет ни в одной ведомости, почти наверняка опечатка: без --force не сохраняем. */
+    public function test_accounts_command_refuses_unseen_account(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3410' => 4.00]);
+
+        $this->artisan('autoaudit:accounts', ['--tenant' => $this->tenant->id, '--rule' => 3, '--set' => '3410,3940', '--apply' => true])
+            ->assertFailed();
+
+        $this->assertSame(['3410'], AutoAuditRunner::accountsFor(3, $this->tenant->fresh()));
+
+        $this->artisan('autoaudit:accounts', ['--tenant' => $this->tenant->id, '--rule' => 3, '--set' => '3410,3940', '--apply' => true, '--force' => true])
+            ->assertSuccessful();
+
+        $this->assertSame(['3410', '3940'], AutoAuditRunner::accountsFor(3, $this->tenant->fresh()));
+    }
+
     private function accountant(): Employee
     {
         $employee = $this->employee(Role::ACCOUNTANT);

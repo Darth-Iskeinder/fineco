@@ -183,6 +183,27 @@ class AutoAuditSources
     }
 
     /**
+     * Оборот ведомости по счетам проверки. Один счёт читаем как раньше, несколько
+     * складываем (DocumentValue::sum): так фирма задаёт свои счета вместо общего.
+     *
+     * @param string[] $accounts
+     */
+    public function readAccounts(Client $client, array $accounts, BuhTaskDocument $document): DocumentValue
+    {
+        if (count($accounts) === 1) {
+            return $this->read($client, 'osv', reset($accounts), $document);
+        }
+
+        $values = [];
+
+        foreach ($accounts as $account) {
+            $values[$account] = $this->read($client, 'osv', $account, $document);
+        }
+
+        return DocumentValue::sum($values);
+    }
+
+    /**
      * ИНН в шапке документа против ИНН в карточке клиента.
      *
      * Без этой проверки чужая форма дала бы «не совпало» по числам, и расхождение искали бы
@@ -296,7 +317,7 @@ class AutoAuditSources
     /** Откуда взято число: по этому человек откроет файл и проверит вывод сам. */
     public function source(string $side, BuhTaskLog $log, BuhTaskDocument $document, DocumentValue $value): array
     {
-        return [
+        $source = [
             'side'        => $side,
             'label'       => self::SIDES[$side]['label'],
             'log_id'      => $log->id,
@@ -311,6 +332,14 @@ class AutoAuditSources
             'value'       => $value->value,
             'reason'      => $value->reason,
         ];
+
+        // Раскладку пишем только там, где счетов несколько: у остальных источник остаётся
+        // ровно прежним, и прогон не примет его за изменившийся итог.
+        if ($value->parts) {
+            $source['parts'] = $value->parts;
+        }
+
+        return $source;
     }
 
     /**

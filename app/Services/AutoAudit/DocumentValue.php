@@ -24,6 +24,8 @@ class DocumentValue
         public readonly ?DocumentPeriod $period = null,
         /** ИНН организации из шапки документа, если он там есть. По нему ловим чужой документ. */
         public readonly ?string $inn = null,
+        /** Раскладка суммы по счетам, когда проверка берёт их несколько: счёт => оборот. */
+        public readonly array $parts = [],
     ) {}
 
     public const FOUND        = 'found';         // показатель прочитан
@@ -80,5 +82,56 @@ class DocumentValue
     public function isFound(): bool
     {
         return $this->status === self::FOUND;
+    }
+
+    /**
+     * Оборот по нескольким счетам одной ведомости: числа складываются.
+     *
+     * Так у фирмы, где единый налог лежит и на 3410, и на 3490 (КЛВ Эксперт). Счёта, которого
+     * в ведомости нет, считаем нулём: 1С не печатает счета без оборотов. Если же нет ни
+     * одного, исход прежний, «нет показателя», и сверка решит, можно ли верить нулю.
+     *
+     * Файл у всех счетов один. Не та форма, скан или битый файл одинаковы для каждого
+     * счёта, поэтому такой исход отдаём как есть.
+     *
+     * @param array<string, self> $values счёт => что прочитано по нему
+     */
+    public static function sum(array $values): self
+    {
+        foreach ($values as $value) {
+            if ($value->period === null) {
+                return $value;
+            }
+        }
+
+        $period    = reset($values)->period;
+        $uncertain = array_filter($values, fn (self $value) => $value->status === self::UNCERTAIN);
+
+        if ($uncertain) {
+            return self::uncertain(
+                implode('. ', array_map(fn (self $value) => $value->reason, $uncertain)),
+                [],
+                $period,
+            );
+        }
+
+        $found = array_filter($values, fn (self $value) => $value->isFound());
+
+        if (!$found) {
+            return self::notFound('В ведомости нет счетов ' . implode(', ', array_keys($values)), [], $period);
+        }
+
+        $parts = array_map(fn (self $value) => $value->isFound() ? (float) $value->value : 0.0, $values);
+
+        return new self(
+            array_sum($parts),
+            self::FOUND,
+            null,
+            // След по каждому счёту отдельно: у них одинаковые ключи, слитые затёрли бы друг друга.
+            array_map(fn (self $value) => $value->trace, $found),
+            $period,
+            null,
+            $parts,
+        );
     }
 }
