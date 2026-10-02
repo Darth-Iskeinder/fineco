@@ -98,6 +98,13 @@ class EventTriggeredTasks
         // сегодняшний день, но задачу всё равно создаём: потерять её хуже.
         $due = CarbonImmutable::now()->addDays(max(0, (int) $child->deadline_days));
 
+        // Клиента остановили: хвост до остановки закрыть можно, но следующей
+        // работы за пределами обслуживания не будет. То же правило, что у сметы.
+        $serviceEnd = $task->client?->serviceEndsAt();
+        if ($serviceEnd && $serviceEnd->lt($due->startOfDay())) {
+            return null;
+        }
+
         return BuhAdhocTask::create([
             'employee_id'     => $task->employee_id,
             // Автор — сам исполнитель: задача не поручение, во вкладку «Я поручил»

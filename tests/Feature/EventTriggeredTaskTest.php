@@ -154,6 +154,21 @@ class EventTriggeredTaskTest extends TestCase
             ->first();
     }
 
+    /** Клиента остановили: хвост закрыть можно, но следующей работы после остановки нет. */
+    public function test_stopped_client_gets_no_child_task(): void
+    {
+        $this->client->update(['is_active' => false, 'service_end_date' => now()->subDay()->toDateString()]);
+        $child = $this->childService(days: 3);
+        $task  = $this->adhoc($this->parentService($child));
+
+        $this->actingAs($this->accountant, 'employee')
+            ->postJson(route('buhtasks.adhoc.complete', $task))
+            ->assertOk()
+            ->assertJsonPath('log.status', 'completed');
+
+        $this->assertNull($this->spawnedFor($task), 'Задача по событию родилась после остановки клиента');
+    }
+
     /** Выполнили разовую задачу по родителю — дочерняя ушла тому же сотруднику и клиенту. */
     public function test_completing_adhoc_parent_spawns_child_task(): void
     {

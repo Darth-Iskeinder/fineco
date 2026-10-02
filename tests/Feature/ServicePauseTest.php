@@ -239,6 +239,144 @@ class ServicePauseTest extends TestCase
         $this->assertFalse($this->client->is_active);
     }
 
+    /**
+     * Справочник как на бою до починки: у «Завершен» флаги не заполнены.
+     * Сидер там не запускали, и смена статуса возвращала клиента в работу.
+     */
+    private function loseClosedStatusFlags(): void
+    {
+        DB::table('client_statuses')->where('name', 'Завершен')
+            ->update(['closes_service' => false, 'stops_tasks' => false]);
+    }
+
+    /**
+     * Клиент как на бою: статус «Завершен», а сам живой и без даты остановки.
+     * Пишем мимо модели, иначе её синхронизация не дала бы так разойтись.
+     */
+    private function driftToClosedStatus(): void
+    {
+        DB::table('clients')->where('id', $this->client->id)->update([
+            'client_status_id' => $this->clientStatus('Завершен')->id,
+            'is_active'        => true,
+            'service_end_date' => null,
+        ]);
+        $this->client->refresh();
+    }
+
+    /** Боевой случай: флагов нет, а «Завершен» всё равно завершает, а не оживляет. */
+    public function test_closing_status_without_flags_still_stops_the_client(): void
+    {
+        $this->loseClosedStatusFlags();
+        Carbon::setTestNow('2026-09-02 10:00:00');
+
+        $this->setStatus('Завершен');
+
+        $this->assertFalse($this->client->is_active, 'Завершённый клиент остался активным');
+        $this->assertSame('2026-09-02', $this->client->service_end_date?->toDateString());
+    }
+
+    /** Статус главнее полей: разошлись они, а будущих напоминаний всё равно нет. */
+    public function test_drifted_closed_client_gets_no_future_reminders(): void
+    {
+        Carbon::setTestNow('2026-09-10 10:00:00');
+        $this->generate('2026-09-10');
+        $this->assertContains('2026-10-05', $this->myDates(), 'Без остановки октябрь должен быть');
+
+        $this->loseClosedStatusFlags();
+        $this->driftToClosedStatus();
+        $this->generate('2026-09-10');
+
+        $this->assertSame(['2026-07-05', '2026-08-05', '2026-09-05'], $this->myDates());
+    }
+
+    /** Живой список бухзадачника держится того же правила, что и генератор. */
+    public function test_task_list_shows_nothing_ahead_for_drifted_closed_client(): void
+    {
+        $this->loseClosedStatusFlags();
+        $this->driftToClosedStatus();
+        // Начало месяца: срок 5-го ещё впереди, и без остановки он был бы в списке.
+        Carbon::setTestNow('2026-10-01 10:00:00');
+
+        $ahead = collect(
+            $this->actingAs($this->employee, 'employee')
+                ->get(route('buhtasks.index'))
+                ->assertOk()
+                ->viewData('tasks')
+        )->where('client_id', $this->client->id)
+            ->filter(fn ($task) => (string) $task['due_date'] > '2026-10-01');
+
+        $this->assertTrue(
+            $ahead->isEmpty(),
+            'У завершённого клиента на экране будущие задачи: ' . $ahead->pluck('due_date')->implode(', '),
+        );
+    }
+
+    /** Связка статуса с полями живёт в модели: любое сохранение, не только карточка. */
+    public function test_saving_status_outside_the_card_stops_the_client(): void
+    {
+        Carbon::setTestNow('2026-09-02 10:00:00');
+
+        $this->client->update(['client_status_id' => $this->clientStatus('Приостановлен')->id]);
+
+        $this->assertFalse($this->client->refresh()->is_active);
+        $this->assertSame('2026-09-02', $this->client->service_end_date->toDateString());
+    }
+
+    /** Возврат после второго перерыва: граница прошлого возврата не открывает новый простой. */
+    public function test_second_resume_moves_the_floor_again(): void
+    {
+        Carbon::setTestNow('2026-09-02 10:00:00');
+        $this->client->update(['client_status_id' => $this->clientStatus('Приостановлен')->id]);
+        Carbon::setTestNow('2026-10-10 10:00:00');
+        $this->client->update(['client_status_id' => $this->clientStatus('Активен')->id]);
+        $this->assertSame('2026-11-01', $this->client->refresh()->tasks_start_from->toDateString());
+
+        Carbon::setTestNow('2027-01-10 10:00:00');
+        $this->client->update(['client_status_id' => $this->clientStatus('Приостановлен')->id]);
+        Carbon::setTestNow('2027-05-10 10:00:00');
+        $this->client->update(['client_status_id' => $this->clientStatus('Активен')->id]);
+
+        $this->assertSame('2027-06-01', $this->client->refresh()->tasks_start_from->toDateString());
+    }
+
+    /** Команда починки: без --apply ничего не трогает, с ним чинит справочник и клиента. */
+    public function test_sync_command_shows_first_then_fixes(): void
+    {
+        $this->loseClosedStatusFlags();
+        $this->driftToClosedStatus();
+        $tenant = $this->client->tenant_id ?? 1;
+        DB::table('clients')->where('id', $this->client->id)->update(['tenant_id' => $tenant]);
+
+        $this->artisan('clients:sync-service-status', ['--tenant' => $tenant, '--stopped-at' => '2026-09-02'])
+            ->assertSuccessful();
+
+        $this->assertFalse((bool) DB::table('client_statuses')->where('name', 'Завершен')->value('stops_tasks'));
+        $this->assertTrue($this->client->refresh()->is_active, 'Показ без --apply изменил клиента');
+
+        $this->artisan('clients:sync-service-status', ['--tenant' => $tenant, '--stopped-at' => '2026-09-02', '--apply' => true])
+            ->assertSuccessful();
+
+        $closed = DB::table('client_statuses')->where('name', 'Завершен')->first();
+        $this->assertTrue((bool) $closed->stops_tasks);
+        $this->assertTrue((bool) $closed->closes_service);
+        $this->client->refresh();
+        $this->assertFalse($this->client->is_active);
+        $this->assertSame('2026-09-02', $this->client->service_end_date->toDateString());
+    }
+
+    /** Без даты остановки команда применять не станет: угадывать её нельзя. */
+    public function test_sync_command_refuses_to_guess_the_stop_date(): void
+    {
+        $this->driftToClosedStatus();
+        $tenant = $this->client->tenant_id ?? 1;
+        DB::table('clients')->where('id', $this->client->id)->update(['tenant_id' => $tenant]);
+
+        $this->artisan('clients:sync-service-status', ['--tenant' => $tenant, '--apply' => true])
+            ->assertFailed();
+
+        $this->assertTrue($this->client->refresh()->is_active);
+    }
+
     /** Правка из списка активностью не распоряжается: этим занят только статус. */
     public function test_inline_edit_does_not_touch_the_active_flag(): void
     {

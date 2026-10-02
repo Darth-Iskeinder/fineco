@@ -162,6 +162,63 @@ class Client extends Model
             $client->previous_tax_system_id = $previous;
             $client->tax_system_changed_at  = CarbonImmutable::now()->startOfDay();
         });
+
+        static::saving(fn (Client $client) => $client->syncServiceWithStatus());
+    }
+
+    /**
+     * Статус, флаг активности и границы окна задач едут вместе.
+     *
+     * Раньше их связывали карточка и импорт, каждый по-своему, а любой другой
+     * путь сохранения (консоль, будущие экраны) оставлял статус «Завершен» при
+     * живом клиенте. Здесь связка срабатывает при любом сохранении.
+     *
+     * Останавливающий статус закрывает окно датой остановки (если её не задали,
+     * то сегодняшней). Рабочий статус возвращает в работу только того, кто
+     * действительно стоял, и поднимает нижнюю границу на следующий месяц.
+     */
+    private function syncServiceWithStatus(): void
+    {
+        if (!$this->isDirty('client_status_id') || !$this->client_status_id) {
+            return;
+        }
+
+        $this->unsetRelation('clientStatus');
+        $status = ClientStatus::find($this->client_status_id);
+
+        if (!$status) {
+            return;
+        }
+
+        if ($status->stops_tasks) {
+            $this->is_active = false;
+            $this->service_end_date ??= CarbonImmutable::now()->toDateString();
+
+            return;
+        }
+
+        if (!$this->exists || !$this->wasStoppedBeforeSave()) {
+            return;
+        }
+
+        $this->is_active        = true;
+        $this->service_end_date = null;
+
+        // Граница от прошлого возврата здесь не годится: она открыла бы весь
+        // нынешний перерыв. Свою мог передать только вызывающий.
+        if (!$this->isDirty('tasks_start_from')) {
+            $this->tasks_start_from = self::tasksStartAfterResume()->toDateString();
+        }
+    }
+
+    /** Состояние до текущего сохранения: клиент стоял по любому из признаков. */
+    private function wasStoppedBeforeSave(): bool
+    {
+        $previousStatusId = $this->getOriginal('client_status_id');
+
+        return !$this->getOriginal('is_active')
+            || $this->getOriginal('service_end_date') !== null
+            || ($previousStatusId && (bool) ClientStatus::find($previousStatusId)?->stops_tasks);
     }
 
     protected $casts = [
@@ -452,12 +509,20 @@ class Client extends Model
      * сняли, и по нему пришлось бы разом спрятать всю накопленную просрочку.
      * По дате незакрытые хвосты внутри периода обслуживания остаются на виду,
      * а на будущее новых задач не появляется.
+     *
+     * Клиент с останавливающим статусом, но без даты (её потеряли) считается
+     * остановленным сегодня. Так было на бою: «Завершен» без флагов стирал
+     * дату, и задачи шли дальше. Хвосты до сегодня остаются на виду, будущих
+     * задач нет. Смотрим только на статус: выключенный флаг при рабочем
+     * статусе ничего не говорит о том, когда и было ли обслуживание остановлено.
      */
     public function serviceEndsAt(): ?CarbonImmutable
     {
-        return $this->service_end_date
-            ? CarbonImmutable::parse($this->service_end_date)->endOfDay()
-            : null;
+        if ($this->service_end_date) {
+            return CarbonImmutable::parse($this->service_end_date)->endOfDay();
+        }
+
+        return $this->clientStatus?->stops_tasks ? CarbonImmutable::now()->endOfDay() : null;
     }
 
     /**
@@ -480,10 +545,17 @@ class Client extends Model
             : null;
     }
 
-    /** Обслуживание сейчас не идёт: клиент на паузе или завершён. */
+    /**
+     * Обслуживание сейчас не идёт: клиент на паузе или завершён.
+     *
+     * Любого из трёх признаков достаточно. Статус главный, но поля могли
+     * разойтись с ним раньше, чем появилась синхронизация в модели.
+     */
     public function serviceIsStopped(): bool
     {
-        return !$this->is_active || $this->service_end_date !== null;
+        return !$this->is_active
+            || $this->service_end_date !== null
+            || (bool) $this->clientStatus?->stops_tasks;
     }
 
     /**

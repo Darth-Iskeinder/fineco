@@ -244,9 +244,7 @@ class ClientController extends Controller
             'tariff_id' => $validated['tariff_id'] ?? null,
             'responsible_employee_id' => $validated['responsible_employee_id'] ?? null,
             'is_active' => true,
-            'client_status_id' => ClientStatus::where('stops_tasks', false)
-                ->orderBy('sort_order')
-                ->value('id'),
+            'client_status_id' => ClientStatus::firstWorking()?->id,
             'notes' => $validated['notes'] ?? null,
             'service_start_date' => $validated['service_start_date'] ?? now()->toDateString(),
         ]);
@@ -521,29 +519,20 @@ class ClientController extends Controller
             unset($validated['employees']);
         }
 
-        // Логика статуса: статус, границы окна задач и флаг активности едут вместе.
-        // Останавливающий статус («Приостановлен», «Завершен») закрывает окно сверху
-        // датой остановки, возврат в работу открывает его снизу — первым числом
-        // следующего месяца, чтобы за перерыв не приехала просрочка.
+        // Статус, границы окна задач и флаг активности связывает модель при
+        // сохранении (Client::syncServiceWithStatus). Здесь остался один случай:
+        // поставили дату завершения, не трогая статус, значит клиента завершают.
         if ($section === 'status') {
             $statusChanged = array_key_exists('client_status_id', $validated)
                 && (string) $validated['client_status_id'] !== (string) $client->client_status_id;
             $endDateAdded = !empty($validated['service_end_date'])
                 && $validated['service_end_date'] !== optional($client->service_end_date)->toDateString();
 
-            if ($statusChanged && !empty($validated['client_status_id'])) {
-                // Пользователь поменял статус — он главный
-                $status = ClientStatus::find($validated['client_status_id']);
-                if ($status) {
-                    $validated = $status->stops_tasks
-                        ? array_merge($validated, Client::serviceStopAttributes($validated['service_end_date'] ?? null))
-                        : array_merge($validated, $client->serviceResumeAttributes());
-                }
-            } elseif ($endDateAdded) {
-                // Поставили дату завершения → статус «Завершен»
-                $closingStatus = ClientStatus::where('closes_service', true)
-                    ->orderBy('sort_order')
-                    ->first();
+            if (!$statusChanged && $endDateAdded) {
+                // Флаг читаем через модель, а не в SQL: он подстрахован названием
+                // на случай, если колонку в справочнике забыли заполнить.
+                $closingStatus = ClientStatus::orderBy('sort_order')->orderBy('id')->get()
+                    ->first(fn (ClientStatus $status) => $status->closes_service);
                 if ($closingStatus) {
                     $validated['client_status_id'] = $closingStatus->id;
                 }

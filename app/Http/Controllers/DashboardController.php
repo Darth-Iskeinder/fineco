@@ -59,6 +59,7 @@ class DashboardController extends Controller
 
         $clients = Client::query()
             ->with([
+                'clientStatus',
                 'serviceSchedules',
                 'estimates' => fn ($q) => $q->with(['rootItems' => fn ($q2) => $q2
                     ->whereNull('parent_id')

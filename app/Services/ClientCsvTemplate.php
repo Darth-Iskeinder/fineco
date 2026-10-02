@@ -71,7 +71,7 @@ final class ClientCsvTemplate
         $form     = OrganizationForm::query()->orderBy('id')->value('name');
         $activity = ActivityType::query()->active()->ordered()->value('name');
         $tax      = TaxSystem::query()->active()->ordered()->value('name');
-        $status   = ClientStatus::query()->where('closes_service', false)->orderBy('sort_order')->value('name');
+        $status   = ClientStatus::firstWorking()?->name;
 
         $inns = self::freeInns(3);
 

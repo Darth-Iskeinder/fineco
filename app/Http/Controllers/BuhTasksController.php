@@ -192,6 +192,7 @@ class BuhTasksController extends Controller
         $clients = Client::query()
             ->where($assignedToEmployee)
             ->with([
+                'clientStatus',
                 'serviceSchedules',
                 'estimates' => fn($q) => $q
                     ->with(['rootItems' => fn($q) => $q

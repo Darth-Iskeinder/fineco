@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\Client;
+use App\Models\ClientStatus;
 use App\Models\Tenant;
 use App\Models\Employee;
 use App\Models\Service;
@@ -10,6 +11,7 @@ use App\Models\TaskReminder;
 use App\Support\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Воркер: материализует напоминания о сроках выполнения БП на горизонт вперёд.
@@ -51,6 +53,8 @@ class GenerateTaskReminders extends Command
      */
     public function handle(): int
     {
+        $this->warnAboutLostStatusFlags();
+
         $tenants = Tenant::real()
             ->when($this->option('tenant'), function ($q) {
                 $value = $this->option('tenant');
@@ -79,6 +83,27 @@ class GenerateTaskReminders extends Command
         return self::SUCCESS;
     }
 
+    /**
+     * Справочник статусов, где у системного статуса потеряны флаги.
+     *
+     * Задачи от этого уже не пострадают (флаг подстрахован названием), но
+     * расхождение значит, что базу заполняли мимо сидера, и что-то ещё могло
+     * разойтись. Так на бою «Завершен» месяц оживлял клиентов, и узнали мы об
+     * этом от клиента. Теперь узнаем из лога ночного прогона.
+     */
+    private function warnAboutLostStatusFlags(): void
+    {
+        $broken = ClientStatus::all()->filter(fn (ClientStatus $status) => $status->hasLostFlags());
+
+        if ($broken->isEmpty()) {
+            return;
+        }
+
+        $names = $broken->pluck('name')->implode(', ');
+        $this->warn("У статусов клиента не заполнены флаги: {$names}. Починка: php artisan clients:sync-service-status");
+        Log::warning('tasks:generate: у статусов клиента не заполнены флаги', ['statuses' => $names]);
+    }
+
     /** Генерация в пределах текущей фирмы: её клиенты, её БП, её сотрудники. */
     private function generateForCurrentTenant(): int
     {
@@ -101,6 +126,7 @@ class GenerateTaskReminders extends Command
         $clients = Client::query()
             ->whereNotNull('responsible_employee_id')
             ->with([
+                'clientStatus',
                 'serviceSchedules',
                 'estimates.rootItems' => fn ($q) => $q->whereNull('parent_id')->whereNotNull('service_id'),
             ])
