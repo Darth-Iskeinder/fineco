@@ -3584,6 +3584,129 @@ class AutoAuditRunTest extends TestCase
         $this->assertSame([], $other->fresh()->autoAuditAccounts());
     }
 
+    /** Выключенная проверка уходит со следующего прогона: строка в историю, вопрос закрыт. */
+    public function test_switched_off_rule_leaves_with_the_next_run(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 1.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $this->assertSame(AutoAuditResult::MISMATCH, $this->runAudit()->firstWhere('rule', '3')->outcome);
+        $this->assertSame(1, AutoAuditFinding::open()->count());
+
+        $this->tenant->setAutoAuditRuleEnabled(3, false, 'вендор');
+
+        $rows = $this->runAudit();
+        $this->assertNull($rows->firstWhere('rule', '3'));
+        $this->assertNotNull($rows->firstWhere('rule', '1'));
+        $this->assertSame(1, AutoAuditResult::whereNotNull('superseded_at')->where('rule', '3')->count());
+        $this->assertSame(0, AutoAuditFinding::open()->count());
+
+        // Включили обратно: прогон считает её снова, вопрос открывается заново.
+        $this->tenant->fresh()->setAutoAuditRuleEnabled(3, true, 'вендор');
+
+        $this->assertSame(AutoAuditResult::MISMATCH, $this->runAudit()->firstWhere('rule', '3')->outcome);
+        $this->assertSame(1, AutoAuditFinding::open()->count());
+    }
+
+    /** Общая строка «Нет документа» теряет только номер выключенной проверки. */
+    public function test_switched_off_rule_leaves_shared_rows(): void
+    {
+        $client = $this->client();
+        $this->closeWithoutFile($client, $this->osvService);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $this->assertSame([1, 3], $this->runAudit()->firstWhere('outcome', AutoAuditResult::MISSING_DOCUMENT)->ruleNumbers());
+
+        $this->tenant->setAutoAuditRuleEnabled(3, false, 'вендор');
+
+        $this->assertSame([1], $this->runAudit()->firstWhere('outcome', AutoAuditResult::MISSING_DOCUMENT)->ruleNumbers());
+    }
+
+    /** Все идущие проверки выключены: прогон останавливается и прошлые строки не трогает. */
+    public function test_run_with_every_rule_off_keeps_previous_results(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $before = $this->runAudit()->count();
+
+        // Страница последнюю не даст, но модель позволяет: так проверяем страховку в прогоне.
+        foreach (array_keys(AutoAuditRunner::RULES) as $number) {
+            $this->tenant->fresh()->setAutoAuditRuleEnabled($number, false, 'вендор');
+        }
+
+        try {
+            app(AutoAuditRunner::class)->run();
+            $this->fail('Прогон без единой проверки должен остановиться');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('выключены все проверки', $e->getMessage());
+        }
+
+        $this->assertSame($before, AutoAuditResult::current()->count());
+    }
+
+    /** Переключатель на странице: руководитель выключает и включает, видно кто и сколько вопросов закроется. */
+    public function test_manager_switches_rule_on_the_settings_page(): void
+    {
+        $this->tenant->setAutoAuditEnabled(true);
+        $manager = $this->employee(Role::MANAGER);
+
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 1.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $this->runAudit();
+
+        $this->actingAs($manager, 'employee')->get(route('settings.auto-audit'))
+            ->assertOk()
+            ->assertSee('закроются вопросы бухгалтерам: 1', false);
+
+        $this->actingAs($manager, 'employee')
+            ->post(route('settings.auto-audit.toggle', 3), ['enabled' => '0'])
+            ->assertRedirect(route('settings.auto-audit'))
+            ->assertSessionHas('success');
+
+        $this->assertSame($manager->full_name, $this->tenant->fresh()->autoAuditOff()[3]['by']);
+
+        $this->actingAs($manager, 'employee')->get(route('settings.auto-audit'))
+            ->assertSee('выключена')
+            ->assertSee($manager->full_name);
+
+        $this->actingAs($manager, 'employee')->post(route('settings.auto-audit.toggle', 3), ['enabled' => '1']);
+        $this->assertSame([], $this->tenant->fresh()->autoAuditOff());
+    }
+
+    /** Последнюю включённую проверку выключить нельзя; без доступа к автоаудиту переключать нельзя. */
+    public function test_settings_page_keeps_one_rule_on_and_checks_access(): void
+    {
+        // Доступ первым: сессия вендора из asVendor() дальше тянется во все запросы теста.
+        $manager    = $this->employee(Role::MANAGER);
+        $accountant = $this->employee(Role::ACCOUNTANT);
+        $module     = \App\Models\Module::firstOrCreate(['name' => 'settings'], ['display_name' => 'Настройки', 'is_active' => true]);
+        $accountant->modules()->syncWithoutDetaching([$module->id]);
+
+        $this->actingAs($manager, 'employee')
+            ->post(route('settings.auto-audit.toggle', 3), ['enabled' => '0'])
+            ->assertNotFound();
+        $this->actingAs($accountant, 'employee')
+            ->post(route('settings.auto-audit.toggle', 3), ['enabled' => '0'])
+            ->assertNotFound();
+        $this->assertSame([], $this->tenant->fresh()->autoAuditOff());
+
+        $this->asVendor()->post(route('settings.auto-audit.toggle', 99), ['enabled' => '0'])->assertNotFound();
+
+        foreach (array_slice(array_keys(AutoAuditRunner::RULES), 1) as $number) {
+            $this->asVendor()->post(route('settings.auto-audit.toggle', $number), ['enabled' => '0']);
+        }
+
+        $last = array_key_first(AutoAuditRunner::RULES);
+        $this->asVendor()->post(route('settings.auto-audit.toggle', $last), ['enabled' => '0'])
+            ->assertSessionHas('error');
+
+        $this->assertArrayNotHasKey($last, $this->tenant->fresh()->autoAuditOff());
+        $this->assertCount(count(AutoAuditRunner::RULES) - 1, $this->tenant->fresh()->autoAuditOff());
+    }
+
     /** Проверка без отмеченного БП не идёт, и страница говорит это прямо. */
     public function test_settings_page_tells_when_rule_cannot_run(): void
     {

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AutoAuditResult;
 use App\Models\Service;
 use App\Models\Tenant;
 use App\Services\AutoAudit\AccountList;
@@ -20,7 +21,10 @@ use InvalidArgumentException;
  *
  * Счета у проверки меняет руководитель прямо здесь (или вендор, зашедший в фирму, или
  * вендор командой autoaudit:accounts). Новые счета действуют на все месяцы: прогон и так
- * каждый раз пересчитывает всё со старта. Выключатель проверки будет следующим шагом.
+ * каждый раз пересчитывает всё со старта.
+ *
+ * Здесь же проверку выключают и включают. Срабатывает со следующего прогона: страница
+ * автоаудита и вопросы в БухЗадачнике показывают то, что записал прогон, а не настройку.
  *
  * Видят те же, кто видит страницу автоаудита: вендор, зашедший в фирму, и руководитель
  * фирмы, которой автоаудит открыт. Остальным 404, и пункта в меню у них нет.
@@ -76,10 +80,62 @@ class AutoAuditSettingsController extends Controller
             : "Проверка №{$rule}: вернули общий счёт. Следующий прогон пересчитает её за все месяцы.");
     }
 
+    /**
+     * Включить или выключить проверку в фирме. Последнюю включённую выключить нельзя:
+     * выключить автоаудит фирме целиком можно командой autoaudit:access.
+     */
+    public function toggle(Request $request, int $rule): RedirectResponse
+    {
+        abort_unless(self::allowed(), 404);
+        abort_unless(isset(AutoAuditRunner::RULES[$rule]), 404);
+
+        $tenant  = Tenant::findOrFail(TenantContext::id());
+        $enabled = $request->boolean('enabled');
+        $off     = $tenant->autoAuditOff();
+
+        if (!$enabled && !array_diff_key(AutoAuditRunner::RULES, $off + [$rule => true])) {
+            return back()->with('error', 'Нельзя выключить последнюю проверку. Если автоаудит в фирме не нужен совсем, напишите нам.');
+        }
+
+        $tenant->setAutoAuditRuleEnabled($rule, $enabled, Impersonation::isActive() ? 'вендор' : auth('employee')->user()?->full_name);
+
+        return redirect()->route('settings.auto-audit')->with('success', $enabled
+            ? "Проверка №{$rule} включена. Следующий прогон пересчитает её за все месяцы."
+            : "Проверка №{$rule} выключена. Её строки и вопросы уйдут после следующего прогона.");
+    }
+
+    /**
+     * Сколько вопросов бухгалтерам закроется, если выключить проверку: проблемные строки,
+     * где кроме неё не останется ни одной включённой проверки.
+     *
+     * @param array<int, mixed> $off уже выключенные
+     * @return array<int, int> номер проверки => вопросов
+     */
+    private function questionsByRule(array $off): array
+    {
+        $counts = array_fill_keys(array_keys(AutoAuditRunner::RULES), 0);
+
+        $rows = AutoAuditResult::current()
+            ->whereIn('outcome', AutoAuditResult::FINDING_OUTCOMES)
+            ->pluck('rule');
+
+        foreach ($rows as $rule) {
+            $numbers = array_diff(array_map('intval', explode(',', (string) $rule)), array_keys($off));
+
+            if (count($numbers) === 1 && isset($counts[reset($numbers)])) {
+                $counts[reset($numbers)]++;
+            }
+        }
+
+        return $counts;
+    }
+
     /** @return array<int, array> строка на каждую проверку */
     private function rows(?Tenant $tenant, ?string $start): array
     {
-        $own    = $tenant?->autoAuditAccounts() ?? [];
+        $own       = $tenant?->autoAuditAccounts() ?? [];
+        $off       = $tenant?->autoAuditOff() ?? [];
+        $questions = $this->questionsByRule($off);
         $marked = Service::whereIn('reference_id', array_column(AutoAuditSources::SIDES, 'ref'))
             ->pluck('reference_id')
             ->all();
@@ -106,6 +162,8 @@ class AutoAuditSettingsController extends Controller
                 'changed'  => $own[$number] ?? null,
                 'missing'  => array_map(fn (string $side) => AutoAuditSources::SIDES[$side]['label'], $missing),
                 'from'     => $from,
+                'off'      => $off[$number] ?? null,
+                'questions' => $questions[$number],
             ];
         }
 

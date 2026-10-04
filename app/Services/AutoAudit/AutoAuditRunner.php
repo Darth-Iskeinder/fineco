@@ -281,10 +281,23 @@ class AutoAuditRunner
             );
         }
 
+        $tenant = Tenant::find(TenantContext::id());
+
+        // Выключенную в фирме проверку не считаем вовсе. Её прежние строки уходят в историю,
+        // вопросы закрываются (store, syncFindings), а из общих строк «4,5,6,7» уходит её номер.
+        $rules = array_diff_key($rules, $tenant?->autoAuditOff() ?? []);
+
+        // Страница не даёт выключить последнюю проверку, но всё могло совпасть с неразмеченными
+        // БП. Пустой прогон стёр бы строки фирмы, поэтому останавливаемся до записи.
+        if (!$rules) {
+            throw new RuntimeException(
+                'В фирме выключены все проверки, которые могут идти. Результаты прошлого прогона не тронуты',
+            );
+        }
+
         // У фирмы свой старт: проверка смотрит с того месяца, что позже, её или фирмы.
         // Строки 'ГГГГ-ММ' сравниваются как числа.
-        $tenant = Tenant::find(TenantContext::id());
-        $start  = $tenant?->autoAuditFrom();
+        $start = $tenant?->autoAuditFrom();
 
         if ($start) {
             $rules = array_map(fn (array $rule) => array_merge($rule, ['from' => max($rule['from'] ?? '', $start)]), $rules);

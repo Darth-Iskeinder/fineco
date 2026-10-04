@@ -40,6 +40,9 @@ class Tenant extends Model
     /** Ключ в settings: свои счета ОСВ у проверок автоаудита, см. autoAuditAccounts(). */
     public const SETTING_AUTO_AUDIT_ACCOUNTS = 'auto_audit_accounts';
 
+    /** Ключ в settings: выключенные в фирме проверки автоаудита, см. autoAuditOff(). */
+    public const SETTING_AUTO_AUDIT_OFF = 'auto_audit_off';
+
     protected $fillable = [
         'name', 'slug', 'status', 'plan', 'settings', 'is_template',
         // Профиль фирмы: правится в настройках, уходит в акты и сметы.
@@ -225,6 +228,41 @@ class Tenant extends Model
         }
 
         $this->settings = array_merge($this->settings ?? [], [self::SETTING_AUTO_AUDIT_ACCOUNTS => $saved]);
+        $this->save();
+    }
+
+    /**
+     * Выключенные в фирме проверки: номер => кто и когда выключил.
+     *
+     * Нет в списке, значит проверка идёт. Так у всех фирм, пока им ничего не выключали.
+     *
+     * @return array<int, array{by: ?string, at: ?string}>
+     */
+    public function autoAuditOff(): array
+    {
+        $saved = $this->settings[self::SETTING_AUTO_AUDIT_OFF] ?? [];
+        $rules = [];
+
+        foreach (is_array($saved) ? $saved : [] as $rule => $entry) {
+            $rules[(int) $rule] = ['by' => $entry['by'] ?? null, 'at' => $entry['at'] ?? null];
+        }
+
+        return $rules;
+    }
+
+    /** Включить или выключить проверку в фирме. Остальные ключи settings не трогаем. */
+    public function setAutoAuditRuleEnabled(int $rule, bool $enabled, ?string $by): void
+    {
+        $saved = $this->settings[self::SETTING_AUTO_AUDIT_OFF] ?? [];
+        $saved = is_array($saved) ? $saved : [];
+
+        if ($enabled) {
+            unset($saved[(string) $rule]);
+        } else {
+            $saved[(string) $rule] = ['by' => $by, 'at' => now()->toDateString()];
+        }
+
+        $this->settings = array_merge($this->settings ?? [], [self::SETTING_AUTO_AUDIT_OFF => $saved]);
         $this->save();
     }
 

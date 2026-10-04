@@ -380,6 +380,8 @@ Route::middleware('auth:employee')->group(function () {
         Route::get('/auto-audit', [AutoAuditSettingsController::class, 'show'])->name('auto-audit');
         Route::post('/auto-audit/{rule}', [AutoAuditSettingsController::class, 'update'])
             ->whereNumber('rule')->name('auto-audit.update');
+        Route::post('/auto-audit/{rule}/toggle', [AutoAuditSettingsController::class, 'toggle'])
+            ->whereNumber('rule')->name('auto-audit.toggle');
 
         // Коды налоговых органов
         Route::get('/tax-authorities', [SettingsController::class, 'taxAuthoritiesPage'])->name('tax-authorities');

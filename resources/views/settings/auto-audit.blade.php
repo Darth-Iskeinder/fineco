@@ -4,7 +4,9 @@
 @section('settings-content')
 {{--
     Какие проверки идут в фирме и какие счета ведомости они берут. Счета у проверки
-    руководитель меняет в окне «Изменить». Выключателя проверки пока нет.
+    руководитель меняет в окне «Изменить», переключателем проверку выключает и включает.
+    Выключение срабатывает со следующего прогона, поэтому перед ним спрашиваем, сколько
+    вопросов бухгалтерам закроется.
 
     Окно одно на страницу, форма обычная (без fetch): после сохранения страница
     перерисовывается целиком. Ошибка ввода возвращает на страницу с old('rule'), и окно
@@ -41,8 +43,8 @@
                 <div class="text-sm font-semibold text-slate-800">{{ $nightly ? 'каждую ночь' : 'вручную' }}</div>
             </div>
             <div>
-                <div class="text-xs text-slate-500">Проверок</div>
-                <div class="text-sm font-semibold text-slate-800">{{ count($rows) }}</div>
+                <div class="text-xs text-slate-500">Включено проверок</div>
+                <div class="text-sm font-semibold text-slate-800">{{ collect($rows)->whereNull('off')->count() }} из {{ count($rows) }}</div>
             </div>
         </div>
 
@@ -50,6 +52,7 @@
             <table class="min-w-full divide-y divide-slate-200">
                 <thead class="bg-slate-50">
                     <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Включена</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">№</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Проверка</th>
                         <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Счета ОСВ</th>
@@ -58,10 +61,33 @@
                 </thead>
                 <tbody class="bg-white divide-y divide-slate-200">
                     @foreach ($rows as $row)
-                        <tr class="align-top">
+                        <tr class="align-top {{ $row['off'] ? 'bg-slate-50' : '' }}">
+                            <td class="px-6 py-4">
+                                @php
+                                    $confirm = $row['questions']
+                                        ? "Выключить проверку №{$row['number']}? После следующего прогона её строки уйдут в историю, и закроются вопросы бухгалтерам: {$row['questions']}."
+                                        : "Выключить проверку №{$row['number']}? После следующего прогона её строки уйдут в историю.";
+                                @endphp
+                                <form method="POST" action="{{ route('settings.auto-audit.toggle', $row['number']) }}"
+                                      @if (!$row['off']) x-on:submit="if (!confirm(@js($confirm))) $event.preventDefault()" @endif>
+                                    @csrf
+                                    <input type="hidden" name="enabled" value="{{ $row['off'] ? 1 : 0 }}">
+                                    <button type="submit" role="switch" aria-checked="{{ $row['off'] ? 'false' : 'true' }}"
+                                            title="{{ $row['off'] ? 'Включить' : 'Выключить' }}"
+                                            class="relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out {{ $row['off'] ? 'bg-slate-200' : 'bg-indigo-600' }}">
+                                        <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out {{ $row['off'] ? 'translate-x-0' : 'translate-x-5' }}"></span>
+                                    </button>
+                                </form>
+                            </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm font-semibold text-slate-700">{{ $row['number'] }}</td>
                             <td class="px-6 py-4 text-sm">
                                 <div class="font-medium text-slate-900">{{ $row['name'] }}</div>
+                                @if ($row['off'])
+                                    <div class="text-xs text-slate-500 mt-0.5">
+                                        <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">выключена</span>
+                                        {{ $row['off']['at'] ? \Carbon\Carbon::parse($row['off']['at'])->format('d.m.Y') : '' }}{{ $row['off']['by'] ? ', ' . $row['off']['by'] : '' }}
+                                    </div>
+                                @endif
                                 <div class="text-xs text-slate-500 mt-0.5">{{ $row['hint'] }}</div>
                                 @if ($row['from'])
                                     <div class="text-xs text-slate-500 mt-0.5">Проверяет с периода: {{ $row['from'] }}</div>
@@ -102,6 +128,7 @@
         <div class="px-6 py-4 border-t border-slate-100 text-sm text-slate-500 space-y-1">
             <p>Если у проверки несколько счетов, их обороты складываются.</p>
             <p>Новые счета действуют на все месяцы: следующий прогон пересчитает проверку с её начала.</p>
+            <p>Выключенная проверка уходит после следующего прогона: её строки остаются в истории, вопросы бухгалтерам закрываются. Включили обратно: прогон пересчитает её за все месяцы, и вопросы откроются заново.</p>
         </div>
     </div>
 
