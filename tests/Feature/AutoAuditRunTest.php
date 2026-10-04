@@ -3659,7 +3659,9 @@ class AutoAuditRunTest extends TestCase
 
         $this->actingAs($manager, 'employee')->get(route('settings.auto-audit'))
             ->assertOk()
-            ->assertSee('закроются вопросы бухгалтерам: 1', false);
+            ->assertSee('вопросы бухгалтерам закроются')
+            ->assertSee('questions\\u0022:1', false)
+            ->assertDontSee('confirm(', false);
 
         $this->actingAs($manager, 'employee')
             ->post(route('settings.auto-audit.toggle', 3), ['enabled' => '0'])

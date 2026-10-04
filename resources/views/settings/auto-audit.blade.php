@@ -5,8 +5,9 @@
 {{--
     Какие проверки идут в фирме и какие счета ведомости они берут. Счета у проверки
     руководитель меняет в окне «Изменить», переключателем проверку выключает и включает.
-    Выключение срабатывает со следующего прогона, поэтому перед ним спрашиваем, сколько
-    вопросов бухгалтерам закроется.
+    Выключение срабатывает со следующего прогона, поэтому перед ним спрашиваем в своём окне
+    (не confirm браузера), сколько вопросов бухгалтерам закроется. Окно жёлтое, а не красное,
+    как у удаления: выключение обратимо и ничего не удаляет.
 
     Окно одно на страницу, форма обычная (без fetch): после сохранения страница
     перерисовывается целиком. Ошибка ввода возвращает на страницу с old('rule'), и окно
@@ -19,7 +20,9 @@
             'accounts' => implode(', ', $row['accounts']),
             'default'  => $row['default'],
             'changed'  => (bool) $row['changed'],
+            'questions' => $row['questions'],
         ])),
+        offRule: null,
         rule: @js(old('rule') !== null ? (int) old('rule') : null),
         accounts: @js(old('accounts', '')),
         open(number) { this.rule = number; this.accounts = this.rules[number].accounts; },
@@ -63,13 +66,9 @@
                     @foreach ($rows as $row)
                         <tr class="align-top {{ $row['off'] ? 'bg-slate-50' : '' }}">
                             <td class="px-6 py-4">
-                                @php
-                                    $confirm = $row['questions']
-                                        ? "Выключить проверку №{$row['number']}? После следующего прогона её строки уйдут в историю, и закроются вопросы бухгалтерам: {$row['questions']}."
-                                        : "Выключить проверку №{$row['number']}? После следующего прогона её строки уйдут в историю.";
-                                @endphp
+                                {{-- Включаем сразу, выключаем через окно подтверждения внизу. --}}
                                 <form method="POST" action="{{ route('settings.auto-audit.toggle', $row['number']) }}"
-                                      @if (!$row['off']) x-on:submit="if (!confirm(@js($confirm))) $event.preventDefault()" @endif>
+                                      @if (!$row['off']) x-on:submit.prevent="offRule = {{ $row['number'] }}" @endif>
                                     @csrf
                                     <input type="hidden" name="enabled" value="{{ $row['off'] ? 1 : 0 }}">
                                     <button type="submit" role="switch" aria-checked="{{ $row['off'] ? 'false' : 'true' }}"
@@ -173,6 +172,40 @@
                                     <button type="button" @click="rule = null" class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50">Отмена</button>
                                     <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700">Сохранить</button>
                                 </div>
+                            </div>
+                        </form>
+                    </template>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    {{-- Подтверждение выключения. Отдельный x-teleport: два окна в одном Alpine теряет. --}}
+    <template x-teleport="body">
+        <div x-show="offRule !== null" x-cloak class="fixed inset-0 z-50 overflow-y-auto">
+            <div class="flex items-center justify-center min-h-screen px-4">
+                <div class="fixed inset-0 bg-slate-500/75" @click="offRule = null"></div>
+                <div class="relative w-full max-w-md bg-white rounded-2xl shadow-xl p-6 z-10">
+                    <template x-if="offRule !== null">
+                        <form method="POST" :action="'{{ url('/settings/auto-audit') }}/' + offRule + '/toggle'">
+                            @csrf
+                            <input type="hidden" name="enabled" value="0">
+                            <div class="flex items-center gap-4 mb-4">
+                                <div class="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center flex-shrink-0">
+                                    <svg class="w-6 h-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                                </div>
+                                <div>
+                                    <h3 class="text-lg font-semibold text-slate-900" x-text="'Выключить проверку №' + offRule + '?'"></h3>
+                                    <p class="text-sm text-slate-500" x-text="rules[offRule].name"></p>
+                                </div>
+                            </div>
+                            <p class="text-slate-700 mb-6">
+                                После ночного прогона её строки уйдут в историю<span x-show="rules[offRule].questions">, вопросы бухгалтерам закроются: <span class="font-medium" x-text="rules[offRule].questions"></span></span>.
+                                Включить обратно можно в любой момент.
+                            </p>
+                            <div class="flex justify-end gap-3">
+                                <button type="button" @click="offRule = null" class="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50">Отмена</button>
+                                <button type="submit" class="px-4 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700">Выключить</button>
                             </div>
                         </form>
                     </template>
