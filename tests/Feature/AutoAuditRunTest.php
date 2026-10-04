@@ -3464,7 +3464,8 @@ class AutoAuditRunTest extends TestCase
             ->assertSee('Единый налог в отчёте = начислен в учёте')
             ->assertSee('3490')
             ->assertSee('изменено')
-            ->assertSee('Только просмотр');
+            ->assertSee('Изменить')
+            ->assertDontSee('Только просмотр');
     }
 
     /** Руководитель видит страницу, только когда фирме открыт автоаудит; бухгалтер никогда. */
@@ -3487,6 +3488,100 @@ class AutoAuditRunTest extends TestCase
         $this->actingAs($accountant, 'employee')->get(route('settings.auto-audit'))->assertNotFound();
         $this->actingAs($accountant, 'employee')->get(route('settings.tax-systems'))
             ->assertDontSee(route('settings.auto-audit'), false);
+    }
+
+    /** Руководитель меняет счета на странице, и прогон берёт их сразу за все месяцы. */
+    public function test_manager_sets_accounts_on_the_settings_page(): void
+    {
+        $this->tenant->setAutoAuditEnabled(true);
+        $manager = $this->employee(Role::MANAGER);
+
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 1.00, '3490' => 3.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $this->actingAs($manager, 'employee')
+            ->post(route('settings.auto-audit.update', 3), ['accounts' => '3410; 3490'])
+            ->assertRedirect(route('settings.auto-audit'))
+            ->assertSessionHas('success');
+
+        $tenant = $this->tenant->fresh();
+        $this->assertSame(['3410', '3490'], AutoAuditRunner::accountsFor(3, $tenant));
+        $this->assertSame($manager->full_name, $tenant->autoAuditAccounts()[3]['by']);
+
+        $row = $this->runAudit()->firstWhere('rule', '3');
+        $this->assertSame(AutoAuditResult::MATCHED, $row->outcome);
+    }
+
+    /** «Вернуть как было» снимает настройку; один общий счёт тоже не хранится как свой. */
+    public function test_settings_page_returns_the_default_account(): void
+    {
+        $this->tenant->setAutoAuditAccounts(3, ['3410', '3490'], 'вендор');
+
+        $this->asVendor()->post(route('settings.auto-audit.update', 3), ['reset' => '1'])
+            ->assertRedirect(route('settings.auto-audit'));
+        $this->assertSame([], $this->tenant->fresh()->autoAuditAccounts());
+
+        $this->asVendor()->post(route('settings.auto-audit.update', 4), ['accounts' => '3420, 3421']);
+        $this->assertSame('вендор', $this->tenant->fresh()->autoAuditAccounts()[4]['by']);
+
+        $default = AutoAuditRunner::RULES[4]['account'];
+        $this->asVendor()->post(route('settings.auto-audit.update', 4), ['accounts' => " {$default} "]);
+        $this->assertSame([], $this->tenant->fresh()->autoAuditAccounts());
+    }
+
+    /** Не похожее на счёт и пустое не сохраняются, окно открывается снова с ошибкой. */
+    public function test_settings_page_rejects_what_is_not_an_account(): void
+    {
+        $this->tenant->setAutoAuditAccounts(3, ['3410', '3490'], 'вендор');
+
+        foreach (['3410, налог', '', ' , '] as $input) {
+            $this->asVendor()->from(route('settings.auto-audit'))
+                ->post(route('settings.auto-audit.update', 3), ['accounts' => $input])
+                ->assertRedirect(route('settings.auto-audit'))
+                ->assertSessionHasErrors('accounts');
+        }
+
+        $this->assertSame(['3410', '3490'], AutoAuditRunner::accountsFor(3, $this->tenant->fresh()));
+
+        $this->asVendor()->withSession(['_old_input' => ['rule' => 3, 'accounts' => '3410, налог']])
+            ->get(route('settings.auto-audit'))
+            ->assertOk()
+            ->assertSee('3410, налог');
+    }
+
+    /** Править может только тот, кто видит страницу; чужую фирму и несуществующую проверку не трогаем. */
+    public function test_settings_page_update_follows_auto_audit_access(): void
+    {
+        $manager    = $this->employee(Role::MANAGER);
+        $accountant = $this->employee(Role::ACCOUNTANT);
+        $module     = \App\Models\Module::firstOrCreate(['name' => 'settings'], ['display_name' => 'Настройки', 'is_active' => true]);
+        $accountant->modules()->syncWithoutDetaching([$module->id]);
+
+        // Автоаудит фирме не открыт: руководитель тоже не правит.
+        $this->actingAs($manager, 'employee')
+            ->post(route('settings.auto-audit.update', 3), ['accounts' => '3490'])
+            ->assertNotFound();
+
+        $this->tenant->setAutoAuditEnabled(true);
+
+        $this->actingAs($accountant->fresh(), 'employee')
+            ->post(route('settings.auto-audit.update', 3), ['accounts' => '3490'])
+            ->assertNotFound();
+        $this->actingAs($manager->fresh(), 'employee')
+            ->post(route('settings.auto-audit.update', 99), ['accounts' => '3490'])
+            ->assertNotFound();
+
+        $this->assertSame([], $this->tenant->fresh()->autoAuditAccounts());
+
+        $other = Tenant::create(['name' => 'Чужая ' . uniqid(), 'slug' => 'other-' . uniqid(), 'status' => Tenant::STATUS_ACTIVE]);
+
+        $this->actingAs($manager->fresh(), 'employee')
+            ->post(route('settings.auto-audit.update', 3), ['accounts' => '3490'])
+            ->assertRedirect(route('settings.auto-audit'));
+
+        $this->assertSame(['3490'], AutoAuditRunner::accountsFor(3, $this->tenant->fresh()));
+        $this->assertSame([], $other->fresh()->autoAuditAccounts());
     }
 
     /** Проверка без отмеченного БП не идёт, и страница говорит это прямо. */

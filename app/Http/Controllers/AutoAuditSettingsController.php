@@ -4,18 +4,23 @@ namespace App\Http\Controllers;
 
 use App\Models\Service;
 use App\Models\Tenant;
+use App\Services\AutoAudit\AccountList;
 use App\Services\AutoAudit\AutoAuditRunner;
 use App\Services\AutoAudit\AutoAuditSources;
 use App\Services\AutoAudit\DocumentPeriod;
 use App\Support\Impersonation;
 use App\Support\TenantContext;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\View\View;
+use InvalidArgumentException;
 
 /**
  * «Настройки → Автоаудит»: какие проверки идут в фирме и какие счета ведомости они берут.
  *
- * Пока только просмотр. Счета фирме задаёт вендор командой autoaudit:accounts, правка
- * на странице и выключатель проверки будут следующими шагами.
+ * Счета у проверки меняет руководитель прямо здесь (или вендор, зашедший в фирму, или
+ * вендор командой autoaudit:accounts). Новые счета действуют на все месяцы: прогон и так
+ * каждый раз пересчитывает всё со старта. Выключатель проверки будет следующим шагом.
  *
  * Видят те же, кто видит страницу автоаудита: вендор, зашедший в фирму, и руководитель
  * фирмы, которой автоаудит открыт. Остальным 404, и пункта в меню у них нет.
@@ -39,6 +44,36 @@ class AutoAuditSettingsController extends Controller
             'start'   => $start ? $this->monthTitle($start) : null,
             'nightly' => (bool) $tenant?->autoAuditNightly(),
         ]);
+    }
+
+    /**
+     * Задать проверке свои счета или вернуть общий (reset).
+     *
+     * Здесь проверяем только, что это похоже на счёт. Есть ли счёт в ведомостях, смотрит
+     * команда: на странице это пока не делаем (Искендер, 04.10.2026).
+     */
+    public function update(Request $request, int $rule): RedirectResponse
+    {
+        abort_unless(self::allowed(), 404);
+        abort_unless(isset(AutoAuditRunner::RULES[$rule]), 404);
+
+        $tenant = Tenant::findOrFail(TenantContext::id());
+
+        try {
+            $accounts = $request->boolean('reset')
+                ? []
+                : AccountList::parse((string) $request->input('accounts'), AutoAuditRunner::RULES[$rule]['account']);
+        } catch (InvalidArgumentException $e) {
+            return back()->withErrors(['accounts' => $e->getMessage()])->withInput(['rule' => $rule] + $request->only('accounts'));
+        }
+
+        $by = Impersonation::isActive() ? 'вендор' : auth('employee')->user()?->full_name;
+
+        $tenant->setAutoAuditAccounts($rule, $accounts ?: null, $by);
+
+        return redirect()->route('settings.auto-audit')->with('success', $accounts
+            ? "Проверка №{$rule}: счета " . implode(', ', $accounts) . '. Следующий прогон пересчитает её за все месяцы.'
+            : "Проверка №{$rule}: вернули общий счёт. Следующий прогон пересчитает её за все месяцы.");
     }
 
     /** @return array<int, array> строка на каждую проверку */

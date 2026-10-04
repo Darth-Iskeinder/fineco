@@ -5,11 +5,13 @@ namespace App\Console\Commands;
 use App\Models\Client;
 use App\Models\Service;
 use App\Models\Tenant;
+use App\Services\AutoAudit\AccountList;
 use App\Services\AutoAudit\AutoAuditRunner;
 use App\Services\AutoAudit\AutoAuditSources;
 use App\Support\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
+use InvalidArgumentException;
 use RuntimeException;
 
 /**
@@ -19,7 +21,8 @@ use RuntimeException;
  * С одним общим счётом у КЛВ по №3 вышли бы ложные «Не совпало». Фирме задают свой список,
  * обороты по нему складываются (AutoAuditRunner::accountsFor).
  *
- * Пока на странице «Настройки → Автоаудит» нет правки, счета задаются здесь.
+ * То же умеет страница «Настройки → Автоаудит» у руководителя; команда вдобавок проверяет
+ * счета по ведомостям.
  *
  *   autoaudit:accounts --tenant=4                         как сейчас, все проверки
  *   autoaudit:accounts --tenant=4 --rule=3                одна проверка и где её счета есть в ведомостях
@@ -189,24 +192,13 @@ class AutoAuditAccounts extends Command
             return null;
         }
 
-        $accounts = array_values(array_unique(preg_split('/[\s,;]+/u', trim($set), -1, PREG_SPLIT_NO_EMPTY)));
-
-        if (!$accounts) {
-            $this->error('Пустой список счетов. Вернуть общий счёт: --reset');
+        try {
+            return AccountList::parse($set, $default);
+        } catch (InvalidArgumentException $e) {
+            $this->error($e->getMessage() . (trim($set) === '' ? '. Вернуть общий счёт: --reset' : ''));
 
             return false;
         }
-
-        foreach ($accounts as $account) {
-            if (!preg_match('/^\d{2,6}(\.\d{1,3})?$/', $account)) {
-                $this->error("«{$account}» не похоже на счёт ОСВ: нужны цифры, например 3410");
-
-                return false;
-            }
-        }
-
-        // Один общий счёт это и есть «по умолчанию»: храним его как отсутствие настройки.
-        return $accounts === [$default] ? [] : $accounts;
     }
 
     /**

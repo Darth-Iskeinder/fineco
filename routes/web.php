@@ -375,9 +375,11 @@ Route::middleware('auth:employee')->group(function () {
         Route::put('/billings/{billing}', [SettingsController::class, 'updateBilling'])->name('billings.update');
         Route::delete('/billings/{billing}', [SettingsController::class, 'destroyBilling'])->name('billings.destroy');
 
-        // Автоаудит: какие проверки идут в фирме и какие счета ведомости берут. Пока только
-        // просмотр; кому видно, решает контроллер (те же, кто видит страницу автоаудита).
+        // Автоаудит: какие проверки идут в фирме и какие счета ведомости берут. Кому видно и
+        // кто правит счета, решает контроллер (те же, кто видит страницу автоаудита).
         Route::get('/auto-audit', [AutoAuditSettingsController::class, 'show'])->name('auto-audit');
+        Route::post('/auto-audit/{rule}', [AutoAuditSettingsController::class, 'update'])
+            ->whereNumber('rule')->name('auto-audit.update');
 
         // Коды налоговых органов
         Route::get('/tax-authorities', [SettingsController::class, 'taxAuthoritiesPage'])->name('tax-authorities');
