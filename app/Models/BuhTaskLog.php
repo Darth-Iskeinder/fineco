@@ -20,6 +20,13 @@ class BuhTaskLog extends Model
      * Автоаудит смотрит только сюда, а не в текст: «Нулевой» у него значит ноль по
      * документу, «Освобождён» ноль по налогу. Раз в квартал и «Другое» не значат ничего.
      */
+    /**
+     * Задачу передали другому исполнителю, когда этот уже начинал её. Запись остаётся
+     * прежнему как история (его время, кому и когда передали) и видна ему во «Выполненных».
+     * Ни выполненной, ни открытой она не считается. См. App\Services\TaskHandover.
+     */
+    public const STATUS_HANDED = 'handed';
+
     public const FORCE_ZERO      = 'zero';
     public const FORCE_QUARTERLY = 'quarterly';
     public const FORCE_EXEMPT    = 'exempt';
@@ -35,7 +42,7 @@ class BuhTaskLog extends Model
 
     protected $fillable = [
         'employee_id', 'client_id', 'estimate_item_id',
-        'year', 'month', 'due_date', 'status', 'review_comment', 'rework_count', 'employee_comment', 'rework_seen_at',
+        'year', 'month', 'due_date', 'status', 'handed_to_id', 'handed_at', 'review_comment', 'rework_count', 'employee_comment', 'rework_seen_at',
         'force_closed', 'force_close_reason', 'force_close_comment',
         'started_at', 'resumed_at', 'paused_seconds', 'completed_at',
         'reviewed_at', 'reviewed_by', 'review_started_at', 'actual_quantity',
@@ -47,6 +54,7 @@ class BuhTaskLog extends Model
         'started_at'   => 'datetime',
         'resumed_at'   => 'datetime',
         'completed_at' => 'datetime',
+        'handed_at'    => 'datetime',
         'reviewed_at'  => 'datetime',
         'review_started_at' => 'datetime',
         'rework_seen_at' => 'datetime',
@@ -93,6 +101,12 @@ class BuhTaskLog extends Model
     public function reviewer(): BelongsTo
     {
         return $this->belongsTo(Employee::class, 'reviewed_by');
+    }
+
+    /** Кому передали задачу (статус «Передана»). */
+    public function handedTo(): BelongsTo
+    {
+        return $this->belongsTo(Employee::class, 'handed_to_id');
     }
 
     public function documents(): MorphMany

@@ -31,8 +31,8 @@ use Illuminate\Database\Eloquent\Builder;
  * Чего НЕ переносим:
  *   - позиции, отданные другим бухгалтерам: сменился главбух, а не они;
  *   - логи плановых задач (`buh_task_logs`): кто что делал — история, её не переписываем.
- *     Задачник и так рассчитан на переназначение (см. `BuhTasksController::logForEmployee`):
- *     закрытые периоды видит любой исполнитель БП, а чужая незаконченная работа личная;
+ *     Незакрытые записи прежнего не переезжают, а получают статус «Передана» (TaskHandover):
+ *     время остаётся за ним, а новый исполнитель начинает задачу со своей записи;
  *   - выполненные напоминания и задачи в статусе проверки: они уже сданы, а проверяющий
  *     и без переноса вычисляется по текущему ответственному.
  *
@@ -66,6 +66,8 @@ class ClientResponsibleTransfer
         $result['reminders'] = $this->moveReminders($client, $oldId, $newId);
         $result['adhoc']     = $oldId === null ? 0 : $this->adhocQuery($client, $oldId)
             ->update(['employee_id' => $newId, 'assign_seen_at' => null]);
+
+        (new TaskHandover())->forClient($client);
 
         return $result;
     }

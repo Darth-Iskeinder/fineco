@@ -79,7 +79,10 @@ class DashboardController extends Controller
 
         // Логи всех сотрудников, ключ — «слот» (year-month-item[-дата для weekly]).
         // После переназначения у слота могут быть логи разных исполнителей — берём последний.
+        // «Передана» не участвует: задача засчитывается тому, кто делает её сейчас.
+        // Иначе запись прежнего исполнителя, как самая свежая, выдавала бы задачу за «в работе».
         $logRows = BuhTaskLog::where('year', '>=', min($scanFrom->year, $year))
+            ->where('status', '<>', BuhTaskLog::STATUS_HANDED)
             ->orderBy('id')
             ->get();
 

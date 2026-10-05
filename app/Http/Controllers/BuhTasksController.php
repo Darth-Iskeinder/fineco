@@ -458,6 +458,8 @@ class BuhTasksController extends Controller
                         'description'     => $service?->description,
                         'status'          => $log?->status ?? 'pending',
                         'elapsed_seconds' => $this->calcElapsed($log),
+                        // Кто работал над задачей до меня (запись «Передана»): строка «До вас» в карточке.
+                        'handed_before'   => $this->handedBefore($logs->get($wy . '-' . $wm . '-' . $item->id . $slotKey), $employeeNames),
                         'review_comment'  => $log?->review_comment,
                         'employee_comment' => $log?->employee_comment,
                         'quantity'         => (int) $item->quantity,
@@ -714,54 +716,22 @@ class BuhTasksController extends Controller
             ->whereHas('estimateItem', fn ($q) => $q->whereNull('parent_id'))
             ->with(['estimateItem.service', 'estimateItem.children.service', 'client:id,name', 'documents'])
             ->get()
-            ->map(function ($l) use ($logs, $today) {
-                $item    = $l->estimateItem;
-                $service = $item?->service;
+            ->map(fn ($l) => $this->completedPlannedRow($l, $logs, $today));
 
-                return [
-                    'id'           => 'log_' . $l->id,
-                    'type'         => 'planned',
-                    'name'         => $item?->name ?? '—',
-                    'branch_label' => $item?->branch_label,
-                    'client_id'    => $l->client_id, // фильтр вкладки «Выполненные»
-                    'client_name'  => $l->client?->name ?? '—',
-                    'completed_at' => $l->completed_at->toIso8601String(),
-                    'employee_comment' => $l->employee_comment,
-                    'comment_url'      => route('buhtasks.logs.comment', $l->id),
-                    'elapsed_seconds'   => $this->calcElapsed($l),
-                    'description'       => $service?->description,
-                    'comment'          => $service?->comment,
-                    'periodicity'      => $item?->periodicity,
-                    'reporting_period' => $this->reportingPeriodForLog($l, $item, $today->year),
-                    'due_date'         => $l->due_date?->toDateString(),
-                    'allows_quantity'  => (bool) ($service?->allows_quantity),
-                    'quantity'         => (int) ($item?->quantity ?? 0),
-                    'actual_quantity'  => $l->actual_quantity,
-                    'requires_document' => (bool) ($service?->requires_document),
-                    // Эталонный БП: к его задачам принимаем только машиночитаемые форматы,
-                    // и выбор файла сразу сужаем — иначе человек узнает об отказе после загрузки.
-                    'autoaudit' => (bool) ($service?->reference_id),
-                    'documents'        => $this->docs($l),
-                    'force_closed'        => (bool) $l->force_closed,
-                    'force_close_comment' => $l->forceCloseNote(),
-                    'children'         => ($item?->children ?? collect())->map(function ($child) use ($logs, $l) {
-                        $cSlotKey = $l->due_date ? '-' . $l->due_date->toDateString() : '';
-                        $childLog = $this->logForEmployee($logs->get($l->year . '-' . $l->month . '-' . $child->id . $cSlotKey), $l->employee_id);
-                        $cs = $child->service;
-
-                        return [
-                            'id'                => $child->id,
-                            'name'              => $child->name,
-                            'status'            => $childLog?->status ?? 'pending',
-                            'allows_quantity'   => (bool) ($cs?->allows_quantity),
-                            'quantity'          => (int) $child->quantity,
-                            'actual_quantity'   => $childLog?->actual_quantity,
-                            'requires_document' => (bool) ($cs?->requires_document),
-                            'documents'         => $childLog ? $this->docs($childLog) : [],
-                        ];
-                    })->values()->toArray(),
-                ];
-            });
+        // Передал задачу другому, успев начать: строка во «Выполненных» с пометкой, кому.
+        // Без неё работа прежнего исполнителя пропадала без следа. Дата строки — дата передачи.
+        $handedPlanned = BuhTaskLog::where('employee_id', $employee->id)
+            ->where('status', BuhTaskLog::STATUS_HANDED)
+            ->where('handed_at', '>=', $historyFrom)
+            ->whereHas('estimateItem', fn ($q) => $q->whereNull('parent_id'))
+            ->with(['estimateItem.service', 'estimateItem.children.service', 'client:id,name', 'documents'])
+            ->get()
+            ->map(fn ($l) => [
+                'id'             => 'handed_' . $l->id,
+                'completed_at'   => $l->handed_at->toIso8601String(),
+                'handed_to_name' => $employeeNames->get($l->handed_to_id) ?? 'другому сотруднику',
+                'comment_url'    => null, // задача уже не его: заметку не правит
+            ] + $this->completedPlannedRow($l, $logs, $today));
         $completedAdhoc = BuhAdhocTask::where('employee_id', $employee->id)
             ->where('status', 'completed')
             ->whereNotNull('completed_at')
@@ -892,7 +862,7 @@ class BuhTasksController extends Controller
                 ]);
         }
 
-        $completed = $completedPlanned->concat($completedAdhoc)
+        $completed = $completedPlanned->concat($handedPlanned)->concat($completedAdhoc)
             ->concat($teamCompletedPlanned)->concat($teamCompletedAdhoc)
             ->sortByDesc('completed_at')->values()->toArray();
 
@@ -2264,6 +2234,76 @@ class BuhTasksController extends Controller
         ];
     }
 
+    /**
+     * Строка вкладки «Выполненные» для плановой задачи. Общая для выполненных и переданных.
+     */
+    private function completedPlannedRow(BuhTaskLog $l, Collection $logs, CarbonImmutable $today): array
+    {
+        $item    = $l->estimateItem;
+        $service = $item?->service;
+
+        return [
+            'id'           => 'log_' . $l->id,
+            'type'         => 'planned',
+            'name'         => $item?->name ?? '—',
+            'branch_label' => $item?->branch_label,
+            'client_id'    => $l->client_id, // фильтр вкладки «Выполненные»
+            'client_name'  => $l->client?->name ?? '—',
+            'completed_at' => $l->completed_at?->toIso8601String(),
+            'employee_comment' => $l->employee_comment,
+            'comment_url'      => route('buhtasks.logs.comment', $l->id),
+            'elapsed_seconds'   => $this->calcElapsed($l),
+            'description'       => $service?->description,
+            'comment'          => $service?->comment,
+            'periodicity'      => $item?->periodicity,
+            'reporting_period' => $this->reportingPeriodForLog($l, $item, $today->year),
+            'due_date'         => $l->due_date?->toDateString(),
+            'allows_quantity'  => (bool) ($service?->allows_quantity),
+            'quantity'         => (int) ($item?->quantity ?? 0),
+            'actual_quantity'  => $l->actual_quantity,
+            'requires_document' => (bool) ($service?->requires_document),
+            // Эталонный БП: к его задачам принимаем только машиночитаемые форматы,
+            // и выбор файла сразу сужаем — иначе человек узнает об отказе после загрузки.
+            'autoaudit' => (bool) ($service?->reference_id),
+            'documents'        => $this->docs($l),
+            'force_closed'        => (bool) $l->force_closed,
+            'force_close_comment' => $l->forceCloseNote(),
+            'children'         => ($item?->children ?? collect())->map(function ($child) use ($logs, $l) {
+                $cSlotKey = $l->due_date ? '-' . $l->due_date->toDateString() : '';
+                $childLog = $this->logForEmployee($logs->get($l->year . '-' . $l->month . '-' . $child->id . $cSlotKey), $l->employee_id);
+                $cs = $child->service;
+
+                return [
+                    'id'                => $child->id,
+                    'name'              => $child->name,
+                    'status'            => $childLog?->status ?? 'pending',
+                    'allows_quantity'   => (bool) ($cs?->allows_quantity),
+                    'quantity'          => (int) $child->quantity,
+                    'actual_quantity'   => $childLog?->actual_quantity,
+                    'requires_document' => (bool) ($cs?->requires_document),
+                    'documents'         => $childLog ? $this->docs($childLog) : [],
+                ];
+            })->values()->toArray(),
+        ];
+    }
+
+    /**
+     * «До вас»: кто уже работал над этой задачей и сколько, по записям «Передана» слота.
+     *
+     * @return array<int, array{name: string, seconds: int}>
+     */
+    private function handedBefore(?Collection $slot, Collection $employeeNames): array
+    {
+        return ($slot ?? collect())
+            ->where('status', BuhTaskLog::STATUS_HANDED)
+            ->map(fn ($l) => [
+                'name'    => $employeeNames->get($l->employee_id) ?? 'Сотрудник',
+                'seconds' => (int) $l->paused_seconds,
+            ])
+            ->values()
+            ->all();
+    }
+
     private function calcElapsed($log): int
     {
         if (!$log || !$log->started_at) return 0;
@@ -2272,7 +2312,7 @@ class BuhTasksController extends Controller
 
         return match ($log->status) {
             'running'   => $log->paused_seconds + ($log->resumed_at ? max(0, $now - $log->resumed_at->timestamp) : 0),
-            'paused', 'review', 'rework', 'completed' => $log->paused_seconds,
+            'paused', 'review', 'rework', 'completed', BuhTaskLog::STATUS_HANDED => $log->paused_seconds,
             default     => 0,
         };
     }

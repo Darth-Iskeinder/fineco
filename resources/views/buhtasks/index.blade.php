@@ -818,12 +818,18 @@
             <div class="divide-y divide-slate-100">
                 <template x-for="c in completedPageItems" :key="c.id">
                     <div class="flex items-center gap-3 px-6 py-3 cursor-pointer hover:bg-slate-50/60 transition-colors" @dblclick="openCompleted(c)">
-                        <span class="flex-shrink-0 w-8 h-8 inline-flex items-center justify-center rounded-full bg-emerald-50 text-emerald-500">
-                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        <span class="flex-shrink-0 w-8 h-8 inline-flex items-center justify-center rounded-full"
+                              :class="c.handed_to_name ? 'bg-slate-100 text-slate-400' : 'bg-emerald-50 text-emerald-500'">
+                            <svg x-show="!c.handed_to_name" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                            <svg x-show="c.handed_to_name" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
                         </span>
                         <div class="flex-1 min-w-0">
                             <div class="flex items-center gap-2 min-w-0">
                                 <p class="text-sm font-medium text-slate-700 truncate" x-text="c.name"></p>
+                                {{-- Передал задачу другому, успев поработать: работа не пропадает без следа --}}
+                                <span x-show="c.handed_to_name"
+                                      class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-600 flex-shrink-0"
+                                      x-text="'передана → ' + c.handed_to_name"></span>
                                 <span x-show="c.force_closed"
                                       class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-700 flex-shrink-0"
                                       :title="c.force_close_comment">закрыта принудительно</span>
@@ -1666,6 +1672,14 @@
                     </span>
                 </div>
 
+                {{-- До вас: задачу передали, а прежний исполнитель успел поработать. Его время
+                     остаётся за ним, здесь видно, сколько уже вложено в задачу. --}}
+                <div x-show="(tasks[taskModalIdx].handed_before || []).length > 0"
+                     class="mt-3 flex items-start gap-2 px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-600">
+                    <svg class="w-4 h-4 mt-0.5 flex-shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    <span x-text="handedBeforeLabel(tasks[taskModalIdx])"></span>
+                </div>
+
                 {{-- Таймер + управление (Старт/Пауза/Стоп) — те же действия, что и в строке таблицы --}}
                 <div class="mt-4 flex items-center justify-between gap-3 bg-slate-50 rounded-xl px-4 py-3">
                     <div class="flex items-center gap-2.5">
@@ -2058,9 +2072,13 @@
                 </div>
 
                 {{-- Плашка «выполнено» (+ кто выполнил, если это задача бухгалтера) --}}
-                <div class="mt-4 flex items-center gap-2 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-2.5 text-sm text-emerald-700">
+                <div x-show="!completedItem.handed_to_name" class="mt-4 flex items-center gap-2 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-2.5 text-sm text-emerald-700">
                     <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
                     <span>Выполнено · <span x-text="fmtCompleted(completedItem.completed_at)"></span><span x-show="completedItem.doer_name" x-text="' · бухгалтер: ' + completedItem.doer_name"></span></span>
+                </div>
+                <div x-show="completedItem.handed_to_name" class="mt-4 flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-600">
+                    <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/></svg>
+                    <span>Передана · <span x-text="completedItem.handed_to_name"></span> · <span x-text="fmtCompleted(completedItem.completed_at)"></span></span>
                 </div>
 
                 {{-- Закрыта принудительно: без документа/подпунктов, с обязательной причиной --}}
@@ -3638,6 +3656,12 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 return task.elapsed_seconds + Math.max(0, this.now - task.client_resumed_at);
             }
             return task.elapsed_seconds ?? 0;
+        },
+
+        // «До вас: Динара 0:30, Айзада 1:05» — кто работал над задачей до передачи.
+        handedBeforeLabel(task) {
+            const hm = s => Math.floor(s / 3600) + ':' + String(Math.floor(s / 60) % 60).padStart(2, '0');
+            return 'До вас: ' + (task.handed_before || []).map(h => h.name + ' ' + hm(h.seconds)).join(', ');
         },
 
         formatTime(seconds) {

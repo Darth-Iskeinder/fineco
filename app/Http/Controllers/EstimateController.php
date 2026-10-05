@@ -11,6 +11,7 @@ use App\Models\Role;
 use App\Models\Service;
 use App\Services\ClientServiceCatalog;
 use App\Services\PricingCalculator;
+use App\Services\TaskHandover;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
@@ -726,6 +727,10 @@ class EstimateController extends Controller
             $estimate->notes = $request->notes;
             $estimate->total = $total;
             $estimate->save();
+
+            // Сменили исполнителя позиции: начатая прежним работа становится «Передана»,
+            // иначе его запись пропадала с экрана, а таймер мог идти дальше.
+            (new TaskHandover())->forClient($client);
 
             return response()->json([
                 'success'    => true,
