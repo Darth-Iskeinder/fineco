@@ -459,6 +459,18 @@
                                     <span class="text-sm font-medium cursor-pointer break-words"
                                           :class="task.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-800'"
                                           x-text="task.name"></span>
+                                    {{-- Подпункты: сколько отмечено из скольких, клик раскрывает их прямо в строке.
+                                         Без значка о подпунктах узнавали, только открыв задачу. --}}
+                                    <button type="button" x-show="(task.children || []).length > 0"
+                                            @click.stop="toggleChildrenRow(task)" @dblclick.stop
+                                            :title="childrenRowOpen(task) ? 'Свернуть подпункты' : 'Показать подпункты'"
+                                            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium transition-colors"
+                                            :class="childrenDoneCount(task) === (task.children || []).length
+                                                ? 'bg-emerald-100 text-emerald-700'
+                                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'">
+                                        <svg class="w-3 h-3 transition-transform" :class="childrenRowOpen(task) ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"/></svg>
+                                        <span x-text="childrenDoneCount(task) + '/' + (task.children || []).length"></span>
+                                    </button>
                                     <span x-show="task.branch_label"
                                           class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-700">
                                         <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 6h4"/></svg>
@@ -498,6 +510,27 @@
                                         <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
                                         <span x-text="'поручил: ' + task.assigned_by_name"></span>
                                     </span>
+                                </div>
+
+                                {{-- Раскрытые подпункты: те же галочки, что в карточке задачи, и та же логика
+                                     (документ, проверка). Чужие строки только показываем: отмечать их не нам. --}}
+                                <div x-show="childrenRowOpen(task) && (task.children || []).length > 0"
+                                     class="mt-2 pl-2 space-y-1 border-l border-slate-200" @dblclick.stop>
+                                    <template x-for="(child, cidx) in (task.children || [])" :key="child.id">
+                                        <label class="flex items-center gap-2 text-sm"
+                                               :class="childLocked(task, child) ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'">
+                                            <input type="checkbox"
+                                                   :checked="child.status === 'completed'"
+                                                   :disabled="child.loading || childLocked(task, child)"
+                                                   @change="toggleChild(idx, cidx)"
+                                                   class="w-3.5 h-3.5 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500">
+                                            <span class="break-words"
+                                                  :class="child.status === 'completed' ? 'line-through text-slate-400' : 'text-slate-700'"
+                                                  x-text="child.name"></span>
+                                            <span x-show="child.status === 'review'" class="text-xs text-sky-600 font-medium">на проверке</span>
+                                            <span x-show="child.status === 'rework'" class="text-xs text-rose-600 font-medium">на доработку</span>
+                                        </label>
+                                    </template>
                                 </div>
                             </td>
 
@@ -2438,6 +2471,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
 
         showCreateModal: false,
         startConfirm: { show: false, idx: null },
+        openChildrenRows: {}, // uid задач, у которых подпункты раскрыты прямо в списке
         clockNotice: '',      // текст подсказки «задача поставлена на паузу»
         _clockNoticeTimer: null,
         deleteConfirm: { show: false, idx: null }, // модалка удаления произвольной задачи
@@ -4137,6 +4171,25 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             const data = await this.post(this.actionUrl(this.tasks[idx], 'pause'));
             if (data.success) this.applyResult(idx, data.log);
             else this.patch(idx, { loading: false });
+        },
+
+        // ===== Подпункты прямо в списке: счётчик «2/5» и раскрытие под названием =====
+        childrenDoneCount(task) {
+            return (task.children || []).filter(c => c.status === 'completed').length;
+        },
+
+        childrenRowOpen(task) {
+            return !!this.openChildrenRows[task.uid];
+        },
+
+        toggleChildrenRow(task) {
+            this.openChildrenRows = { ...this.openChildrenRows, [task.uid]: !this.openChildrenRows[task.uid] };
+        },
+
+        // Галочку в списке не трогаем, если задача не своя (на проверке у главбуха, задача
+        // бухгалтера) или подпункт уже ушёл на проверку: те же запреты, что в карточке.
+        childLocked(task, child) {
+            return !!(task.is_team || task.review_for_head) || child.status === 'review';
         },
 
         // Все подпункты (чекбоксы) отмечены? Без подпунктов — считается выполнимой.
