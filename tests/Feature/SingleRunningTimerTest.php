@@ -208,4 +208,80 @@ class SingleRunningTimerTest extends TestCase
 
         $this->assertSame('running', $theirs->fresh()->status);
     }
+
+    /** Таймер в шапке: что сейчас идёт у меня, без чужих. */
+    public function test_running_endpoint_shows_my_running_task(): void
+    {
+        $this->actingAs($this->accountant, 'employee')
+            ->getJson(route('buhtasks.running'))
+            ->assertOk()
+            ->assertJsonPath('running', null);
+
+        $theirs = $this->log(doer: $this->colleague);
+        $theirs->update(['status' => 'running', 'started_at' => now(), 'resumed_at' => now()]);
+
+        $adhoc = $this->adhoc();
+        $this->actingAs($this->accountant, 'employee')
+            ->postJson(route('buhtasks.adhoc.start', $adhoc))->assertOk();
+
+        $this->actingAs($this->accountant, 'employee')
+            ->getJson(route('buhtasks.running'))
+            ->assertOk()
+            ->assertJsonPath('running.type', 'adhoc')
+            ->assertJsonPath('running.id', $adhoc->id)
+            ->assertJsonPath('running.name', $adhoc->name)
+            ->assertJsonPath('running.pause_url', route('buhtasks.adhoc.pause', $adhoc));
+    }
+
+    /** Вечером в 20:00 по Бишкеку забытый таймер встаёт на паузу, время засчитано до 20:00. */
+    public function test_evening_stop_counts_time_until_20_bishkek(): void
+    {
+        $log = $this->log();
+
+        Carbon::setTestNow('2026-10-05 12:00:00'); // 18:00 по Бишкеку
+        $this->actingAs($this->accountant, 'employee')
+            ->postJson(route('buhtasks.logs.start', $log))->assertOk();
+
+        // Без --apply только показывает.
+        Carbon::setTestNow('2026-10-05 14:05:00'); // 20:05 по Бишкеку
+        $this->artisan('buhtasks:stop-forgotten-timers', ['--tenant' => $this->accountant->tenant_id])->assertSuccessful();
+        $this->assertSame('running', $log->fresh()->status);
+
+        $this->artisan('buhtasks:stop-forgotten-timers', ['--tenant' => $this->accountant->tenant_id, '--apply' => true])->assertSuccessful();
+        $log->refresh();
+        $this->assertSame('paused', $log->status);
+        $this->assertSame(7200, $log->paused_seconds); // 18:00-20:00, а не до 20:05
+
+        // Повторный запуск ничего не меняет.
+        $this->artisan('buhtasks:stop-forgotten-timers', ['--tenant' => $this->accountant->tenant_id, '--apply' => true])->assertSuccessful();
+        $this->assertSame(7200, $log->fresh()->paused_seconds);
+    }
+
+    /** Запустил после 20:00: до следующего вечера таймер честный, команда его не трогает. */
+    public function test_evening_stop_skips_timer_started_after_20(): void
+    {
+        $log = $this->log();
+
+        Carbon::setTestNow('2026-10-05 14:30:00'); // 20:30 по Бишкеку
+        $this->actingAs($this->accountant, 'employee')
+            ->postJson(route('buhtasks.logs.start', $log))->assertOk();
+
+        Carbon::setTestNow('2026-10-05 15:00:00');
+        $this->artisan('buhtasks:stop-forgotten-timers', ['--tenant' => $this->accountant->tenant_id, '--apply' => true])->assertSuccessful();
+        $this->assertSame('running', $log->fresh()->status);
+    }
+
+    /** Пропущенный вечер (сервер лежал): время всё равно только до первых 20:00, а не сутки. */
+    public function test_missed_evening_still_counts_only_until_first_20(): void
+    {
+        $log = $this->log();
+
+        Carbon::setTestNow('2026-10-05 13:00:00'); // 19:00 по Бишкеку
+        $this->actingAs($this->accountant, 'employee')
+            ->postJson(route('buhtasks.logs.start', $log))->assertOk();
+
+        Carbon::setTestNow('2026-10-06 14:00:00'); // следующий вечер
+        $this->artisan('buhtasks:stop-forgotten-timers', ['--tenant' => $this->accountant->tenant_id, '--apply' => true])->assertSuccessful();
+        $this->assertSame(3600, $log->fresh()->paused_seconds);
+    }
 }

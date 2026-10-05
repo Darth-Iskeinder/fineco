@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToTenant;
+use App\Models\Concerns\HasWorkClock;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
@@ -11,6 +12,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
 class BuhAdhocTask extends Model
 {
     use BelongsToTenant;
+    use HasWorkClock;
 
     protected $fillable = [
         'employee_id', 'created_by', 'client_id', 'service_id', 'name', 'description', 'clarification', 'checklist', 'cost',

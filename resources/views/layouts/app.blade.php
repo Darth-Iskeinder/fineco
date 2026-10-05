@@ -334,6 +334,24 @@
                 </div>
                 <div class="flex items-center space-x-4">
                     @auth('employee')
+                        {{-- Идущий таймер БухЗадачника. Виден на любой странице, чтобы о запущенной
+                             задаче нельзя было забыть: забытый таймер набивает часы по задаче. --}}
+                        @if(auth('employee')->user()->hasAccessToModule('buhtasks'))
+                            <div x-data="runningClock()" x-show="task" style="display:none"
+                                 class="flex items-center gap-2 pl-3 pr-1 py-1 rounded-xl bg-indigo-50 border border-indigo-100">
+                                <span class="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
+                                <a href="{{ route('buhtasks.index') }}"
+                                   class="text-sm text-indigo-700 max-w-xs truncate"
+                                   :title="task ? task.name + (task.client_name ? ' · ' + task.client_name : '') : ''"
+                                   x-text="task?.name"></a>
+                                <span class="text-sm font-mono tabular-nums text-indigo-600" x-text="clock"></span>
+                                <button type="button" @click="pause()" :disabled="busy" title="Пауза"
+                                        class="w-7 h-7 flex items-center justify-center rounded-lg text-indigo-500 hover:bg-indigo-100 transition-colors">
+                                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M7 5h3v14H7zM14 5h3v14h-3z"/></svg>
+                                </button>
+                            </div>
+                        @endif
+
                         {{-- Помощь. Кнопка рядом с профилем: справка лежит в отдельном
                              лейауте и обратно в систему не возвращает, поэтому открываем
                              её новой вкладкой, чтобы работа на текущем экране не терялась.
@@ -572,6 +590,67 @@
     </div>
 
     <script>
+        /**
+         * Таймер в шапке. Сервер говорит, что идёт и сколько набежало, дальше секунды
+         * тикают здесь. Перезапрашиваем при возврате во вкладку и когда страница
+         * БухЗадачника сообщает о старте или паузе (событие kubik-clock-changed).
+         */
+        function runningClock() {
+            return {
+                task: null,
+                loadedAt: 0,
+                now: Date.now(),
+                busy: false,
+
+                init() {
+                    this.load();
+                    setInterval(() => { this.now = Date.now(); }, 1000);
+                    document.addEventListener('visibilitychange', () => { if (!document.hidden) this.load(); });
+                    window.addEventListener('kubik-clock-changed', () => this.load());
+                },
+
+                async load() {
+                    try {
+                        const r = await fetch('{{ route('buhtasks.running') }}', { headers: { 'Accept': 'application/json' } });
+                        if (!r.ok) return;
+                        this.task = (await r.json()).running;
+                        this.loadedAt = Date.now();
+                    } catch (e) { /* сеть моргнула: покажем при следующей загрузке */ }
+                },
+
+                get clock() {
+                    if (!this.task) return '';
+                    const s = this.task.elapsed_seconds + Math.max(0, Math.floor((this.now - this.loadedAt) / 1000));
+                    const pad = n => String(n).padStart(2, '0');
+                    return `${Math.floor(s / 3600)}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`;
+                },
+
+                async pause() {
+                    if (!this.task || this.busy) return;
+                    this.busy = true;
+                    try {
+                        const r = await fetch(this.task.pause_url, {
+                            method: 'POST',
+                            headers: {
+                                'Accept': 'application/json',
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+                            },
+                        });
+                        const data = await r.json().catch(() => ({}));
+                        // Страница БухЗадачника, если открыта, покажет паузу на своей строке.
+                        if (data.success) {
+                            window.dispatchEvent(new CustomEvent('kubik-clock-paused', {
+                                detail: { type: this.task.type, log: data.log },
+                            }));
+                        }
+                    } finally {
+                        this.busy = false;
+                        this.load();
+                    }
+                },
+            };
+        }
+
         function taskAlerts() {
             return {
                 items: [],

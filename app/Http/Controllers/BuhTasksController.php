@@ -1214,6 +1214,39 @@ class BuhTasksController extends Controller
         return $this->startClock($log);
     }
 
+    /**
+     * Какая задача у меня сейчас идёт: для таймера в шапке на любой странице.
+     * Обычно одна; если по старым данным их несколько, показываем последнюю запущенную.
+     */
+    public function running()
+    {
+        $employeeId = auth('employee')->id();
+        $running = fn (string $model) => $model::where('employee_id', $employeeId)
+            ->where('status', 'running')
+            ->with('client:id,name')
+            ->get();
+
+        $task = $running(BuhTaskLog::class)->load('estimateItem:id,name')
+            ->concat($running(BuhAdhocTask::class))
+            ->sortByDesc(fn ($t) => $t->resumed_at?->timestamp ?? 0)
+            ->first();
+
+        if (!$task) {
+            return response()->json(['running' => null]);
+        }
+
+        $planned = $task instanceof BuhTaskLog;
+
+        return response()->json(['running' => [
+            'type'            => $planned ? 'planned' : 'adhoc',
+            'id'              => $task->id,
+            'name'            => $planned ? ($task->estimateItem?->name ?? 'Задача') : $task->name,
+            'client_name'     => $task->client?->name,
+            'elapsed_seconds' => $this->calcElapsed($task),
+            'pause_url'       => $planned ? route('buhtasks.logs.pause', $task) : route('buhtasks.adhoc.pause', $task),
+        ]]);
+    }
+
     public function pause(BuhTaskLog $log)
     {
         $this->authorizeLog($log);
@@ -1222,7 +1255,7 @@ class BuhTasksController extends Controller
             return response()->json(['success' => false, 'message' => 'Задача не запущена'], 422);
         }
 
-        $this->bankWorkedTime($log, now());
+        $log->bankWorkedTime(now());
         $log->status = 'paused';
         $log->save();
 
@@ -1267,7 +1300,7 @@ class BuhTasksController extends Controller
 
         $now = now();
 
-        $this->bankWorkedTime($log, $now);
+        $log->bankWorkedTime($now);
 
         $needsReview = $this->needsReview($log); // шаг 7.3, условия — в самом методе
 
@@ -1316,7 +1349,7 @@ class BuhTasksController extends Controller
 
         $now = now();
 
-        $this->bankWorkedTime($log, $now);
+        $log->bankWorkedTime($now);
 
         $log->force_closed        = true;
         $log->force_close_reason  = $validated['reason'];
@@ -1578,7 +1611,7 @@ class BuhTasksController extends Controller
             return response()->json(['success' => false, 'message' => 'Задача не запущена'], 422);
         }
 
-        $this->bankWorkedTime($task, now());
+        $task->bankWorkedTime(now());
         $task->status = 'paused';
         $task->save();
 
@@ -1591,7 +1624,7 @@ class BuhTasksController extends Controller
 
         $now = now();
 
-        $this->bankWorkedTime($task, $now);
+        $task->bankWorkedTime($now);
 
         // Задачу с подпунктами нельзя закрыть, пока все не отмечены — как у плановых.
         // Обхода (принудительного закрытия) у внеплановых нет: их никто не обязан
@@ -1950,7 +1983,7 @@ class BuhTasksController extends Controller
         $paused = DB::transaction(function () use ($task, $exclusive) {
             // Строка сотрудника под замком: два старта разом (двойной клик, две вкладки)
             // идут по очереди, и второй уже видит, что запустил первый.
-            Employee::whereKey($task->employee_id)->lockForUpdate()->first();
+            $task::lockClockOwner($task->employee_id);
             $task->refresh();
 
             $now = now();
@@ -1989,31 +2022,16 @@ class BuhTasksController extends Controller
         $paused = [];
 
         foreach ($running(BuhTaskLog::class) as $log) {
-            $this->bankWorkedTime($log, $now);
-            $log->status = 'paused';
-            $log->save();
+            $log->pauseClockAt($now);
             $paused[] = ['type' => 'planned', 'log' => $this->formatLog($log)];
         }
 
         foreach ($running(BuhAdhocTask::class) as $task) {
-            $this->bankWorkedTime($task, $now);
-            $task->status = 'paused';
-            $task->save();
+            $task->pauseClockAt($now);
             $paused[] = ['type' => 'adhoc', 'log' => $this->formatAdhoc($task)];
         }
 
         return $paused;
-    }
-
-    /**
-     * Досчитывает время, отработанное с последнего запуска, в paused_seconds. Это поле
-     * хранит не паузы, а накопленную работу. Статус не меняет: это дело вызывающего.
-     */
-    private function bankWorkedTime(BuhTaskLog|BuhAdhocTask $task, \DateTimeInterface $now): void
-    {
-        if ($task->status === 'running' && $task->resumed_at) {
-            $task->paused_seconds += max(0, $now->getTimestamp() - $task->resumed_at->timestamp);
-        }
     }
 
     private function authorizeLog(BuhTaskLog $log): void

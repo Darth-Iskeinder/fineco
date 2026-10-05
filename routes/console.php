@@ -18,3 +18,11 @@ Schedule::command('tasks:generate')
     ->dailyAt('06:00')
     ->withoutOverlapping()
     ->onOneServer();
+
+// Вечерняя пауза забытых таймеров БухЗадачника: время засчитывается до 20:00, дальше таймер
+// считается забытым. Выходные так же. Повторный запуск безопасен.
+Schedule::command('buhtasks:stop-forgotten-timers --apply')
+    ->timezone('Asia/Bishkek')
+    ->dailyAt('20:00')
+    ->withoutOverlapping()
+    ->onOneServer();

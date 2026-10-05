@@ -3488,6 +3488,9 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             );
             this.ticker = setInterval(() => { this.now = Math.floor(Date.now() / 1000); }, 1000);
 
+            // Паузу нажали в шапке: показываем её и на строке задачи.
+            window.addEventListener('kubik-clock-paused', (e) => this.applyClockLogs([e.detail]));
+
             // Печать не должна ждать пересчёта: отбор запускаем, когда человек
             // остановился. Задержка маленькая, на глаз она читается как «мгновенно».
             this.$watch('listSearchInput', (value) => {
@@ -3781,6 +3784,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             if (log.documents !== undefined) task.documents = log.documents;
             task.client_resumed_at = log.status === 'running' ? this.now : null;
             this._taskVer++; // статус изменился → кэш чеклиста/списка пересчитается
+            window.dispatchEvent(new Event('kubik-clock-changed')); // таймер в шапке перечитает себя
 
             // Задача только что закрыта → строка пропадает из активного списка (visibleTasks),
             // а её копия добавляется во вкладку «Выполненные» без перезагрузки страницы.
@@ -4079,14 +4083,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         applyPausedClocks(paused) {
             if (!paused || paused.length === 0) return;
 
-            const names = [];
-            for (const p of paused) {
-                const idx = this.tasks.findIndex(t => t.type === p.type
-                    && (p.type === 'adhoc' ? t.adhoc_id === p.log.id : t.log_id === p.log.id));
-                if (idx === -1) continue;
-                this.applyResult(idx, p.log);
-                names.push(this.tasks[idx].name);
-            }
+            const names = this.applyClockLogs(paused);
 
             this.clockNotice = names.length === 1
                 ? `Задача «${names[0]}» поставлена на паузу`
@@ -4095,6 +4092,20 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                     : 'Задача, которая шла до этого, поставлена на паузу';
             clearTimeout(this._clockNoticeTimer);
             this._clockNoticeTimer = setTimeout(() => { this.clockNotice = ''; }, 5000);
+        },
+
+        // Ответы сервера по задачам, которые изменились не от кнопки на их строке
+        // (пауза при старте другой, пауза из шапки). Возвращает названия найденных.
+        applyClockLogs(items) {
+            const names = [];
+            for (const p of items) {
+                const idx = this.tasks.findIndex(t => t.type === p.type
+                    && (p.type === 'adhoc' ? t.adhoc_id === p.log.id : t.log_id === p.log.id));
+                if (idx === -1) continue;
+                this.applyResult(idx, p.log);
+                names.push(this.tasks[idx].name);
+            }
+            return names;
         },
 
         async pauseTask(idx) {

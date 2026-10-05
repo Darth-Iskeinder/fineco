@@ -214,6 +214,7 @@ Route::middleware('auth:employee')->group(function () {
     // Модуль БухЗадачник
     Route::prefix('buhtasks')->name('buhtasks.')->middleware('module:buhtasks')->group(function () {
         Route::get('/', [BuhTasksController::class, 'index'])->name('index');
+        Route::get('/running', [BuhTasksController::class, 'running'])->name('running');
         Route::post('/logs', [BuhTasksController::class, 'getOrCreateLog'])->name('logs.get');
         Route::post('/logs/{log}/start', [BuhTasksController::class, 'start'])->name('logs.start');
         Route::post('/logs/{log}/pause', [BuhTasksController::class, 'pause'])->name('logs.pause');
