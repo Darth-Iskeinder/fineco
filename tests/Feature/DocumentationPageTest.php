@@ -68,7 +68,7 @@ class DocumentationPageTest extends TestCase
     /** Ненаписанный и несуществующий разделы одинаково 404, а не пустая страница. */
     public function test_unknown_and_unwritten_sections_are_not_found(): void
     {
-        $this->get('/documentation/kubik/buhtasks')->assertNotFound();
+        $this->get('/documentation/kubik/audit')->assertNotFound();
         $this->get('/documentation/kubik/nothing-here')->assertNotFound();
     }
 

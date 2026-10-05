@@ -17,9 +17,11 @@ use App\Services\AutoAudit\AutoAuditQuestions;
 use App\Services\EventTriggeredTasks;
 use App\Support\Impersonation;
 use Carbon\CarbonImmutable;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
@@ -1209,20 +1211,7 @@ class BuhTasksController extends Controller
     {
         $this->authorizeLog($log);
 
-        $now = now();
-
-        if ($log->status === 'pending') {
-            $log->status     = 'running';
-            $log->started_at = $now;
-            $log->resumed_at = $now;
-        } elseif (in_array($log->status, ['paused', 'rework'], true)) {
-            $log->status     = 'running';
-            $log->resumed_at = $now;
-        }
-
-        $log->save();
-
-        return response()->json(['success' => true, 'log' => $this->formatLog($log)]);
+        return $this->startClock($log);
     }
 
     public function pause(BuhTaskLog $log)
@@ -1233,12 +1222,8 @@ class BuhTasksController extends Controller
             return response()->json(['success' => false, 'message' => 'Задача не запущена'], 422);
         }
 
-        $now = now();
-        $workedSinceResume = $log->resumed_at
-            ? max(0, $now->timestamp - $log->resumed_at->timestamp)
-            : 0;
-        $log->paused_seconds += $workedSinceResume;
-        $log->status          = 'paused';
+        $this->bankWorkedTime($log, now());
+        $log->status = 'paused';
         $log->save();
 
         return response()->json(['success' => true, 'log' => $this->formatLog($log)]);
@@ -1282,9 +1267,7 @@ class BuhTasksController extends Controller
 
         $now = now();
 
-        if ($log->status === 'running' && $log->resumed_at) {
-            $log->paused_seconds += max(0, $now->timestamp - $log->resumed_at->timestamp);
-        }
+        $this->bankWorkedTime($log, $now);
 
         $needsReview = $this->needsReview($log); // шаг 7.3, условия — в самом методе
 
@@ -1333,9 +1316,7 @@ class BuhTasksController extends Controller
 
         $now = now();
 
-        if ($log->status === 'running' && $log->resumed_at) {
-            $log->paused_seconds += max(0, $now->timestamp - $log->resumed_at->timestamp);
-        }
+        $this->bankWorkedTime($log, $now);
 
         $log->force_closed        = true;
         $log->force_close_reason  = $validated['reason'];
@@ -1586,20 +1567,7 @@ class BuhTasksController extends Controller
     {
         $this->authorizeAdhoc($task);
 
-        $now = now();
-
-        if ($task->status === 'pending') {
-            $task->status     = 'running';
-            $task->started_at = $now;
-            $task->resumed_at = $now;
-        } elseif (in_array($task->status, ['paused', 'rework'], true)) {
-            $task->status     = 'running';
-            $task->resumed_at = $now;
-        }
-
-        $task->save();
-
-        return response()->json(['success' => true, 'log' => $this->formatAdhoc($task)]);
+        return $this->startClock($task);
     }
 
     public function pauseAdhoc(BuhAdhocTask $task)
@@ -1610,12 +1578,8 @@ class BuhTasksController extends Controller
             return response()->json(['success' => false, 'message' => 'Задача не запущена'], 422);
         }
 
-        $now = now();
-        $workedSinceResume = $task->resumed_at
-            ? max(0, $now->timestamp - $task->resumed_at->timestamp)
-            : 0;
-        $task->paused_seconds += $workedSinceResume;
-        $task->status          = 'paused';
+        $this->bankWorkedTime($task, now());
+        $task->status = 'paused';
         $task->save();
 
         return response()->json(['success' => true, 'log' => $this->formatAdhoc($task)]);
@@ -1627,9 +1591,7 @@ class BuhTasksController extends Controller
 
         $now = now();
 
-        if ($task->status === 'running' && $task->resumed_at) {
-            $task->paused_seconds += max(0, $now->timestamp - $task->resumed_at->timestamp);
-        }
+        $this->bankWorkedTime($task, $now);
 
         // Задачу с подпунктами нельзя закрыть, пока все не отмечены — как у плановых.
         // Обхода (принудительного закрытия) у внеплановых нет: их никто не обязан
@@ -1970,6 +1932,89 @@ class BuhTasksController extends Controller
     // =============================================
     // ПРИВАТНЫЕ МЕТОДЫ
     // =============================================
+
+    /**
+     * Запуск таймера плановой или внеплановой задачи.
+     *
+     * У сотрудника идёт только один таймер. Запуск новой задачи ставит на паузу всё, что
+     * у него уже идёт, плановое и внеплановое вместе, с честно досчитанным временем.
+     * Ответ несёт и эти задачи (paused), чтобы экран показал паузу без перезагрузки.
+     *
+     * Подпункт исключение: галочка шлёт старт и сразу завершение, задача «идёт» долю
+     * секунды. Его старт не трогает задачу, над которой человек сейчас работает.
+     */
+    private function startClock(BuhTaskLog|BuhAdhocTask $task): JsonResponse
+    {
+        $exclusive = !($task instanceof BuhTaskLog && $task->estimateItem?->parent_id);
+
+        $paused = DB::transaction(function () use ($task, $exclusive) {
+            // Строка сотрудника под замком: два старта разом (двойной клик, две вкладки)
+            // идут по очереди, и второй уже видит, что запустил первый.
+            Employee::whereKey($task->employee_id)->lockForUpdate()->first();
+            $task->refresh();
+
+            $now = now();
+
+            if ($task->status === 'pending') {
+                $task->status     = 'running';
+                $task->started_at = $now;
+                $task->resumed_at = $now;
+            } elseif (in_array($task->status, ['paused', 'rework'], true)) {
+                $task->status     = 'running';
+                $task->resumed_at = $now;
+            }
+
+            $task->save();
+
+            return $exclusive && $task->status === 'running'
+                ? $this->pauseOtherClocks($task, $now)
+                : [];
+        });
+
+        return response()->json([
+            'success' => true,
+            'log'     => $task instanceof BuhTaskLog ? $this->formatLog($task) : $this->formatAdhoc($task),
+            'paused'  => $paused,
+        ]);
+    }
+
+    /** Ставит на паузу все прочие идущие задачи исполнителя $current. Вызывать под замком сотрудника. */
+    private function pauseOtherClocks(BuhTaskLog|BuhAdhocTask $current, \DateTimeInterface $now): array
+    {
+        $running = fn (string $model) => $model::where('employee_id', $current->employee_id)
+            ->where('status', 'running')
+            ->when($current instanceof $model, fn ($q) => $q->whereKeyNot($current->getKey()))
+            ->get();
+
+        $paused = [];
+
+        foreach ($running(BuhTaskLog::class) as $log) {
+            $this->bankWorkedTime($log, $now);
+            $log->status = 'paused';
+            $log->save();
+            $paused[] = ['type' => 'planned', 'log' => $this->formatLog($log)];
+        }
+
+        foreach ($running(BuhAdhocTask::class) as $task) {
+            $this->bankWorkedTime($task, $now);
+            $task->status = 'paused';
+            $task->save();
+            $paused[] = ['type' => 'adhoc', 'log' => $this->formatAdhoc($task)];
+        }
+
+        return $paused;
+    }
+
+    /**
+     * Досчитывает время, отработанное с последнего запуска, в paused_seconds. Это поле
+     * хранит не паузы, а накопленную работу. Статус не меняет: это дело вызывающего.
+     */
+    private function bankWorkedTime(BuhTaskLog|BuhAdhocTask $task, \DateTimeInterface $now): void
+    {
+        if ($task->status === 'running' && $task->resumed_at) {
+            $task->paused_seconds += max(0, $now->getTimestamp() - $task->resumed_at->timestamp);
+        }
+    }
 
     private function authorizeLog(BuhTaskLog $log): void
     {

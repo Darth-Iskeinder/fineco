@@ -77,6 +77,13 @@
 <script type="application/json" id="audit-questions-data">@json($auditQuestions ?? [])</script>
 <div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($completed) }}, {{ json_encode($employees) }}, {{ $employee->id }}, {{ json_encode($catalog) }}, {{ json_encode($teamTasks) }}, {{ json_encode($teamMembers) }}, {{ json_encode($assignedTasks) }}, {{ (int) $assignedAlertCount }}, {{ (int) $assignedDoneDays }})" x-cloak>
 
+    {{-- Подсказка «поставлена на паузу»: у сотрудника идёт только один таймер, запуск
+         новой задачи останавливает прежнюю. Без подсказки таймер просто «пропадал» бы. --}}
+    <div x-show="clockNotice" x-transition.opacity style="display:none"
+         class="fixed bottom-4 inset-x-0 z-[70] flex justify-center px-4 pointer-events-none">
+        <div class="bg-slate-800 text-white text-sm rounded-xl shadow-lg px-4 py-3 max-w-sm" x-text="clockNotice"></div>
+    </div>
+
     {{-- Шапка --}}
     <div class="flex items-center justify-between mb-2">
         <div class="flex items-center gap-2 text-sm text-slate-500">
@@ -2413,6 +2420,8 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
 
         showCreateModal: false,
         startConfirm: { show: false, idx: null },
+        clockNotice: '',      // текст подсказки «задача поставлена на паузу»
+        _clockNoticeTimer: null,
         deleteConfirm: { show: false, idx: null }, // модалка удаления произвольной задачи
         reviewReject: { show: false, idx: null, comment: '' }, // модалка «вернуть на доработку» (проверка главбухом)
         catalog: catalog || [],
@@ -4054,15 +4063,38 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             }
 
             const data = await this.post(this.actionUrl(this.tasks[idx], 'start'));
-            if (data.success) this.applyResult(idx, data.log);
+            if (data.success) { this.applyResult(idx, data.log); this.applyPausedClocks(data.paused); }
             else this.patch(idx, { loading: false });
         },
 
         async resumeTask(idx) {
             this.patch(idx, { loading: true });
             const data = await this.post(this.actionUrl(this.tasks[idx], 'start'));
-            if (data.success) this.applyResult(idx, data.log);
+            if (data.success) { this.applyResult(idx, data.log); this.applyPausedClocks(data.paused); }
             else this.patch(idx, { loading: false });
+        },
+
+        // Сервер ставит на паузу всё, что шло у сотрудника до этого старта. Показываем паузу
+        // на своих строках; задачи не с этого экрана (другой месяц) просто пропускаем.
+        applyPausedClocks(paused) {
+            if (!paused || paused.length === 0) return;
+
+            const names = [];
+            for (const p of paused) {
+                const idx = this.tasks.findIndex(t => t.type === p.type
+                    && (p.type === 'adhoc' ? t.adhoc_id === p.log.id : t.log_id === p.log.id));
+                if (idx === -1) continue;
+                this.applyResult(idx, p.log);
+                names.push(this.tasks[idx].name);
+            }
+
+            this.clockNotice = names.length === 1
+                ? `Задача «${names[0]}» поставлена на паузу`
+                : names.length > 1
+                    ? `На паузу поставлены: ${names.map(n => `«${n}»`).join(', ')}`
+                    : 'Задача, которая шла до этого, поставлена на паузу';
+            clearTimeout(this._clockNoticeTimer);
+            this._clockNoticeTimer = setTimeout(() => { this.clockNotice = ''; }, 5000);
         },
 
         async pauseTask(idx) {
