@@ -1596,7 +1596,18 @@
                                     <a :href="docTabUrl(src)" @click="openDocFromLink($event, src)" target="_blank"
                                        class="text-indigo-600 hover:underline" x-text="src.name"></a>
                                 </template>
-                                <span x-show="!src.url" class="text-slate-500">файл не приложен</span>
+                                {{-- Файл после проверки заменили: старого нет, даём то, что лежит в задаче сейчас. --}}
+                                <template x-if="src.replaced">
+                                    <span>
+                                        <span class="text-slate-400 line-through" x-text="src.name"></span>
+                                        <span class="text-slate-500" x-text="src.current.length ? 'заменён:' : '(удалён)'"></span>
+                                        <template x-for="(doc, j) in src.current" :key="j">
+                                            <a :href="docTabUrl(doc)" @click="openDocFromLink($event, doc)" target="_blank"
+                                               class="text-indigo-600 hover:underline" x-text="doc.name"></a>
+                                        </template>
+                                    </span>
+                                </template>
+                                <span x-show="!src.url && !src.replaced" class="text-slate-500">файл не приложен</span>
                                 <span x-show="src.value !== null" class="text-slate-500" x-text="auditMoney(src.value)"></span>
                             </div>
                         </template>

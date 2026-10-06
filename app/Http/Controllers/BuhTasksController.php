@@ -14,6 +14,7 @@ use App\Models\EstimateItem;
 use App\Models\Service;
 use App\Models\TaskReminder;
 use App\Services\AutoAudit\AutoAuditQuestions;
+use App\Services\AutoAudit\SourceDocumentLinks;
 use App\Services\EventTriggeredTasks;
 use App\Support\Impersonation;
 use Carbon\CarbonImmutable;
@@ -947,7 +948,9 @@ class BuhTasksController extends Controller
         try {
             if (AutoAuditQuestions::enabled()) {
                 $questions      = app(AutoAuditQuestions::class);
-                $auditQuestions = $questions->forEmployee($employee)->map(fn (array $q) => $questions->toFront($q))->values()->all();
+                $mine           = $questions->forEmployee($employee);
+                $links          = SourceDocumentLinks::for($mine->pluck('result'));
+                $auditQuestions = $mine->map(fn (array $q) => $questions->toFront($q, $links))->values()->all();
             }
         } catch (\Throwable $e) {
             report($e);

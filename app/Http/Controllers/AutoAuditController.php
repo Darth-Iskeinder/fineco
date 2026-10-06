@@ -9,6 +9,7 @@ use App\Models\AutoAuditResult;
 use App\Models\Tenant;
 use App\Services\AutoAudit\AutoAuditQuestions;
 use App\Services\AutoAudit\AutoAuditRunner;
+use App\Services\AutoAudit\SourceDocumentLinks;
 use App\Support\Impersonation;
 use App\Support\TenantContext;
 use Carbon\CarbonImmutable;
@@ -109,6 +110,7 @@ class AutoAuditController extends Controller
 
         return view('auto-audit.index', [
             'results'       => $results,
+            'links'         => SourceDocumentLinks::for($results),
             'periods'       => $periods,
             'period'        => $period,
             'rule'          => $rule,

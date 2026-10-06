@@ -225,7 +225,24 @@
                                         </div>
                                         @continue
                                     @endif
-                                    @php $documentUrl = route('documents.task', $source['document_id']); @endphp
+                                    @if ($links->replaced($source))
+                                        {{-- Файл после проверки заменили: старого нет, ссылка на него дала бы 404.
+                                             Показываем, что лежит в задаче сейчас. --}}
+                                        <div>
+                                            <span class="text-slate-400" title="Задача за {{ $source['task_month'] }}">{{ $source['label'] ?? ($source['side'] === 'osv' ? 'ОСВ' : 'Отчёт') }}@if (!empty($source['employee'])), <span class="font-medium text-slate-500">{{ $source['employee'] }}</span>@endif:</span>
+                                            <span class="text-slate-400 line-through">{{ $source['name'] }}</span>
+                                            @forelse ($links->current($source) as $doc)
+                                                @if ($loop->first)<span class="text-slate-500">заменён:</span>@endif
+                                                <a href="{{ $doc['url'] }}" target="_blank"
+                                                   @click="openDocFromLink($event, @js($doc))"
+                                                   class="text-indigo-600 hover:underline">{{ $doc['name'] }}</a>
+                                            @empty
+                                                <span class="text-slate-500">(удалён)</span>
+                                            @endforelse
+                                        </div>
+                                        @continue
+                                    @endif
+                                    @php $documentUrl = $links->url($source); @endphp
                                     <div>
                                         {{-- Месяц задачи нужен редко: при наведении, чтобы не шуметь в каждой строке. --}}
                                         <span class="text-slate-400" title="Задача за {{ $source['task_month'] }}">{{ $source['label'] ?? ($source['side'] === 'osv' ? 'ОСВ' : 'Отчёт') }}@if (!empty($source['employee'])), <span class="font-medium text-slate-500">{{ $source['employee'] }}</span>@endif:</span>

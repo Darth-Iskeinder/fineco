@@ -156,14 +156,18 @@ class AutoAuditQuestions
      *
      * fix: задачи, куда сотрудник может приложить файл сам. action replace, когда в задаче
      * есть файлы строки (заменить их), attach, когда задача закрыта без файла.
+     *
+     * $links передаёт тот, кто рисует сразу много вопросов: так документы подтягиваются
+     * одним проходом на все, а не на каждый вопрос.
      */
-    public function toFront(array $question): array
+    public function toFront(array $question, ?SourceDocumentLinks $links = null): array
     {
         /** @var AutoAuditFinding $finding */
         /** @var AutoAuditResult $result */
         $finding = $question['finding'];
         $result  = $question['result'];
         $sources = collect($result->sources ?? []);
+        $links ??= SourceDocumentLinks::for([$result]);
 
         $rejection = self::rejection($finding);
 
@@ -204,7 +208,9 @@ class AutoAuditQuestions
                 'employee' => $s['employee'] ?? null,
                 'month'    => $s['task_month'] ?? null,
                 'name'     => $s['name'] ?? null,
-                'url'      => empty($s['document_id']) ? null : route('documents.task', $s['document_id']),
+                'url'      => $links->url($s),
+                'replaced' => $links->replaced($s),
+                'current'  => $links->current($s),
                 'value'    => $s['value'] ?? null,
                 'reason'   => $s['reason'] ?? null,
             ])->values()->all(),
@@ -276,8 +282,10 @@ class AutoAuditQuestions
 
         [$rejected, $rest] = $fresh->partition(fn (array $q) => self::rejection($q['finding']) !== null);
 
-        $items = $rejected->map(function (array $q) {
-            $front     = $this->toFront($q);
+        $links = SourceDocumentLinks::for($rejected->pluck('result'));
+
+        $items = $rejected->map(function (array $q) use ($links) {
+            $front     = $this->toFront($q, $links);
             $rejection = self::rejection($q['finding']);
 
             return [

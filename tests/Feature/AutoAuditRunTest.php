@@ -2964,6 +2964,50 @@ class AutoAuditRunTest extends TestCase
         $this->asVendor()->get(route('auto-audit.index'))->assertSee('Файл заменён, ждёт следующей проверки');
     }
 
+    /**
+     * После замены строка до следующего прогона помнит удалённый файл. Ссылка на него
+     * давала 404, теперь ведёт на то, что лежит в задаче сейчас (случай КЛВ, 06.10.2026).
+     */
+    public function test_replaced_file_links_to_the_current_one(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $doer = $this->accountant();
+        [, $mismatch] = $this->mismatchRow();
+        $this->ownedBy('осв.xls', $doer);
+        $this->ownedBy('отчёт.pdf', $doer);
+
+        $log = $this->logOf('осв.xls');
+        $old = $log->documents()->where('name', 'осв.xls')->sole();
+
+        $this->actingAs($doer, 'employee')
+            ->post(route('buhtasks.audit-questions.fix', AutoAuditFinding::sole()), [
+                'result_id' => $mismatch->id,
+                'log_id'    => $log->id,
+                'file'      => UploadedFile::fake()->create('осв-исправленная.xls', 5),
+            ], ['Accept' => 'application/json'])
+            ->assertOk();
+
+        $new = $log->documents()->where('name', 'осв-исправленная.xls')->sole();
+
+        $this->asVendor()->get(route('auto-audit.index'))
+            ->assertOk()
+            ->assertDontSee('href="' . route('documents.task', $old->id) . '"', false)
+            ->assertSee('href="' . route('documents.task', $new) . '"', false)
+            ->assertSee('заменён:');
+
+        $source = collect(app(AutoAuditQuestions::class)->toFront(app(AutoAuditQuestions::class)->open()->sole())['sources'])
+            ->firstWhere('name', 'осв.xls');
+        $this->assertNull($source['url']);
+        $this->assertTrue($source['replaced']);
+        $this->assertSame([['name' => 'осв-исправленная.xls', 'url' => route('documents.task', $new)]], $source['current']);
+
+        // Файл, который не меняли, открывается как раньше.
+        $report = collect(app(AutoAuditQuestions::class)->toFront(app(AutoAuditQuestions::class)->open()->sole())['sources'])
+            ->firstWhere('name', 'отчёт.pdf');
+        $this->assertFalse($report['replaced']);
+        $this->assertNotNull($report['url']);
+    }
+
     /** Заменил, а прогон показал то же: вопрос возвращается с пометкой. Помогло: закрывается. */
     public function test_fix_that_did_not_help_brings_the_question_back(): void
     {
