@@ -203,6 +203,26 @@ class Employee extends Authenticatable
         return $this->status === self::STATUS_ACTIVE;
     }
 
+    /**
+     * Почему сотруднику нельзя войти, или null, если можно.
+     *
+     * Уволенный не входит сразу, как его отметили уволенным, даже если учётка
+     * осталась открытой: увольнение оформляют именно этой отметкой, а учётку
+     * отдельно никто не закрывает. Вернули на работу, и доступ вернулся сам.
+     */
+    public function signInRefusal(): ?string
+    {
+        if ($this->isFired()) {
+            return 'Доступ закрыт. Обратитесь к руководителю.';
+        }
+
+        if (!$this->isActive()) {
+            return 'Ваш аккаунт неактивен. Обратитесь к администратору.';
+        }
+
+        return null;
+    }
+
     public function isPending(): bool
     {
         return $this->status === self::STATUS_PENDING;

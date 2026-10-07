@@ -4,6 +4,7 @@ use App\Http\Middleware\AdminMiddleware;
 use App\Http\Middleware\AuditAccessMiddleware;
 use App\Http\Middleware\CheckModuleAccess;
 use App\Http\Middleware\EndIdleImpersonation;
+use App\Http\Middleware\LogOutBlockedEmployee;
 use App\Http\Middleware\ManagerMiddleware;
 use App\Http\Middleware\SetTenantContext;
 use App\Support\ErrorReporter;
@@ -40,9 +41,12 @@ return Application::configure(basePath: dirname(__DIR__))
         // EndIdleImpersonation стоит перед SetTenantContext: если вендора пора
         // выставить из чужой фирмы, сделать это надо до того, как запрос начнёт
         // работать от её имени.
+        // LogOutBlockedEmployee сразу за ними: уволенного выводит раньше, чем
+        // запрос что-нибудь сделает от его имени.
         $middleware->web(append: [
             EndIdleImpersonation::class,
             SetTenantContext::class,
+            LogOutBlockedEmployee::class,
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
         ]);
 

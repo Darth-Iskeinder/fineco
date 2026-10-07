@@ -37,12 +37,12 @@ class AuthController extends Controller
         if (Auth::guard('employee')->attempt($credentials, $remember)) {
             $employee = Auth::guard('employee')->user();
 
-            if (!$employee->isActive()) {
+            if ($refusal = $employee->signInRefusal()) {
                 Auth::guard('employee')->logout();
 
                 return back()
                     ->withInput($request->only('email', 'remember'))
-                    ->withErrors(['email' => 'Ваш аккаунт неактивен. Обратитесь к администратору.']);
+                    ->withErrors(['email' => $refusal]);
             }
 
             $request->session()->regenerate();
