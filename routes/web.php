@@ -155,6 +155,9 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/', [EmployeeController::class, 'store'])->name('store');
         Route::get('/{employee}', [EmployeeController::class, 'show'])->name('show');
         Route::patch('/{employee}', [EmployeeController::class, 'updateSection'])->name('update-section');
+        // Увольнение: что на сотруднике сейчас и передача работы уже уволенного.
+        Route::get('/{employee}/work', [EmployeeController::class, 'workPreview'])->name('work.preview');
+        Route::post('/{employee}/work', [EmployeeController::class, 'transferWork'])->name('work.transfer');
         Route::delete('/{employee}', [EmployeeController::class, 'destroy'])->name('destroy');
     });
 

@@ -156,8 +156,11 @@ class ClientResponsibleTransfer
      * которое у нового исполнителя уже есть, не переносим, а убираем: иначе перенос
      * упал бы на дубликате. Такое бывает, когда новый ответственный уже вёл часть БП
      * этого клиента.
+     *
+     * Публичный: им же пользуется передача работы уволенного (EmployeeWorkTransfer)
+     * для позиций, которые он вёл у чужих клиентов.
      */
-    private function moveReminders(Client $client, ?int $oldId, int $newId): int
+    public function moveReminders(Client $client, ?int $oldId, int $newId): int
     {
         if ($oldId === null) {
             return 0;

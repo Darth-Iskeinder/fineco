@@ -9,10 +9,13 @@ use App\Models\Employee;
 use App\Models\EstimateItem;
 use App\Models\Module;
 use App\Models\Role;
+use App\Services\EmployeeWorkTransfer;
 use App\Support\KgPhone;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class EmployeeController extends Controller
 {
@@ -61,6 +64,8 @@ class EmployeeController extends Controller
         return view('employees.show', [
             'employee' => $employee,
             'clients' => $this->clientsOfEmployee($employee),
+            // Кому можно передать работу при увольнении: работающие, кроме него самого.
+            'recipients' => $this->recipients($employee),
             // «Руководитель» в выборе роли не предлагается — её выдаёт только
             // регистрация фирмы. Но если сотрудник уже руководитель, роль обязана
             // быть в списке: иначе селект встанет на чужое значение и первое же
@@ -237,9 +242,29 @@ class EmployeeController extends Controller
                 $validated = $request->validate([
                     'birth_date' => ['nullable', 'date'],
                     'hired_at' => ['nullable', 'date'],
-                    'fired_at' => ['nullable', 'date'],
+                    // Без даты не видно, с какого дня человек не работает, и его
+                    // прошлые закрытые задачи нельзя отличить от чужих.
+                    'fired_at' => ['nullable', 'date', 'required_if:employment_status,' . Employee::EMPLOYMENT_FIRED],
                     'employment_status' => ['required', 'in:employed,fired'],
+                    'recipient_id' => ['nullable', 'integer'],
+                ], [
+                    'fired_at.required_if' => 'Укажите дату увольнения',
                 ]);
+                $recipientId = $validated['recipient_id'] ?? null;
+                unset($validated['recipient_id']);
+
+                // Увольнение вместе с передачей работы, одной транзакцией: либо уволен
+                // и всё передано, либо ничего. Иначе работа оставалась на уволенном.
+                if ($validated['employment_status'] === Employee::EMPLOYMENT_FIRED && !$employee->isFired()) {
+                    $recipient = $this->recipientFor($employee, $recipientId);
+
+                    DB::transaction(function () use ($employee, $validated, $recipient) {
+                        $employee->update($validated);
+                        (new EmployeeWorkTransfer())->apply($employee, $recipient);
+                    });
+                    break;
+                }
+
                 $employee->update($validated);
                 break;
 
@@ -268,6 +293,78 @@ class EmployeeController extends Controller
         ]);
     }
 
+    /**
+     * Что сейчас на сотруднике: для окна «Кому передать работу» перед увольнением.
+     * Только чтение.
+     */
+    public function workPreview(Employee $employee)
+    {
+        return response()->json((new EmployeeWorkTransfer())->preview($employee));
+    }
+
+    /**
+     * Передать работу уже уволенного. Для тех, кого уволили до появления окна
+     * передачи, и на ком что-то осталось.
+     */
+    public function transferWork(Request $request, Employee $employee)
+    {
+        abort_unless($employee->isFired(), 422, 'Передать работу можно только у уволенного сотрудника');
+
+        $recipient = $this->recipientFor($employee, $request->integer('recipient_id') ?: null);
+
+        $result = DB::transaction(fn () => (new EmployeeWorkTransfer())->apply($employee, $recipient));
+
+        $employee->load(['role', 'modules']);
+
+        return response()->json([
+            'success'  => true,
+            'result'   => $result,
+            'employee' => $this->formatEmployeeForJson($employee),
+        ]);
+    }
+
+    /**
+     * Кому передают работу. Нужен, только если на сотруднике есть живая работа;
+     * получателем может быть лишь тот, кому вообще можно поручать (работает, учётка
+     * открыта), и не он сам. Проверка через модель, то есть в пределах своей фирмы.
+     */
+    private function recipientFor(Employee $employee, ?int $recipientId): ?Employee
+    {
+        $needed = (new EmployeeWorkTransfer())->preview($employee)['needs_recipient'];
+
+        if ($recipientId === null) {
+            if ($needed) {
+                throw ValidationException::withMessages([
+                    'recipient_id' => 'Выберите, кому передать работу сотрудника',
+                ]);
+            }
+
+            return null;
+        }
+
+        $recipient = Employee::assignable()->whereKeyNot($employee->id)->find($recipientId);
+
+        if (!$recipient) {
+            throw ValidationException::withMessages([
+                'recipient_id' => 'Этому сотруднику нельзя передать работу: он уволен или его учётка закрыта',
+            ]);
+        }
+
+        return $recipient;
+    }
+
+    /** @return \Illuminate\Support\Collection<int, array{id:int, full_name:string, role:?string}> */
+    private function recipients(Employee $employee)
+    {
+        return Employee::assignable()
+            ->whereKeyNot($employee->id)
+            ->with('role:id,display_name')
+            ->orderBy('full_name')
+            ->get(['id', 'full_name', 'role_id'])
+            ->map(fn (Employee $e) => ['id' => $e->id, 'full_name' => $e->full_name, 'role' => $e->role?->display_name])
+            ->values();
+    }
+
     private function formatEmployeeForJson(Employee $employee): array
     {
         return [
@@ -285,11 +382,11 @@ class EmployeeController extends Controller
             'role_name' => $employee->role?->display_name,
             'module_ids' => $employee->modules->pluck('id')->toArray(),
             'module_names' => $employee->modules->pluck('display_name')->toArray(),
-            'clients' => $employee->clients->map(fn($c) => [
-                'id' => $c->id,
-                'name' => $c->name,
-                'inn' => $c->inn,
-            ])->values()->toArray(),
+            // Тот же список, что при открытии страницы: иначе после сохранения он
+            // сжимался до одной команды клиента, а после передачи работы не менялся.
+            'clients' => $this->clientsOfEmployee($employee)->toArray(),
+            // Что осталось на уволенном: по этому карточка показывает «Передать работу».
+            'work' => $employee->isFired() ? (new EmployeeWorkTransfer())->preview($employee) : null,
         ];
     }
 

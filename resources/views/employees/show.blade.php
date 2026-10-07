@@ -41,6 +41,21 @@
 
     <div class="space-y-6">
 
+        {{-- Уволенный, на котором что-то осталось: его уволили до появления окна передачи
+             или передать было некому. Работа на нём никем не делается. --}}
+        <template x-if="employee.employment_status === 'fired' && employee.work && (employee.work.needs_recipient || employee.work.stopped.length)">
+            <div class="rounded-2xl border border-amber-200 bg-amber-50 px-6 py-4 flex flex-col sm:flex-row sm:items-center gap-3">
+                <div class="flex-1 text-sm text-amber-900">
+                    <p class="font-semibold">На уволенном сотруднике осталась работа</p>
+                    <p class="mt-0.5" x-text="workSummary(employee.work)"></p>
+                </div>
+                <button type="button" @click="openTransfer('transfer', employee.work)"
+                        class="inline-flex items-center justify-center px-4 py-2 rounded-xl text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 transition-colors">
+                    Передать работу
+                </button>
+            </div>
+        </template>
+
         <!-- Основная информация -->
         <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
             <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
@@ -460,6 +475,79 @@
         </div>
     </div>
 
+    <!-- Modal: Кому передать работу -->
+    <div x-show="transfer.open" class="fixed inset-0 z-50 overflow-y-auto" style="display: none;">
+        <div class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm" @click="closeTransfer()"></div>
+        <div class="flex min-h-full items-center justify-center p-4">
+            <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+                <div class="px-6 pt-6 pb-4">
+                    <h3 class="text-lg font-semibold text-slate-800"
+                        x-text="transfer.mode === 'fire' ? 'Уволить и передать работу' : 'Передать работу'"></h3>
+                    <p class="mt-1 text-sm text-slate-500">
+                        <span x-text="employee.full_name"></span>: вся работа перейдёт к одному сотруднику.
+                    </p>
+                </div>
+                <template x-if="transfer.preview">
+                    <div class="px-6 pb-4 space-y-3 text-sm">
+                        <template x-if="transfer.preview.clients.length">
+                            <div>
+                                <p class="font-medium text-slate-800" x-text="'Клиенты, где он ответственный: ' + transfer.preview.clients.length"></p>
+                                <p class="text-slate-500" x-text="transfer.preview.clients.map(c => c.name).join(', ')"></p>
+                            </div>
+                        </template>
+                        <template x-if="transfer.preview.items">
+                            <div>
+                                <p class="font-medium text-slate-800" x-text="'Его позиции в сметах других клиентов: ' + transfer.preview.items"></p>
+                                <p class="text-slate-500" x-text="transfer.preview.item_clients.join(', ')"></p>
+                            </div>
+                        </template>
+                        <template x-if="transfer.preview.adhoc">
+                            <p class="font-medium text-slate-800" x-text="'Незакрытые внеплановые задачи: ' + transfer.preview.adhoc"></p>
+                        </template>
+                        <template x-if="transfer.preview.logs">
+                            <div>
+                                <p class="font-medium text-slate-800" x-text="'Начатые задачи: ' + transfer.preview.logs"></p>
+                                <p class="text-slate-500">Станут «Передана», потраченное время останется за ним.</p>
+                            </div>
+                        </template>
+                        <template x-if="transfer.preview.stopped.length">
+                            <div class="rounded-xl bg-slate-50 border border-slate-100 px-3 py-2">
+                                <p class="font-medium text-slate-800" x-text="'Завершённые и приостановленные клиенты: ' + transfer.preview.stopped.length"></p>
+                                <p class="text-slate-500" x-text="transfer.preview.stopped.map(c => c.name).join(', ')"></p>
+                                <p class="mt-1 text-slate-500">Ответственный у них снимется. Нового выберете, когда клиента вернут в работу.</p>
+                            </div>
+                        </template>
+                        <template x-if="transfer.preview.needs_recipient">
+                            <div class="pt-1">
+                                <label for="transfer_recipient" class="block font-medium text-slate-700 mb-1">Кому передать</label>
+                                <select id="transfer_recipient" x-model="transfer.recipientId"
+                                        class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                    <option value="">Выберите сотрудника</option>
+                                    <template x-for="r in recipients" :key="r.id">
+                                        <option :value="String(r.id)" x-text="r.full_name + (r.role ? ' · ' + r.role : '')"></option>
+                                    </template>
+                                </select>
+                            </div>
+                        </template>
+                        <template x-if="transfer.error">
+                            <p class="px-3 py-2 rounded-lg bg-red-50 text-red-700" x-text="transfer.error"></p>
+                        </template>
+                    </div>
+                </template>
+                <div class="px-6 py-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-3">
+                    <button type="button" @click="closeTransfer()"
+                            class="px-4 py-2 border border-slate-200 rounded-xl text-sm font-medium text-slate-600 bg-white hover:bg-slate-50 transition-colors">
+                        Отмена
+                    </button>
+                    <button type="button" @click="confirmTransfer()"
+                            :disabled="transfer.saving || (transfer.preview?.needs_recipient && !transfer.recipientId)"
+                            class="px-4 py-2 rounded-xl text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                            x-text="transfer.mode === 'fire' ? 'Уволить и передать' : 'Передать'"></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
 </div>
 
 <script>
@@ -479,6 +567,10 @@ function employeeShow() {
             access: { role_id: '', module_ids: [] },
         },
         showDeleteModal: false,
+        // Кому можно передать работу: работающие, кроме самого сотрудника.
+        recipients: @js($recipients),
+        // Окно передачи. mode: fire (увольнение из раздела) или transfer (у уже уволенного).
+        transfer: { open: false, mode: 'fire', preview: null, recipientId: '', saving: false, error: '' },
 
         init() {
             this.employee = @js([
@@ -497,6 +589,7 @@ function employeeShow() {
                 'module_ids' => $employee->modules->pluck('id')->toArray(),
                 'module_names' => $employee->modules->pluck('display_name')->toArray(),
                 'clients' => $clients->toArray(),
+                'work' => $employee->isFired() ? (new \App\Services\EmployeeWorkTransfer())->preview($employee) : null,
             ]);
             this.resetForm();
         },
@@ -532,11 +625,27 @@ function employeeShow() {
             this.resetForm();
         },
 
-        async saveSection(section) {
+        async saveSection(section, extra = {}) {
+            // Увольнение: сначала показываем, что на человеке, и спрашиваем, кому отдать.
+            // Если на нём ничего нет, окно не нужно, сохраняем сразу.
+            if (section === 'personal' && !('recipient_id' in extra)
+                && this.form.personal.employment_status === 'fired' && this.employee.employment_status !== 'fired') {
+                if (!this.form.personal.fired_at) {
+                    this.errors.personal = ['Укажите дату увольнения'];
+                    return;
+                }
+                const preview = await this.loadWork();
+                if (preview === null) return;
+                if (preview.needs_recipient || preview.stopped.length) {
+                    this.openTransfer('fire', preview);
+                    return;
+                }
+            }
+
             this.saving[section] = true;
             this.errors[section] = [];
             try {
-                const data = { section };
+                const data = { section, ...extra };
                 if (section === 'info') Object.assign(data, this.form.info);
                 if (section === 'personal') Object.assign(data, this.form.personal);
                 if (section === 'access') {
@@ -569,6 +678,79 @@ function employeeShow() {
                 this.errors[section] = ['Не удалось сохранить: нет связи с сервером'];
             }
             this.saving[section] = false;
+        },
+
+        async loadWork() {
+            try {
+                const resp = await fetch('/employees/' + this.employee.id + '/work', { headers: { 'Accept': 'application/json' } });
+                if (!resp.ok) throw new Error(resp.status);
+                return await resp.json();
+            } catch (e) {
+                console.error(e);
+                this.errors.personal = ['Не удалось проверить, что на сотруднике: нет связи с сервером'];
+                return null;
+            }
+        },
+
+        openTransfer(mode, preview) {
+            this.transfer = { open: true, mode, preview, recipientId: '', saving: false, error: '' };
+        },
+
+        closeTransfer() {
+            if (!this.transfer.saving) this.transfer.open = false;
+        },
+
+        async confirmTransfer() {
+            this.transfer.saving = true;
+            this.transfer.error = '';
+            const recipientId = this.transfer.recipientId ? Number(this.transfer.recipientId) : null;
+
+            if (this.transfer.mode === 'fire') {
+                await this.saveSection('personal', { recipient_id: recipientId });
+                this.transfer.saving = false;
+                if (this.editing.personal) {
+                    // Не сохранилось: причину показываем в окне, а не под ним.
+                    this.transfer.error = this.errors.personal.join(' ');
+                } else {
+                    this.transfer.open = false;
+                }
+                return;
+            }
+
+            try {
+                const resp = await fetch('/employees/' + this.employee.id + '/work', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]').content,
+                        'Accept': 'application/json',
+                    },
+                    body: JSON.stringify({ recipient_id: recipientId }),
+                });
+                const result = await resp.json();
+                if (result.success) {
+                    this.employee = result.employee;
+                    this.transfer.open = false;
+                } else {
+                    this.transfer.error = Object.values(result.errors ?? {}).flat().join(' ') || result.message || 'Не удалось передать';
+                }
+            } catch (e) {
+                console.error(e);
+                this.transfer.error = 'Не удалось передать: нет связи с сервером';
+            }
+            this.transfer.saving = false;
+        },
+
+        /** Одна строка для плашки: что осталось на уволенном. */
+        workSummary(work) {
+            const parts = [];
+            if (work.clients.length) parts.push('клиентов, где он ответственный: ' + work.clients.length);
+            if (work.items) parts.push('позиций у других клиентов: ' + work.items);
+            if (work.adhoc) parts.push('внеплановых задач: ' + work.adhoc);
+            if (work.logs) parts.push('начатых задач: ' + work.logs);
+            if (work.stopped.length) parts.push('завершённых клиентов: ' + work.stopped.length);
+            const text = parts.join(', ');
+            return text.charAt(0).toUpperCase() + text.slice(1) + '.';
         },
 
         moduleAdd(id) {

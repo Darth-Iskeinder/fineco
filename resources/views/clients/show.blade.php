@@ -237,6 +237,21 @@
                                     </button>
                                 </div>
                             </div>
+                            {{-- Возврат в работу клиента без работающего ответственного: без выбора
+                                 задачи ушли бы никому или уволенному, поэтому сервер не сохранит. --}}
+                            <template x-if="needsResponsibleOnResume()">
+                                <div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3" style="grid-column: 1 / -1">
+                                    <label for="resume_responsible" class="block text-sm font-medium text-amber-900 mb-1">Кто будет вести клиента</label>
+                                    <p class="text-xs text-amber-800 mb-2">Клиент возвращается в работу, а ответственного нет или он уволен. Задачи пойдут на того, кого выберете.</p>
+                                    <select id="resume_responsible" x-model="form.status.responsible_employee_id"
+                                            class="block w-full max-w-sm px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
+                                        <option value="">Выберите сотрудника</option>
+                                        <template x-for="emp in allEmployees.filter(e => !e.note)" :key="emp.id">
+                                            <option :value="String(emp.id)" x-text="emp.full_name"></option>
+                                        </template>
+                                    </select>
+                                </div>
+                            </template>
                         </div>
                     </template>
                 </div>
@@ -2792,6 +2807,7 @@ function clientShow() {
                         ? this.client.service_start_date.split('T')[0]
                         : (this.client.created_at ? this.client.created_at.split('T')[0] : ''),
                     service_end_date: this.client.service_end_date ? this.client.service_end_date.split('T')[0] : '',
+                    responsible_employee_id: '',
                 },
                 flags: {
                     is_zero_movement: this.client.is_zero_movement || false,
@@ -3022,6 +3038,24 @@ function clientShow() {
             }
 
             return '';
+        },
+
+        /**
+         * Клиента возвращают в работу, а работающего ответственного у него нет.
+         * Те же условия, что у сервера (ClientController::resumeResponsible).
+         */
+        needsResponsibleOnResume() {
+            const current = this.clientStatuses.find(cs => String(cs.id) === String(this.client.client_status_id ?? ''));
+            const stopped = !this.client.is_active || Boolean(this.client.service_end_date) || Boolean(current?.stops_tasks);
+            const next = this.clientStatuses.find(cs => String(cs.id) === this.form.status.client_status_id);
+            // Рабочий статус снимает дату остановки сам, а форма держит её прежней.
+            const toWorking = next && !next.stops_tasks && String(next.id) !== String(this.client.client_status_id ?? '');
+            const endCleared = !next?.stops_tasks && !this.form.status.service_end_date;
+            const resumes = stopped && (toWorking || endCleared);
+            if (!resumes) return false;
+
+            const responsible = this.allEmployees.find(e => String(e.id) === String(this.client.responsible_employee_id ?? ''));
+            return !responsible || Boolean(responsible.note);
         },
 
         /** Ответственного в секции «Договор» поменяли на другого (или сняли). */

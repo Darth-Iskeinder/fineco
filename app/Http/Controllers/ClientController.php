@@ -377,6 +377,9 @@ class ClientController extends Controller
                 'client_status_id' => ['nullable', 'exists:client_statuses,id'],
                 'service_start_date' => ['nullable', 'date'],
                 'service_end_date' => ['nullable', 'date'],
+                // Только при возврате в работу клиента без работающего ответственного,
+                // см. resumeResponsible(). В остальных случаях поле не используется.
+                'responsible_employee_id' => ['nullable', 'integer'],
             ],
             'tax' => [
                 'tax_system_id' => ['nullable', 'exists:tax_systems,id'],
@@ -529,6 +532,8 @@ class ClientController extends Controller
             $endDateAdded = !empty($validated['service_end_date'])
                 && $validated['service_end_date'] !== optional($client->service_end_date)->toDateString();
 
+            $this->resumeResponsible($client, $validated);
+
             if (!$statusChanged && $endDateAdded) {
                 // Флаг читаем через модель, а не в SQL: он подстрахован названием
                 // на случай, если колонку в справочнике забыли заполнить.
@@ -639,6 +644,47 @@ class ClientController extends Controller
     private function authorizeManage(): void
     {
         abort_unless(Client::canBeManagedBy(auth('employee')->user()), 403, 'Недостаточно прав');
+    }
+
+    /**
+     * Возврат клиента в работу без работающего ответственного.
+     *
+     * У остановленного клиента ответственного может не быть (его снимают при
+     * увольнении, см. EmployeeWorkTransfer), или там стоит уволенный из старых
+     * данных. Вернуть такого клиента в работу как есть значит отдать задачи никому
+     * или уволенному. Поэтому при возврате ответственного выбирают, и сохранение
+     * без него не проходит. Выбранный попадает в $validated, и saveClient переносит
+     * на него работу как при обычной смене ответственного.
+     *
+     * Если клиент не возвращается или ответственный у него в порядке, поле выкидываем.
+     */
+    private function resumeResponsible(Client $client, array &$validated): void
+    {
+        $chosen = $validated['responsible_employee_id'] ?? null;
+        unset($validated['responsible_employee_id']);
+
+        $newStatus = !empty($validated['client_status_id'])
+            ? ClientStatus::find($validated['client_status_id'])
+            : null;
+        // Возврат: либо поставили рабочий статус (дату остановки модель тогда снимет
+        // сама, форма же присылает её прежней), либо стёрли дату, не ставя остановку.
+        $toWorkingStatus = $newStatus && !$newStatus->stops_tasks
+            && (string) $newStatus->id !== (string) $client->client_status_id;
+        $endCleared = !$newStatus?->stops_tasks && empty($validated['service_end_date']);
+        $resumes = $client->serviceIsStopped() && ($toWorkingStatus || $endCleared);
+
+        $current = $client->responsible_employee_id;
+        if (!$resumes || ($current && Employee::assignable()->whereKey($current)->exists())) {
+            return;
+        }
+
+        if (!$chosen || !Employee::assignable()->whereKey($chosen)->exists()) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'responsible_employee_id' => 'Клиент возвращается в работу, а ответственного нет или он уволен. Выберите, кто будет вести клиента.',
+            ]);
+        }
+
+        $validated['responsible_employee_id'] = (int) $chosen;
     }
 
     /**
