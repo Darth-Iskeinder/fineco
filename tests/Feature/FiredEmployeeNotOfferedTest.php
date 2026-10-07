@@ -28,6 +28,7 @@ class FiredEmployeeNotOfferedTest extends TestCase
     private Employee $head;
     private Employee $working;
     private Employee $fired;
+    private Employee $manager;
     private Client $client;
 
     protected function connectionsToTransact(): array
@@ -72,7 +73,11 @@ class FiredEmployeeNotOfferedTest extends TestCase
         // Уволен, но аккаунт не заблокирован — так увольнение и оформляется в карточке.
         $this->fired   = $make('fired', ['employment_status' => Employee::EMPLOYMENT_FIRED]);
 
-        foreach ([$this->head, $this->working, $this->fired] as $e) {
+        // Ответственного меняет и заводит клиентов руководитель.
+        $managerRole   = Role::firstOrCreate(['name' => Role::MANAGER], ['display_name' => 'Руководитель']);
+        $this->manager = $make('manager', ['role_id' => $managerRole->id]);
+
+        foreach ([$this->head, $this->working, $this->fired, $this->manager] as $e) {
             $e->modules()->syncWithoutDetaching($modules);
         }
 
@@ -118,9 +123,11 @@ class FiredEmployeeNotOfferedTest extends TestCase
             'assignee_id' => $this->fired->id,
         ]);
 
-        $ids = array_column($this->assigneeOptions(), 'id');
+        $options = collect($this->assigneeOptions())->keyBy('id');
 
-        $this->assertContains($this->fired->id, $ids, 'Действующий исполнитель пропал из селекта');
+        $this->assertTrue($options->has($this->fired->id), 'Действующий исполнитель пропал из селекта');
+        $this->assertTrue($options[$this->fired->id]['fired'], 'Уволенный не помечен: его можно выбрать заново');
+        $this->assertFalse($options[$this->working->id]['fired'], 'Работающий помечен уволенным');
     }
 
     public function test_buhtasks_does_not_offer_a_fired_employee(): void
@@ -146,5 +153,121 @@ class FiredEmployeeNotOfferedTest extends TestCase
                 'due_date'    => now()->addWeek()->toDateString(),
             ])
             ->assertNotFound();
+    }
+
+    /** @return \Illuminate\Support\Collection<int, array{id:int, full_name:string, note:?string}> */
+    private function responsibleOptions()
+    {
+        return collect($this->actingAs($this->manager, 'employee')
+            ->get(route('clients.index'))
+            ->assertOk()
+            ->viewData('employees'))->keyBy('id');
+    }
+
+    /** Данные формы правки клиента: всё как есть, меняется только ответственный. */
+    private function clientForm(?int $responsibleId): array
+    {
+        return [
+            'name' => $this->client->name,
+            'inn'  => $this->client->inn,
+            'responsible_employee_id' => $responsibleId,
+        ];
+    }
+
+    public function test_client_form_does_not_offer_a_fired_responsible(): void
+    {
+        $options = $this->responsibleOptions();
+
+        $this->assertTrue($options->has($this->working->id), 'Работающий сотрудник пропал из выбора ответственного');
+        $this->assertFalse($options->has($this->fired->id), 'Уволенный предлагается в ответственные');
+    }
+
+    /**
+     * Уволенный, который уже стоит у клиента, в списке остаётся с пометкой: без него
+     * форма открылась бы с пустым полем, а фильтр не нашёл бы его клиентов.
+     */
+    /** Карточка клиента берёт тот же список: нынешний уволенный в нём есть, с пометкой. */
+    public function test_client_card_keeps_its_fired_responsible_with_a_note(): void
+    {
+        $this->client->update(['responsible_employee_id' => $this->fired->id]);
+
+        $options = collect($this->actingAs($this->manager, 'employee')
+            ->get(route('clients.show', $this->client))
+            ->assertOk()
+            ->viewData('responsibleOptions'))->keyBy('id');
+
+        $this->assertSame('уволен', $options[$this->fired->id]['note'] ?? null);
+    }
+
+    public function test_current_fired_responsible_stays_in_the_list_with_a_note(): void
+    {
+        $this->client->update(['responsible_employee_id' => $this->fired->id]);
+
+        $options = $this->responsibleOptions();
+
+        $this->assertTrue($options->has($this->fired->id), 'Нынешний ответственный пропал из списка');
+        $this->assertSame('уволен', $options[$this->fired->id]['note']);
+        $this->assertNull($options[$this->working->id]['note']);
+    }
+
+    /** Список не единственная дверь: форму можно отправить и мимо него. */
+    public function test_new_client_cannot_get_a_fired_responsible(): void
+    {
+        $this->actingAs($this->manager, 'employee')
+            ->post(route('clients.store'), [
+                'name' => 'ТОО Новый ' . uniqid(),
+                'inn'  => strtoupper(substr(md5(uniqid()), 0, 12)),
+                'responsible_employee_id' => $this->fired->id,
+            ])
+            ->assertSessionHasErrors('responsible_employee_id', null, 'createClient');
+    }
+
+    public function test_client_cannot_be_switched_to_a_fired_responsible(): void
+    {
+        $this->actingAs($this->manager, 'employee')
+            ->putJson(route('clients.update', $this->client), $this->clientForm($this->fired->id))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('responsible_employee_id');
+
+        $this->assertSame($this->head->id, $this->client->fresh()->responsible_employee_id);
+    }
+
+    public function test_contract_section_cannot_switch_to_a_fired_responsible(): void
+    {
+        $this->actingAs($this->manager, 'employee')
+            ->patchJson(route('clients.update-section', $this->client), [
+                'section' => 'contract',
+                'responsible_employee_id' => $this->fired->id,
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('responsible_employee_id');
+
+        $this->assertSame($this->head->id, $this->client->fresh()->responsible_employee_id);
+    }
+
+    /**
+     * Ловушка, ради которой правило пропускает нынешнего: клиента с уволенным
+     * ответственным сохраняют по другому поводу, и ответственный не должен стереться.
+     */
+    public function test_saving_a_client_keeps_its_fired_responsible(): void
+    {
+        $this->client->update(['responsible_employee_id' => $this->fired->id]);
+
+        $this->actingAs($this->manager, 'employee')
+            ->putJson(route('clients.update', $this->client), $this->clientForm($this->fired->id))
+            ->assertOk();
+
+        $this->assertSame($this->fired->id, $this->client->fresh()->responsible_employee_id);
+    }
+
+    public function test_client_can_still_be_switched_to_a_working_employee(): void
+    {
+        $this->client->update(['responsible_employee_id' => $this->fired->id]);
+
+        $this->actingAs($this->manager, 'employee')
+            ->putJson(route('clients.update', $this->client), $this->clientForm($this->working->id))
+            ->assertOk();
+
+        $this->assertSame($this->working->id, $this->client->fresh()->responsible_employee_id);
     }
 }

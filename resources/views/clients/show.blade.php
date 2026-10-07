@@ -869,8 +869,11 @@
                                     <label class="block text-sm font-medium text-slate-700 mb-1">Ответственное лицо</label>
                                     <select x-model="form.contract.responsible_employee_id" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white">
                                         <option value="">— Не назначено —</option>
-                                        <template x-for="emp in allEmployees" :key="emp.id">
-                                            <option :value="String(emp.id)" x-text="emp.full_name"></option>
+                                        {{-- Уволенного выбрать нельзя, но нынешний ответственный остаётся в списке:
+                                             иначе поле открылось бы пустым и сохранение стёрло бы его. --}}
+                                        <template x-for="emp in allEmployees.filter(e => !e.note || String(e.id) === String(client.responsible_employee_id ?? ''))" :key="emp.id">
+                                            <option :value="String(emp.id)" :selected="String(emp.id) === String(form.contract.responsible_employee_id)"
+                                                    x-text="emp.full_name + (emp.note ? ' (' + emp.note + ')' : '')"></option>
                                         </template>
                                     </select>
                                     <p class="mt-1 text-xs text-slate-400">На это лицо ассайнятся задачи по компании</p>
@@ -1059,7 +1062,7 @@
                                 </div>
                                 <select @change="if($event.target.value && !form.attorney.power_of_attorney_name.includes($event.target.value)) form.attorney.power_of_attorney_name.push($event.target.value); $event.target.value = ''" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
                                     <option value="">+ Добавить сотрудника</option>
-                                    <template x-for="emp in allEmployees" :key="emp.id">
+                                    <template x-for="emp in allEmployees.filter(e => !e.note)" :key="emp.id">
                                         <option :value="emp.full_name" :disabled="form.attorney.power_of_attorney_name.includes(emp.full_name)" x-text="emp.full_name"></option>
                                     </template>
                                 </select>
@@ -2540,7 +2543,8 @@ function clientShow() {
         taxSystems: @json(\App\Models\TaxSystem::active()->ordered()->get()),
         activityTypes: @json(\App\Models\ActivityType::active()->ordered()->get()),
         tariffs: @json(\App\Models\Tariff::active()->ordered()->get()),
-        allEmployees: @json(\App\Models\Employee::active()->orderBy('full_name')->get()),
+        {{-- [{id, full_name, note}]: note говорит, почему человека нельзя выбрать заново (уволен, учётка закрыта). --}}
+        allEmployees: @json($responsibleOptions),
         {{-- [{column, label}]: колонка отметки у клиента и название типа из каталога БП. --}}
         serviceScopeOptions: @json(collect(\App\Models\Client::SERVICE_SCOPE_COLUMNS)
             ->map(fn ($column, $key) => ['column' => $column, 'label' => \App\Models\Service::SERVICE_TYPES[$key]])

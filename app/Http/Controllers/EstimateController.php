@@ -84,10 +84,12 @@ class EstimateController extends Controller
         // Реальные исполнители сохранённых позиций + ответственный: имена нужны для честного
         // отображения «на ком стоит задача» (в т.ч. read-only для тех, кто не может назначать).
         $savedAssigneeIds = $estimate->rootItems->pluck('assignee_id')->filter()->unique()->values();
-        $assigneeNames = Employee::whereIn(
-            'id',
-            $savedAssigneeIds->concat([$responsibleId])->filter()->unique()
-        )->pluck('full_name', 'id');
+        // Уволенного подписываем: смотрящий смету должен видеть, что задача стоит на
+        // человеке, которого уже нет. withTrashed, чтобы имя не пропало у удалённого.
+        $assigneeNames = Employee::withTrashed()
+            ->whereIn('id', $savedAssigneeIds->concat([$responsibleId])->filter()->unique())
+            ->get(['id', 'full_name', 'employment_status'])
+            ->mapWithKeys(fn ($e) => [$e->id => $e->full_name . ($e->isFired() ? ' (уволен)' : '')]);
 
         // Индивидуальные расписания БП этого клиента (override дефолтов), keyed by service_id
         $overrides = $client->serviceSchedules()->get()->keyBy('service_id');
@@ -332,7 +334,9 @@ class EstimateController extends Controller
         if ($canAssign) {
             // Кандидаты: работающие бухгалтеры + ответственный. Плюс уже назначенные
             // исполнители сохранённых позиций (даже уволенные) — иначе селект не сможет
-            // показать, на ком реально стоит задача.
+            // показать, на ком реально стоит задача. Таких помечаем `fired`: их видно
+            // только в строке, где они стоят, выбрать заново нельзя.
+            $assignableIds = Employee::assignable()->pluck('id')->flip();
             $assigneeOptions = Employee::query()
                 ->with('role')
                 ->where(function ($q) use ($client, $savedAssigneeIds) {
@@ -350,6 +354,7 @@ class EstimateController extends Controller
                     'id'        => $e->id,
                     'full_name' => $e->full_name,
                     'role'      => $e->role?->display_name,
+                    'fired'     => !$assignableIds->has($e->id),
                 ])
                 ->values()
                 ->toArray();

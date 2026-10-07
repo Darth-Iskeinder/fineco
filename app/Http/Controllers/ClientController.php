@@ -51,7 +51,7 @@ class ClientController extends Controller
             'clientStatuses' => ClientStatus::orderBy('sort_order')->orderBy('name')->get(['id', 'name']),
             // Список сотрудников нужен и рядовым: из него выбирают ответственного
             // в модалке правки клиента. Скрыт от них только фильтр по ответственному.
-            'employees' => Employee::active()->orderBy('full_name')->get(),
+            'employees' => $this->responsibleOptions(),
             'tariffs' => Tariff::active()->ordered()->get(),
             'organizationForms' => OrganizationForm::orderBy('name')->get(['id', 'name']),
             'canManageClients' => $seesEveryone,
@@ -192,8 +192,9 @@ class ClientController extends Controller
             ->canView(auth('employee')->user(), $client);
 
         return view('clients.show', [
-            'client'            => $client,
-            'canSeeTaskHistory' => $canSeeTaskHistory,
+            'client'             => $client,
+            'canSeeTaskHistory'  => $canSeeTaskHistory,
+            'responsibleOptions' => $this->responsibleOptions(),
         ]);
     }
 
@@ -215,7 +216,7 @@ class ClientController extends Controller
             'company_number' => $this->companyNumberRules(),
             'tax_system_id' => ['nullable', 'exists:tax_systems,id'],
             'tariff_id' => ['nullable', 'exists:tariffs,id'],
-            'responsible_employee_id' => ['nullable', 'exists:employees,id'],
+            'responsible_employee_id' => $this->responsibleRules(),
             'notes' => ['nullable', 'string'],
         ], [
             'inn.required' => 'Введите ИНН',
@@ -266,7 +267,7 @@ class ClientController extends Controller
         $this->authorizeClient($client);
 
         $validated = $request->validate([
-            'employee_id' => ['nullable', 'exists:employees,id'],
+            'employee_id' => $this->responsibleRules($client),
         ]);
 
         return response()->json(
@@ -305,7 +306,7 @@ class ClientController extends Controller
             'company_number' => $this->companyNumberRules($client->id),
             'tax_system_id' => ['nullable', 'exists:tax_systems,id'],
             'tariff_id' => ['nullable', 'exists:tariffs,id'],
-            'responsible_employee_id' => ['nullable', 'exists:employees,id'],
+            'responsible_employee_id' => $this->responsibleRules($client),
             'notes' => ['nullable', 'string'],
         ], [
             'inn.required' => 'Введите ИНН',
@@ -394,7 +395,7 @@ class ClientController extends Controller
                 'contract_url' => ['nullable', 'string', 'max:500'],
                 'requisites_url' => ['nullable', 'string', 'max:500'],
                 'founding_docs_urls' => ['nullable', 'array'],
-                'responsible_employee_id' => ['nullable', 'exists:employees,id'],
+                'responsible_employee_id' => $this->responsibleRules($client),
             ],
             'attorney' => [
                 'power_of_attorney_name' => ['nullable', 'array'],
@@ -638,6 +639,63 @@ class ClientController extends Controller
     private function authorizeManage(): void
     {
         abort_unless(Client::canBeManagedBy(auth('employee')->user()), 403, 'Недостаточно прав');
+    }
+
+    /**
+     * Кого показывать в выборе ответственного.
+     *
+     * Те, кому можно поручать работу (работает и учётка открыта), плюс те, кто уже стоит ответственным у
+     * какого-нибудь клиента, даже уволенные. Без вторых форма правки такого клиента
+     * открылась бы с пустым полем, и «Сохранить» молча стёр бы ответственного.
+     * Пометка `note` говорит, почему человека нельзя выбрать заново.
+     *
+     * @return \Illuminate\Support\Collection<int, array{id:int, full_name:string, note:?string}>
+     */
+    private function responsibleOptions(): \Illuminate\Support\Collection
+    {
+        $current = Client::whereNotNull('responsible_employee_id')
+            ->distinct()
+            ->pluck('responsible_employee_id');
+
+        return Employee::withTrashed()
+            ->where(fn ($q) => $q
+                ->where(fn ($q2) => $q2->assignable()->whereNull('deleted_at'))
+                ->orWhereIn('id', $current))
+            ->orderBy('full_name')
+            ->get(['id', 'full_name', 'status', 'employment_status', 'deleted_at'])
+            ->map(fn (Employee $e) => [
+                'id'        => $e->id,
+                'full_name' => $e->full_name,
+                'note'      => match (true) {
+                    $e->trashed()                          => 'удалён',
+                    $e->isFired()                          => 'уволен',
+                    $e->status !== Employee::STATUS_ACTIVE => 'учётка закрыта',
+                    default                                => null,
+                },
+            ])
+            ->values();
+    }
+
+    /**
+     * Правила для ответственного: назначить можно только того, кому вообще можно
+     * поручать работу (Employee::assignable: работает и учётка открыта).
+     *
+     * Того, кто уже стоит у этого клиента, пропускаем: иначе карточку клиента с
+     * уволенным ответственным нельзя было бы сохранить, пока его не заменят.
+     * Проверка идёт через модель, то есть в пределах своей фирмы. Прежнее правило
+     * `exists` смотрело таблицу напрямую и пропустило бы сотрудника чужой фирмы.
+     */
+    private function responsibleRules(?Client $client = null): array
+    {
+        return ['nullable', 'integer', function (string $attribute, mixed $value, \Closure $fail) use ($client) {
+            if ($client && (int) $value === (int) $client->responsible_employee_id) {
+                return;
+            }
+
+            if (!Employee::assignable()->whereKey($value)->exists()) {
+                $fail('Этого сотрудника нельзя назначить ответственным: он уволен или его учётка закрыта.');
+            }
+        }];
     }
 
     /**

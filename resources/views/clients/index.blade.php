@@ -50,7 +50,13 @@
             this.showEditModal = true;
         @endif
     },
-    allEmployees: @js($employees->map(fn($e) => ['id' => $e->id, 'name' => $e->full_name])),
+    // note: почему человека нельзя выбрать заново (уволен, учётка закрыта). Такие есть
+    // в фильтре и у клиента, где уже стоят, но не в выборе нового ответственного.
+    allEmployees: @js($employees->map(fn($e) => [
+        'id'   => $e['id'],
+        'name' => $e['full_name'] . ($e['note'] ? ' (' . $e['note'] . ')' : ''),
+        'note' => $e['note'],
+    ])),
     taxSystems: @js($taxSystems->map(fn($t) => ['id' => $t->id, 'name' => $t->name])),
     clientStatuses: @js($clientStatuses),
     tariffs: @js($tariffs->map(fn($t) => ['id' => $t->id, 'name' => $t->name])),
@@ -926,7 +932,7 @@
                                 <label for="create_responsible" class="block text-sm font-medium text-slate-700 mb-2">Ответственное лицо</label>
                                 <select name="responsible_employee_id" id="create_responsible" class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
                                     <option value="">Не назначено</option>
-                                    <template x-for="employee in allEmployees" :key="employee.id">
+                                    <template x-for="employee in allEmployees.filter(e => !e.note)" :key="employee.id">
                                         <option :value="employee.id" :selected="'{{ old('responsible_employee_id') }}' == employee.id" x-text="employee.name"></option>
                                     </template>
                                 </select>
@@ -1076,8 +1082,11 @@
                                 <label for="edit_responsible" class="block text-sm font-medium text-slate-700 mb-2">Ответственное лицо</label>
                                 <select name="responsible_employee_id" id="edit_responsible" x-model="editClient.responsible_employee_id" class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200">
                                     <option value="">Не назначено</option>
-                                    <template x-for="employee in allEmployees" :key="employee.id">
-                                        <option :value="employee.id" x-text="employee.name"></option>
+                                    {{-- Уволенного выбрать нельзя, но тот, кто уже стоит у клиента, в списке остаётся:
+                                         без него поле открылось бы пустым и сохранение стёрло бы ответственного.
+                                         :selected нужен, потому что опция появляется вместе с открытием окна. --}}
+                                    <template x-for="employee in allEmployees.filter(e => !e.note || String(e.id) === editResponsibleWas)" :key="employee.id">
+                                        <option :value="employee.id" :selected="String(employee.id) === String(editClient.responsible_employee_id)" x-text="employee.name"></option>
                                     </template>
                                 </select>
                                 <p class="mt-1 text-xs text-slate-500">На это лицо будут ассайниться все БП клиента</p>

@@ -30,9 +30,12 @@
                 class="text-xs border rounded-md pl-1.5 pr-6 py-0.5 focus:outline-none focus:ring-1 focus:ring-indigo-400"
                 :class="{{ $row }}.assignee_id ? 'border-slate-200 bg-white' : 'border-amber-300 bg-amber-50 text-amber-700'">
             <option value="" disabled :selected="!{{ $row }}.assignee_id">— не назначен —</option>
-            <template x-for="opt in assigneeOptions" :key="opt.id">
+            {{-- Уволенный виден только в строке, где он уже стоит: так понятно, на ком задача,
+                 а поставить его на другую позицию или вернуть после замены нельзя. --}}
+            <template x-for="opt in assigneeOptions.filter(o => !o.fired || o.id === {{ $row }}.assignee_id)" :key="opt.id">
                 <option :value="opt.id" :selected="opt.id === {{ $row }}.assignee_id"
-                        x-text="opt.full_name + (opt.role ? ' · ' + opt.role : '')"></option>
+                        :class="opt.fired ? 'text-slate-400' : ''"
+                        x-text="opt.full_name + (opt.fired ? ' (уволен)' : (opt.role ? ' · ' + opt.role : ''))"></option>
             </template>
         </select>
     </template>
