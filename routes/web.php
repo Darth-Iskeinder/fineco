@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AuditController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\AutoAuditClientsController;
 use App\Http\Controllers\AutoAuditController;
 use App\Http\Controllers\AutoAuditSettingsController;
 use App\Http\Controllers\BuhSmetaController;
@@ -139,6 +140,10 @@ Route::middleware('auth:employee')->group(function () {
     // страница отвечает 404, проверка внутри контроллера. Со страницы проверку не
     // запустить: прогон только командой autoaudit:run в терминале.
     Route::get('/auto-audit', [AutoAuditController::class, 'index'])->name('auto-audit.index');
+    // Вкладка «По клиентам»: только чтение. Карточка клиента отдельным запросом по клику.
+    Route::get('/auto-audit/clients', [AutoAuditClientsController::class, 'index'])->name('auto-audit.clients');
+    Route::get('/auto-audit/clients/{client}', [AutoAuditClientsController::class, 'card'])
+        ->whereNumber('client')->name('auto-audit.clients.card');
     // Решение руководителя по находке. Права и флаг проверяет контроллер.
     Route::post('/auto-audit/findings/{finding}/accept', [AutoAuditController::class, 'accept'])->name('auto-audit.findings.accept');
     Route::post('/auto-audit/findings/{finding}/reject', [AutoAuditController::class, 'reject'])->name('auto-audit.findings.reject');

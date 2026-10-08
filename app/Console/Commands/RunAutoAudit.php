@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Jobs\RunAutoAuditJob;
 use App\Models\AutoAuditResult;
+use App\Models\AutoAuditWatchRun;
 use App\Models\Client;
 use App\Models\Tenant;
 use App\Services\AutoAudit\AutoAuditRunner;
@@ -138,7 +139,8 @@ class RunAutoAudit extends Command
         }
 
         try {
-            $counts = RunAutoAuditJob::perform($tenant, $runner);
+            // --all ставит ночной крон, так его прогоны и видно в журнале наблюдения.
+            $counts = RunAutoAuditJob::perform($tenant, $runner, $this->option('all') ? AutoAuditWatchRun::NIGHT : AutoAuditWatchRun::COMMAND);
         } catch (Throwable $e) {
             // Состояние «упала» и журнал сбоев perform уже записал, здесь только сказать.
             $this->error('Проверка не прошла: ' . $e->getMessage());

@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Models\AutoAuditWatchRun;
 use App\Services\AutoAudit\AutoAuditRunner;
 use App\Support\TenantContext;
 use Illuminate\Support\Facades\Cache;
@@ -67,7 +68,7 @@ class RunAutoAuditJob
      * @return array<string, int>|null счётчики исходов, или null, если прогон уже идёт
      * @throws Throwable то, что бросил сам прогон: состояние и журнал сбоев уже записаны
      */
-    public static function perform(int $tenantId, AutoAuditRunner $runner): ?array
+    public static function perform(int $tenantId, AutoAuditRunner $runner, string $trigger = AutoAuditWatchRun::COMMAND): ?array
     {
         $lock = Cache::lock(self::lockKey($tenantId), self::LOCK_SECONDS);
 
@@ -81,7 +82,7 @@ class RunAutoAuditJob
         try {
             self::markRunning($tenantId);
 
-            $counts = TenantContext::for($tenantId, fn () => $runner->run());
+            $counts = TenantContext::for($tenantId, fn () => $runner->run($trigger));
 
             Cache::put($key, [
                 'status'      => self::DONE,

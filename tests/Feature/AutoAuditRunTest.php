@@ -4,7 +4,11 @@ namespace Tests\Feature;
 
 use App\Models\AutoAuditFinding;
 use App\Models\AutoAuditFindingMessage;
+use App\Models\AutoAuditDocumentRead;
 use App\Models\AutoAuditResult;
+use App\Models\AutoAuditSnapshot;
+use App\Models\AutoAuditWatchClient;
+use App\Models\AutoAuditWatchRun;
 use App\Models\BuhTaskDocument;
 use App\Models\BuhTaskLog;
 use App\Models\Client;
@@ -17,6 +21,7 @@ use App\Models\Service;
 use App\Models\Tenant;
 use App\Services\AutoAudit\AutoAuditQuestions;
 use App\Services\AutoAudit\AutoAuditRunner;
+use App\Services\AutoAudit\AutoAuditWatch;
 use App\Services\AutoAudit\BalanceSheetReader;
 use App\Services\AutoAudit\DocumentPeriod;
 use App\Services\AutoAudit\DocumentValue;
@@ -2053,7 +2058,7 @@ class AutoAuditRunTest extends TestCase
         $runner = new class extends AutoAuditRunner {
             public function __construct() {}
 
-            public function run(): array
+            public function run(string $trigger = 'command'): array
             {
                 throw new \RuntimeException('разметка потерялась');
             }
@@ -2085,7 +2090,7 @@ class AutoAuditRunTest extends TestCase
 
             public function __construct() {}
 
-            public function run(): array
+            public function run(string $trigger = 'command'): array
             {
                 $this->calls++;
 
@@ -2119,7 +2124,7 @@ class AutoAuditRunTest extends TestCase
         $runner = new class extends AutoAuditRunner {
             public function __construct() {}
 
-            public function run(): array
+            public function run(string $trigger = 'command'): array
             {
                 throw new \RuntimeException('упал');
             }
@@ -2145,7 +2150,7 @@ class AutoAuditRunTest extends TestCase
 
             public function __construct(private string $key) {}
 
-            public function run(): array
+            public function run(string $trigger = 'command'): array
             {
                 $this->seen = Cache::get($this->key)['status'] ?? null;
 
@@ -2176,7 +2181,7 @@ class AutoAuditRunTest extends TestCase
 
             public function __construct() {}
 
-            public function run(): array
+            public function run(string $trigger = 'command'): array
             {
                 $this->calls++;
 
@@ -3838,6 +3843,202 @@ class AutoAuditRunTest extends TestCase
             'role_id' => Role::where('name', $role)->value('id'),
             'status' => Employee::STATUS_ACTIVE,
         ]);
+    }
+
+    // Наблюдение за прогоном (AutoAuditWatch, этап 2а): кого можно было бы пропустить.
+
+    /** Первый прогон: все клиенты новые, снимок записан, у файла запомнен его период. */
+    public function test_watch_first_run_marks_everyone_new_and_remembers_periods(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $this->runAudit();
+
+        $run = AutoAuditWatchRun::sole();
+        $this->assertSame(AutoAuditWatchRun::COMMAND, $run->trigger);
+        $this->assertSame([1, 1, 2, 2, 2, 0, 0], [
+            $run->clients, $run->clients_needed, $run->checks, $run->checks_by_client,
+            $run->checks_by_month, $run->alarms, $run->alarms_by_month,
+        ]);
+        $this->assertSame(AutoAuditWatchClient::NEW, $run->clients()->sole()->reason);
+        $this->assertTrue(AutoAuditSnapshot::where('client_id', $client->id)->exists());
+
+        $read = AutoAuditDocumentRead::where('side', 'osv')->sole();
+        $this->assertSame('2026-07-01', $read->period_from->toDateString());
+        $this->assertSame('2026-07-31', $read->period_to->toDateString());
+        $this->assertSame(DocumentValue::FOUND, $read->status);
+    }
+
+    /** Ничего не поменялось: проверять никого не нужно, тревог нет. */
+    public function test_watch_rerun_without_changes_needs_nobody(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $this->runAudit();
+        $this->runAudit();
+
+        $run = AutoAuditWatchRun::latest('id')->first();
+        $this->assertSame([1, 0, 2, 0, 0, 0, 0], [
+            $run->clients, $run->clients_needed, $run->checks, $run->checks_by_client,
+            $run->checks_by_month, $run->alarms, $run->alarms_by_month,
+        ]);
+        $this->assertSame(0, $run->clients()->count());
+    }
+
+    /** Файлы за новый месяц: задет только он, июль перепроверять не нужно. */
+    public function test_watch_new_month_touches_only_that_month(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв-июль.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт-июль.pdf', base: 100.00, tax: 4.00);
+        $this->runAudit();
+
+        $this->attachSheet($client, 'осв-август.xls', ['3210' => 50.00, '3410' => 2.00], month: 8, taskMonth: 9);
+        $this->attachReport($client, 'отчёт-август.pdf', base: 50.00, tax: 2.00, month: 8, taskMonth: 9);
+        $this->runAudit();
+
+        $run   = AutoAuditWatchRun::latest('id')->first();
+        $entry = $run->clients()->sole();
+
+        $this->assertSame(AutoAuditWatchClient::TASKS, $entry->reason);
+        $this->assertSame(['2026-08'], $entry->months);
+        $this->assertSame([4, 4, 2, 0, 0], [$run->checks, $run->checks_by_client, $run->checks_by_month, $run->alarms, $run->alarms_by_month]);
+    }
+
+    /**
+     * Файл заменили на месте, числа те же. Месяц всё равно задет: прочитать новый файл
+     * нужно, иначе не узнать, что числа те же.
+     */
+    public function test_watch_replaced_file_touches_its_month(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $this->runAudit();
+
+        $this->sheets['осв-новая.xls'] = $this->sheets['осв.xls'];
+        $document = BuhTaskDocument::where('name', 'осв.xls')->firstOrFail();
+        $path     = dirname($document->path) . '/осв-новая.xls';
+        Storage::disk('local')->put($path, 'x');
+        $document->update(['path' => $path, 'name' => 'осв-новая.xls']);
+
+        $this->runAudit();
+
+        $entry = AutoAuditWatchRun::latest('id')->first()->clients()->sole();
+        $this->assertSame(AutoAuditWatchClient::TASKS, $entry->reason);
+        $this->assertSame(['2026-07'], $entry->months);
+        $this->assertFalse($entry->alarm);
+        $this->assertSame($path, AutoAuditDocumentRead::where('document_id', $document->id)->value('path'));
+    }
+
+    /** Замена одной ОСВ квартала задевает квартальный отчёт: его сверки идут в перепроверку. */
+    public function test_watch_quarter_is_touched_by_one_of_its_sheets(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв-апрель.xls', ['3210' => 100.00, '3410' => 4.00], month: 4);
+        $this->attachSheet($client, 'осв-май.xls', ['3210' => 200.00, '3410' => 8.00], month: 5);
+        $this->attachSheet($client, 'осв-июнь.xls', ['3210' => 300.00, '3410' => 12.00], month: 6);
+        $this->attachQuarterReport($client, 'отчёт-2кв.pdf', base: 600.00, tax: 24.00);
+        $this->runAudit();
+
+        $this->sheets['осв-май-новая.xls'] = $this->sheets['осв-май.xls'];
+        $document = BuhTaskDocument::where('name', 'осв-май.xls')->firstOrFail();
+        $path     = dirname($document->path) . '/осв-май-новая.xls';
+        Storage::disk('local')->put($path, 'x');
+        $document->update(['path' => $path, 'name' => 'осв-май-новая.xls']);
+
+        $this->runAudit();
+
+        $run   = AutoAuditWatchRun::latest('id')->first();
+        $entry = $run->clients()->sole();
+        $this->assertSame(['2026-05'], $entry->months);
+        $this->assertSame([2, 2], [$run->checks, $run->checks_by_month]);
+    }
+
+    /** Поменялась карточка клиента: перепроверять его целиком. */
+    public function test_watch_client_card_change_rechecks_the_whole_client(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $this->runAudit();
+
+        $client->update(['accounting_method' => Client::ACCOUNTING_ACCRUAL]);
+        $this->runAudit();
+
+        $run = AutoAuditWatchRun::latest('id')->first();
+        $this->assertSame(AutoAuditWatchClient::CLIENT, $run->clients()->sole()->reason);
+        $this->assertSame($run->checks, $run->checks_by_month);
+        $this->assertSame(0, $run->alarms);
+    }
+
+    /**
+     * Тревога: снимок тот же, а итог другой. Здесь в файле на том же месте поменялись числа,
+     * и снимок этого не видит. Ровно такие случаи наблюдение и должно ловить.
+     */
+    public function test_watch_raises_an_alarm_when_the_verdict_changes_behind_the_snapshot(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $this->runAudit();
+
+        $this->sheets['осв.xls']['accounts']['3210'] = 150.00;
+        $this->runAudit();
+
+        $run   = AutoAuditWatchRun::latest('id')->first();
+        $entry = $run->clients()->sole();
+
+        $this->assertSame([1, 1, 0], [$run->alarms, $run->alarms_by_month, $run->clients_needed]);
+        $this->assertSame(AutoAuditWatchClient::SAME, $entry->reason);
+        $this->assertTrue($entry->alarm);
+        $this->assertCount(1, $entry->changed);
+        $this->assertStringStartsWith("check:{$client->id}:1:", $entry->changed[0]);
+
+        $this->artisan('autoaudit:watch', ['--tenant' => $this->tenant->id])
+            ->expectsOutputToContain('Тревоги:')
+            ->expectsOutputToContain($client->name)
+            ->assertSuccessful();
+    }
+
+    /** Наблюдение упало: сверки всё равно записаны, сбой ушёл в журнал сбоев. */
+    public function test_watch_failure_does_not_cost_the_run_its_results(): void
+    {
+        \Illuminate\Support\Facades\Exceptions::fake();
+
+        $this->app->instance(AutoAuditWatch::class, new class extends AutoAuditWatch {
+            public function record(array $rows, \Illuminate\Support\Collection $before, array $reads, string $trigger, float $seconds): AutoAuditWatchRun
+            {
+                throw new \RuntimeException('наблюдение сломалось');
+            }
+        });
+
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+
+        $this->assertCount(2, $this->runAudit());
+        $this->assertSame(0, AutoAuditWatchRun::count());
+        \Illuminate\Support\Facades\Exceptions::assertReported(fn (\RuntimeException $e) => $e->getMessage() === 'наблюдение сломалось');
+    }
+
+    /** Ночной крон помечает свои прогоны, команда по фирме свои. */
+    public function test_watch_tells_night_runs_from_commands(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
+
+        RunAutoAuditJob::perform($this->tenant->id, app(AutoAuditRunner::class), AutoAuditWatchRun::NIGHT);
+        RunAutoAuditJob::perform($this->tenant->id, app(AutoAuditRunner::class));
+
+        $this->assertSame([AutoAuditWatchRun::NIGHT, AutoAuditWatchRun::COMMAND], AutoAuditWatchRun::orderBy('id')->pluck('trigger')->all());
+        $this->artisan('autoaudit:watch', ['--tenant' => $this->tenant->id])
+            ->expectsOutputToContain('Тревог нет')
+            ->assertSuccessful();
     }
 
     private function asVendor(): static

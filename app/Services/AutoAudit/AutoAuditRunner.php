@@ -3,6 +3,7 @@
 namespace App\Services\AutoAudit;
 
 use App\Models\AutoAuditResult;
+use App\Models\AutoAuditWatchRun;
 use App\Models\BuhTaskLog;
 use App\Models\Client;
 use App\Models\Service;
@@ -12,6 +13,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
+use Throwable;
 
 /**
  * Автоаудит: ОСВ против отчёта по единому налогу и против формы 161.
@@ -50,6 +52,8 @@ use RuntimeException;
  * Проверять только изменившихся клиентов сознательно не стали. Итог зависит от многого:
  * задачи, файлы, ИНН, метод учёта, смета, тип обслуживания. Забыть что-то одно значило бы
  * молча оставить на странице устаревший вердикт. Полный прогон на бою идёт 35 секунд.
+ * С 08.10.2026 после прогона AutoAuditWatch записывает, кого можно было бы пропустить и
+ * не ошибся бы снимок. Экономию включим, когда журнал неделями будет без тревог.
  */
 class AutoAuditRunner
 {
@@ -203,16 +207,20 @@ class AutoAuditRunner
     public function __construct(
         private readonly AutoAuditSources $sources,
         private readonly AutoAuditStore $store,
+        private readonly AutoAuditWatch $watch,
     ) {}
 
     /**
      * Прогнать проверку по текущей фирме и записать результат.
      *
+     * @param string $trigger кто запустил, для журнала наблюдения: ночь или команда
      * @return array<string, int> сколько строк с каким исходом
      */
-    public function run(): array
+    public function run(string $trigger = AutoAuditWatchRun::COMMAND): array
     {
-        $rows = $this->collect();
+        $started = microtime(true);
+        $rows    = $this->collect();
+        $before  = AutoAuditResult::current()->get();
 
         // Одна транзакция на весь прогон: либо записалось всё, либо ничего, и половинчатой
         // страницы не бывает. Находки в той же: без неё строка и её находка могли бы разойтись.
@@ -223,7 +231,22 @@ class AutoAuditRunner
             return $changes;
         });
 
+        $this->watch($rows, $before, $trigger, $started);
+
         return collect($rows)->countBy('outcome')->all();
+    }
+
+    /**
+     * Наблюдение пишем после сверок и отдельно от них. Упало: сбой в журнал сбоев, а
+     * сверки уже записаны. Наблюдение не должно стоить прогону ни одной строки.
+     */
+    private function watch(array $rows, $before, string $trigger, float $started): void
+    {
+        try {
+            $this->watch->record($rows, $before, $this->sources->documentReads(), $trigger, microtime(true) - $started);
+        } catch (Throwable $e) {
+            report($e);
+        }
     }
 
     /**

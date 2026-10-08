@@ -31,6 +31,9 @@ class Tenant extends Model
     /** Ключ в settings: руководитель фирмы видит ответы по находкам автоаудита. */
     public const SETTING_AUTO_AUDIT_FINDINGS = 'auto_audit_findings';
 
+    /** Ключ в settings: руководитель фирмы видит вкладку автоаудита «По клиентам». */
+    public const SETTING_AUTO_AUDIT_CLIENTS = 'auto_audit_clients';
+
     /** Ключ в settings: первый отчётный месяц, который автоаудит проверяет в фирме, '2026-09'. */
     public const SETTING_AUTO_AUDIT_FROM = 'auto_audit_from';
 
@@ -139,6 +142,22 @@ class Tenant extends Model
     public function setAutoAuditFindingsEnabled(bool $enabled): void
     {
         $this->settings = array_merge($this->settings ?? [], [self::SETTING_AUTO_AUDIT_FINDINGS => $enabled]);
+        $this->save();
+    }
+
+    /**
+     * Видит ли руководитель фирмы вкладку «По клиентам»: клиенты по месяцам и за кем ход.
+     * Без открытой страницы автоаудита (autoAuditEnabled) от флага толку нет. Вендору,
+     * зашедшему в фирму, вкладка видна всегда.
+     */
+    public function autoAuditClientsEnabled(): bool
+    {
+        return (bool) ($this->settings[self::SETTING_AUTO_AUDIT_CLIENTS] ?? false);
+    }
+
+    public function setAutoAuditClientsEnabled(bool $enabled): void
+    {
+        $this->settings = array_merge($this->settings ?? [], [self::SETTING_AUTO_AUDIT_CLIENTS => $enabled]);
         $this->save();
     }
 

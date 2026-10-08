@@ -48,7 +48,7 @@ class AutoAuditSources
     private const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'tif', 'tiff', 'webp', 'heic'];
 
     /** Задачи, документам которых верим: работа закрыта или сдана на проверку. */
-    private const DONE_STATUSES = ['completed', 'review'];
+    public const DONE_STATUSES = ['completed', 'review'];
 
     /** Прочитанное за прогон: один файл разбираем один раз на каждое число. */
     private array $cache = [];
@@ -63,6 +63,29 @@ class AutoAuditSources
     public function reset(): void
     {
         $this->cache = [];
+    }
+
+    /**
+     * Что прогон узнал о каждом прочитанном файле: сторона и исход чтения. Один файл читается
+     * на несколько чисел; берём то чтение, где опознан период, он у всех чисел файла один.
+     * Нужно наблюдению (AutoAuditWatch): по периоду видно, какие месяцы задел файл.
+     *
+     * @return array<int, array{side: string, value: DocumentValue}> id документа => прочитанное
+     */
+    public function documentReads(): array
+    {
+        $reads = [];
+
+        foreach ($this->cache as $key => $value) {
+            [$side, , $id] = explode(':', $key);
+            $id = (int) $id;
+
+            if (!isset($reads[$id]) || ($reads[$id]['value']->period === null && $value->period !== null)) {
+                $reads[$id] = ['side' => $side, 'value' => $value];
+            }
+        }
+
+        return $reads;
     }
 
     /**
@@ -163,7 +186,7 @@ class AutoAuditSources
             'log_id'      => $log->id,
             'branch_id'   => $log->estimate_item_id,
             'task_month'  => sprintf('%02d.%d', $log->month, $log->year),
-            'employee'    => $this->shortName($log->employee?->full_name),
+            'employee'    => self::shortName($log->employee?->full_name),
             'document_id' => null,
             'name'        => null,
             'status'      => AutoAuditRunner::SOURCE_MISSING,
@@ -325,7 +348,7 @@ class AutoAuditSources
             // сверка понимает, кто из филиалов сдал, а кто нет.
             'branch_id'   => $log->estimate_item_id,
             'task_month'  => sprintf('%02d.%d', $log->month, $log->year),
-            'employee'    => $this->shortName($log->employee?->full_name),
+            'employee'    => self::shortName($log->employee?->full_name),
             'document_id' => $document->id,
             'name'        => $document->name,
             'status'      => $value->status,
@@ -346,7 +369,7 @@ class AutoAuditSources
      * Исполнитель задачи коротко: «Обозова Айзада Алмасбековна» становится «Обозова А. А.».
      * Полные ФИО раздувают колонку с документами.
      */
-    private function shortName(?string $fullName): ?string
+    public static function shortName(?string $fullName): ?string
     {
         $parts = preg_split('/\s+/u', trim((string) $fullName), -1, PREG_SPLIT_NO_EMPTY);
 

@@ -54,6 +54,7 @@
 
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50">
         <div class="px-6 py-4">
+            @include('auto-audit._tabs', ['active' => 'auto-audit.index', 'class' => 'mb-3'])
             <p class="text-sm text-slate-600">
                 Система сама сверяет суммы в документах, которые бухгалтеры прикладывают к задачам.
                 «Не совпало» не значит ошибку: это повод попросить у бухгалтера пояснение.

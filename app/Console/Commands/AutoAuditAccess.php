@@ -11,6 +11,9 @@ use Illuminate\Console\Command;
  * --findings-on и --findings-off отдельно открывают руководителю ответы по находкам и
  * кнопки «Принять» и «Не принято». Без открытой страницы от них толку нет.
  *
+ * --clients-on и --clients-off отдельно открывают руководителю вкладку «По клиентам»:
+ * клиенты по месяцам и за кем ход. Тоже без открытой страницы ни к чему.
+ *
  * --from=2026-09 задаёт первый отчётный месяц, который автоаудит проверяет в фирме, --from=all
  * снимает ограничение. Ставится до первого прогона у фирмы, подключённой не с начала.
  *
@@ -31,6 +34,8 @@ class AutoAuditAccess extends Command
         {--off : Закрыть страницу руководителю}
         {--findings-on : Показать руководителю ответы по находкам}
         {--findings-off : Спрятать от руководителя ответы по находкам}
+        {--clients-on : Показать руководителю вкладку «По клиентам»}
+        {--clients-off : Спрятать от руководителя вкладку «По клиентам»}
         {--from= : С какого отчётного месяца проверять фирму, 2026-09; all = все месяцы}
         {--nightly-on : Включить фирму в ночной прогон (autoaudit:run --all)}
         {--nightly-off : Убрать фирму из ночного прогона}';
@@ -55,6 +60,12 @@ class AutoAuditAccess extends Command
 
         if ($this->option('findings-on') && $this->option('findings-off')) {
             $this->error('Выберите что-то одно: --findings-on или --findings-off');
+
+            return self::FAILURE;
+        }
+
+        if ($this->option('clients-on') && $this->option('clients-off')) {
+            $this->error('Выберите что-то одно: --clients-on или --clients-off');
 
             return self::FAILURE;
         }
@@ -97,6 +108,10 @@ class AutoAuditAccess extends Command
             $tenant->setAutoAuditFindingsEnabled((bool) $this->option('findings-on'));
         }
 
+        if ($this->option('clients-on') || $this->option('clients-off')) {
+            $tenant->setAutoAuditClientsEnabled((bool) $this->option('clients-on'));
+        }
+
         $this->line(sprintf(
             'Фирма %d «%s»: автоаудит руководителю %s',
             $tenant->id,
@@ -104,6 +119,7 @@ class AutoAuditAccess extends Command
             $tenant->autoAuditEnabled() ? 'открыт' : 'закрыт',
         ));
         $this->line('Ответы по находкам руководителю: ' . ($tenant->autoAuditFindingsEnabled() ? 'видны' : 'скрыты'));
+        $this->line('Вкладка «По клиентам» руководителю: ' . ($tenant->autoAuditClientsEnabled() ? 'видна' : 'скрыта'));
         $this->line('Проверяет отчёты: ' . ($tenant->autoAuditFrom() ? 'с ' . $tenant->autoAuditFrom() : 'за все месяцы'));
         $this->line('Ночной прогон: ' . ($tenant->autoAuditNightly() ? 'включён' : 'выключен'));
 
