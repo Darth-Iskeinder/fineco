@@ -103,7 +103,7 @@ class AutoAuditClientsController extends Controller
             'acc'          => $acc,
             'q'            => $q,
             'name'         => $name,
-            'checkedAt'    => $board->checkedAt()?->setTimezone(config('app.timezone')),
+            'checkedAt'    => $board->checkedAt()?->setTimezone(config('app.display_timezone')),
             'vendor'       => Impersonation::isActive(),
             'openToManager' => $this->openToManager(),
         ]);
@@ -131,7 +131,7 @@ class AutoAuditClientsController extends Controller
             'focus'     => $focus,
             'cell'      => $row['cells'][$focus->format('Y-m')],
             'name'      => fn (?int $id) => $id ? ($employees[$id] ?? 'сотрудник удалён') : 'не назначен',
-            'checkedAt' => $board->checkedAt()?->setTimezone(config('app.timezone')),
+            'checkedAt' => $board->checkedAt()?->setTimezone(config('app.display_timezone')),
             'today'     => $today,
         ]);
     }

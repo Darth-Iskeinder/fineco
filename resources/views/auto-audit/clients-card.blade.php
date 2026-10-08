@@ -113,7 +113,7 @@
                                 @case(Board::TURN_ACCOUNTANT)
                                     <div><span class="font-semibold text-amber-700">Ход бухгалтера {{ $doers($result) }}</span>, висит {{ $days($issue['days']) }}</div>
                                     @if ($last?->kind === AutoAuditFindingMessage::REJECTED)
-                                        <div>Главбух не принял ответ, {{ $last->created_at->format('d.m') }}: «{{ $last->body }}»</div>
+                                        <div>Главбух не принял ответ, {{ $last->created_at->copy()->setTimezone(config('app.display_timezone'))->format('d.m') }}: «{{ $last->body }}»</div>
                                     @endif
                                     @break
                                 @case(Board::TURN_CHIEF)
@@ -126,7 +126,7 @@
                                     <div>Вопроса бухгалтеру нет: система сама не уверена. Сверить глазами.</div>
                             @endswitch
                             @if ($answer && $issue['turn'] !== Board::TURN_ACCOUNTANT)
-                                <div><b class="font-semibold">{{ AutoAuditSources::shortName($answer->authorName()) }}</b>, {{ $answer->created_at->format('d.m') }}: «{{ $answer->body ?: AutoAuditFindingMessage::LABELS[$answer->kind] }}»</div>
+                                <div><b class="font-semibold">{{ AutoAuditSources::shortName($answer->authorName()) }}</b>, {{ $answer->created_at->copy()->setTimezone(config('app.display_timezone'))->format('d.m') }}: «{{ $answer->body ?: AutoAuditFindingMessage::LABELS[$answer->kind] }}»</div>
                             @endif
                         </div>
                     </div>

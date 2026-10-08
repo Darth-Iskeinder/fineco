@@ -62,7 +62,7 @@
             </p>
             <p class="text-sm text-slate-500 mt-1">
                 @if ($checkedAt)
-                    Данные на {{ $checkedAt->format('d.m.Y H:i') }}
+                    Данные на {{ $checkedAt->copy()->setTimezone(config('app.display_timezone'))->format('d.m.Y H:i') }}
                 @else
                     Проверок пока не было
                 @endif
@@ -87,7 +87,7 @@
         @if ($running)
             {{-- Прогон идёт в терминале: показываем это и обновляем страницу, пока не закончится. --}}
             <div class="mx-6 mb-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                Идёт проверка с {{ \Carbon\CarbonImmutable::parse($state['started_at'])->setTimezone(config('app.timezone'))->format('H:i') }}.
+                Идёт проверка с {{ \Carbon\CarbonImmutable::parse($state['started_at'])->setTimezone(config('app.display_timezone'))->format('H:i') }}.
                 Ниже пока прежние результаты. Страница обновится сама.
             </div>
             <script>setTimeout(() => window.location.reload(), 15000);</script>
@@ -281,14 +281,14 @@
                                             <span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap bg-slate-100 text-slate-600">Объяснено</span>
                                         @else
                                             @php $days = $finding->daysOpen(); @endphp
-                                            <p class="text-slate-500" title="С {{ $finding->opened_at->format('d.m.Y') }}">
+                                            <p class="text-slate-500" title="С {{ $finding->opened_at->copy()->setTimezone(config('app.display_timezone'))->format('d.m.Y') }}">
                                                 {{ $days === 0 ? 'Висит с сегодня' : 'Висит ' . $days . ' ' . $plural($days, ['день', 'дня', 'дней']) }}
                                             </p>
                                         @endif
 
                                         @forelse ($finding->messages as $message)
                                             <div>
-                                                <span class="font-medium text-slate-600">{{ AutoAuditFindingMessage::LABELS[$message->kind] ?? $message->kind }}</span><span class="text-slate-400">, {{ $message->authorName() }}, {{ $message->created_at->format('d.m') }}</span>@if ($message->result_id !== $result->id)<span class="text-slate-400" title="Сообщение относится к прежнему итогу строки, до замены файла или исправления">, к прежнему итогу</span>@endif
+                                                <span class="font-medium text-slate-600">{{ AutoAuditFindingMessage::LABELS[$message->kind] ?? $message->kind }}</span><span class="text-slate-400">, {{ $message->authorName() }}, {{ $message->created_at->copy()->setTimezone(config('app.display_timezone'))->format('d.m') }}</span>@if ($message->result_id !== $result->id)<span class="text-slate-400" title="Сообщение относится к прежнему итогу строки, до замены файла или исправления">, к прежнему итогу</span>@endif
                                                 @if ($message->body)
                                                     <p class="text-slate-700 whitespace-pre-line">{{ $message->body }}</p>
                                                 @endif

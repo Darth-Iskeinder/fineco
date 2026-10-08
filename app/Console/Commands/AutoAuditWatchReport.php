@@ -43,7 +43,7 @@ class AutoAuditWatchReport extends Command
             $this->table(
                 ['Когда', 'Кто', 'Клиентов', 'Нужно', 'Сверок', 'По клиенту', 'По месяцам', 'Тревог', 'По месяцам', 'Сек'],
                 $runs->map(fn (AutoAuditWatchRun $r) => [
-                    $r->created_at->setTimezone(config('app.timezone'))->format('d.m H:i'),
+                    $r->created_at->setTimezone(config('app.display_timezone'))->format('d.m H:i'),
                     $r->trigger === AutoAuditWatchRun::NIGHT ? 'ночь' : 'команда',
                     $r->clients,
                     $r->clients_needed,

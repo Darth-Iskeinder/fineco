@@ -293,7 +293,7 @@ class AutoAuditController extends Controller
             return null;
         }
 
-        return ['last' => $last?->setTimezone(config('app.timezone'))];
+        return ['last' => $last?->setTimezone(config('app.display_timezone'))];
     }
 
     private function isRunning(?array $state): bool

@@ -183,6 +183,21 @@ class AutoAuditClientsPageTest extends TestCase
         $this->assertSame('2 сверки сошлись', $cell['note']);
     }
 
+    /** Время для людей по Бишкеку: ночной прогон в 23:00 UTC это 05:00 следующего дня. */
+    public function test_check_time_is_shown_in_bishkek_time(): void
+    {
+        $client = $this->client();
+        $this->doneTask($client, $this->item($client, $this->osv));
+        $row = $this->auditRow($client, '1', AutoAuditResult::MATCHED);
+        $row->timestamps = false;
+        $row->forceFill(['updated_at' => CarbonImmutable::parse('2026-10-07 23:00:00', 'UTC')])->save();
+
+        $this->asVendor()->get(route('auto-audit.clients', ['all' => 1]))
+            ->assertOk()->assertSee('Последняя проверка 08.10.2026 05:00');
+        $this->asVendor()->get(route('auto-audit.index'))
+            ->assertOk()->assertSee('Данные на 08.10.2026 05:00');
+    }
+
     public function test_unanswered_finding_waits_for_the_accountant(): void
     {
         $client = $this->client();
