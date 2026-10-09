@@ -52,6 +52,9 @@ class BalanceSheetReader
     /** На сколько строк ниже верхнего уровня шапки может стоять нижний. */
     private const HEADER_LEVEL_GAP = 4;
 
+    /** Сколько последних дней месяца ведомость может не захватить и всё равно считаться месячной. */
+    private const SHORT_MONTH_DAYS = 3;
+
     /**
      * Корни названий месяцев для поиска в заголовке ведомости.
      *
@@ -385,11 +388,30 @@ class BalanceSheetReader
             $to   = CarbonImmutable::createFromFormat('!d.m.Y', "{$m[4]}.{$m[5]}.{$m[6]}");
 
             if ($from && $to && $from->lessThanOrEqualTo($to)) {
-                return new DocumentPeriod($from, $to);
+                return $this->wholeMonth($from, $to) ?? new DocumentPeriod($from, $to);
             }
         }
 
         return null;
+    }
+
+    /**
+     * Ведомость с 1-го числа почти до конца месяца считаем ведомостью за месяц.
+     *
+     * На бою 09.10.2026 у Сан Планет Интернешэнл ОСВ за июль и август сформированы по 30-е,
+     * а форма 161 по 31-е. Период не совпадал день в день, пары не было, и настоящее
+     * расхождение по зарплате пропало молча. Напечатанный конец храним в printedTo, чтобы
+     * сверка могла о нём сказать. С 1 по 15-е это уже не забытый день, такую не трогаем.
+     */
+    private function wholeMonth(CarbonImmutable $from, CarbonImmutable $to): ?DocumentPeriod
+    {
+        $end = $from->endOfMonth()->startOfDay();
+
+        if ($from->day !== 1 || !$to->isSameMonth($from) || $to->equalTo($end) || $to->day < $end->day - self::SHORT_MONTH_DAYS) {
+            return null;
+        }
+
+        return new DocumentPeriod($from, $end, $to);
     }
 
     /**

@@ -362,6 +362,12 @@ class AutoAuditSources
             $source['parts'] = $value->parts;
         }
 
+        // ОСВ без последних дней месяца засчитана месячной: сверка пишет, по какое число она.
+        // Тоже только там, где это есть, по той же причине.
+        if ($value->period?->printedTo) {
+            $source['printed_to'] = $value->period->printedTo->toDateString();
+        }
+
         return $source;
     }
 

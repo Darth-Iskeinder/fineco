@@ -421,6 +421,45 @@ class BalanceSheetReaderTest extends TestCase
         $this->assertCount(3, $result->period->months());
     }
 
+    /**
+     * Ведомость по 30-е августа считается августовской, иначе она не встанет в пару с
+     * формой 161 за август. Так было на бою у Сан Планет Интернешэнл 09.10.2026.
+     */
+    public function test_month_without_its_last_day_is_the_whole_month(): void
+    {
+        $other = $this->writeBalanceSheet('Оборотно-сальдовая ведомость за 01.08.2026 - 30.08.2026');
+
+        $result = $this->reader()->turnover($other, '3210', 'credit');
+
+        @unlink($other);
+        $this->assertSame('01.08.2026 – 31.08.2026', $result->period->label());
+        $this->assertSame('2026-08-30', $result->period->printedTo?->toDateString());
+    }
+
+    /** С 1 по 15-е это не забытый последний день: период остаётся как напечатан. */
+    public function test_half_a_month_stays_as_printed(): void
+    {
+        $other = $this->writeBalanceSheet('Оборотно-сальдовая ведомость за 01.08.2026 - 15.08.2026');
+
+        $result = $this->reader()->turnover($other, '3210', 'credit');
+
+        @unlink($other);
+        $this->assertSame('01.08.2026 – 15.08.2026', $result->period->label());
+        $this->assertNull($result->period->printedTo);
+    }
+
+    /** Полный месяц датами: напечатанный конец и есть конец, отдельно его не помним. */
+    public function test_full_month_in_dates_has_no_printed_end(): void
+    {
+        $other = $this->writeBalanceSheet('Оборотно-сальдовая ведомость за 01.08.2026 - 31.08.2026');
+
+        $result = $this->reader()->turnover($other, '3210', 'credit');
+
+        @unlink($other);
+        $this->assertSame('01.08.2026 – 31.08.2026', $result->period->label());
+        $this->assertNull($result->period->printedTo);
+    }
+
     /** Май не должен путаться с мартом: у них общее начало. */
     public function test_may_is_not_confused_with_march(): void
     {

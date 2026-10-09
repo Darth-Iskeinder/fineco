@@ -17,6 +17,12 @@ class DocumentPeriod
     public function __construct(
         public readonly CarbonImmutable $from,
         public readonly CarbonImmutable $to,
+        /**
+         * Какой конец напечатан в документе, если период засчитан целым месяцем, хотя
+         * документ сформирован чуть раньше конца (ОСВ «01.08.2026 - 30.08.2026»).
+         * Пусто, если напечатано ровно $to.
+         */
+        public readonly ?CarbonImmutable $printedTo = null,
     ) {}
 
     public static function of(int $year, int $month): self

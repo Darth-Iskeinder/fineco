@@ -939,6 +939,14 @@ class AutoAuditRunner
                 $notes[] = sprintf('Ведомостей за %s: %d, взята последняя', $month, count($osv));
             }
 
+            if (!empty($osv[0]['printed_to'])) {
+                $notes[] = sprintf(
+                    'ОСВ за %s сформирована по %s, а не до конца месяца',
+                    $month,
+                    CarbonImmutable::parse($osv[0]['printed_to'])->format('d.m.Y'),
+                );
+            }
+
             if ($osv[0]['status'] === DocumentValue::UNCERTAIN) {
                 $unknown[] = $osv[0]['reason'];
             } elseif ($osv[0]['status'] === DocumentValue::NOT_FOUND) {

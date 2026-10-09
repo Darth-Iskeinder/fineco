@@ -24,6 +24,7 @@ use App\Services\AutoAudit\AutoAuditRunner;
 use App\Services\AutoAudit\AutoAuditWatch;
 use App\Services\AutoAudit\BalanceSheetReader;
 use App\Services\AutoAudit\DocumentPeriod;
+use Carbon\CarbonImmutable;
 use App\Services\AutoAudit\DocumentValue;
 use App\Services\AutoAudit\SingleTaxReportReader;
 use App\Support\TenantContext;
@@ -155,6 +156,11 @@ class AutoAuditRunTest extends TestCase
         }
 
         $period = DocumentPeriod::of(...$sheet['month']);
+
+        // Ведомость без последних дней месяца: читалка засчитывает её месячной и помнит конец.
+        if (isset($sheet['printed_to'])) {
+            $period = new DocumentPeriod($period->from, $period->to, CarbonImmutable::parse($sheet['printed_to']));
+        }
 
         if (!array_key_exists($account, $sheet['accounts'])) {
             return DocumentValue::notFound("В ведомости нет счёта {$account}", [], $period);
@@ -541,6 +547,26 @@ class AutoAuditRunTest extends TestCase
         $this->assertStringContainsString('Форма 161 и зарплатные налоги', $missing->reason);
         $this->assertSame([null, 'осв.xls'], array_column($missing->sources, 'name'));
         $this->assertSame('f161', $missing->sources[0]['side']);
+    }
+
+    /**
+     * ОСВ по 30-е встаёт в пару с формой 161 за весь месяц, а в строке сказано, по какое
+     * число она сформирована. На бою 09.10.2026 у Сан Планет Интернешэнл такая пара
+     * пропадала молча, и расхождение по зарплате никто не видел.
+     */
+    public function test_sheet_without_the_last_day_is_checked_with_a_note(): void
+    {
+        $f161   = $this->service('Форма 161 и зарплатные налоги', AutoAuditRunner::REF_FORM_161);
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3520' => 25.46]);
+        $this->sheets['осв.xls']['printed_to'] = '2026-07-30';
+        $this->attachForm($client, $f161, 'форма-161.pdf', income: 147000.00);
+
+        $row = $this->runAudit()->firstWhere('rule', '4');
+
+        $this->assertSame(AutoAuditResult::MISMATCH, $row->outcome);
+        $this->assertStringContainsString('ОСВ за июль 2026 сформирована по 30.07.2026, а не до конца месяца', $row->reason);
+        $this->assertSame('2026-07-30', $row->sources[0]['printed_to']);
     }
 
     /** Нет ведомости: ломаются все проверки клиента, в том числе проверки по форме 161. */
