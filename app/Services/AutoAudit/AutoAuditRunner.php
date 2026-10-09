@@ -699,6 +699,12 @@ class AutoAuditRunner
                 ],
             };
 
+            // Число из файла не того периода только путает: рядом с именем файла в вопросе
+            // бухгалтеру стоял бы оборот по 3210 из чужого месяца.
+            if ($outcome === AutoAuditResult::WRONG_PERIOD) {
+                $sources = array_map(fn (array $source) => array_merge($source, ['value' => null]), $sources);
+            }
+
             $period = $this->expectedMonth($log);
 
             $rows[] = [

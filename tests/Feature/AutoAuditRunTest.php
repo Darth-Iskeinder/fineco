@@ -1031,6 +1031,7 @@ class AutoAuditRunTest extends TestCase
         $this->assertSame('В задаче за 09.2026 файл «осв.xls» за август 2025, а нужен за август 2026', $row->reason);
         $this->assertSame(['2026-08-01', '2026-08-31'], [$row->period_from->toDateString(), $row->period_to->toDateString()]);
         $this->assertSame([1, 3], $row->ruleNumbers());
+        $this->assertNull($row->sources[0]['value']);
         $this->assertSame(1, AutoAuditFinding::where('key', $row->key())->count());
     }
 
