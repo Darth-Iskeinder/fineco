@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\AutoAuditDocumentRead;
 use App\Models\AutoAuditFinding;
 use App\Models\AutoAuditFindingMessage;
 use App\Models\AutoAuditResult;
@@ -350,6 +351,45 @@ class AutoAuditClientsPageTest extends TestCase
             ->assertSee('Ход бухгалтера');
     }
 
+    /**
+     * Документы с обеих сторон есть, а пары нет: ОСВ на деле за прошлый год. Карточка не
+     * пишет «Ничего не требует внимания» и показывает, за какой период прочитан каждый файл.
+     * На бою 09.10.2026 так выглядел Дипмаркет.
+     */
+    public function test_card_without_a_pair_says_why_and_shows_read_periods(): void
+    {
+        $client = $this->client();
+        $osv    = $this->doneTask($client, $this->item($client, $this->osv));
+        $form   = $this->doneTask($client, $this->item($client, $this->form161));
+        $this->fileRead($osv, 'осв.pdf', '2025-09-01', '2025-09-30');
+        $this->fileRead($form, 'форма.pdf', '2026-09-01', '2026-09-30');
+        $this->checkedAfterTasks();
+
+        $this->assertSame(AutoAuditClientBoard::UNVERIFIED, $this->statusOf($client, '2026-09'));
+
+        $this->asVendor()->get(route('auto-audit.clients.card', [$client->id, 'month' => '2026-09']))
+            ->assertOk()
+            ->assertSee('Сверка не сложилась')
+            ->assertSee('осв.pdf</b>, прочитан как сентябрь 2025', false)
+            ->assertSee('форма.pdf</b>, прочитан как сентябрь 2026', false)
+            ->assertDontSee('Ничего не требует внимания')
+            ->assertDontSee('В порядке');
+    }
+
+    /** Только ОСВ: сверять её не с чем, и карточка так и говорит, без зелёных галочек. */
+    public function test_card_with_only_a_sheet_says_there_is_nothing_to_compare(): void
+    {
+        $client = $this->client();
+        $this->fileRead($this->doneTask($client, $this->item($client, $this->osv)), 'осв.pdf', '2026-09-01', '2026-09-30');
+        $this->checkedAfterTasks();
+
+        $this->asVendor()->get(route('auto-audit.clients.card', [$client->id, 'month' => '2026-09']))
+            ->assertOk()
+            ->assertSee('Сверять не с чем')
+            ->assertDontSee('Сверка не сложилась')
+            ->assertDontSee('Ничего не требует внимания');
+    }
+
     /** Требование: таблица грузит итог константным числом запросов, сколько бы ни было клиентов. */
     public function test_query_count_does_not_grow_with_clients(): void
     {
@@ -483,6 +523,23 @@ class AutoAuditClientsPageTest extends TestCase
             'left_value' => $mismatch ? 1000 : 500, 'right_value' => 500, 'difference' => $mismatch ? 500 : 0,
             'sources' => [],
         ]);
+    }
+
+    /** Файл в задаче и период, который прочитал из него прогон. */
+    private function fileRead(BuhTaskLog $log, string $name, string $from, string $to): void
+    {
+        $document = $log->documents()->create(['path' => "buh_task_documents/{$log->id}/{$name}", 'name' => $name]);
+
+        AutoAuditDocumentRead::create([
+            'document_id' => $document->id, 'client_id' => $log->client_id, 'side' => 'osv',
+            'path' => $document->path, 'period_from' => $from, 'period_to' => $to, 'status' => 'found',
+        ]);
+    }
+
+    /** Прогон был после закрытия задач: иначе клетка ждала бы ночной проверки. */
+    private function checkedAfterTasks(): void
+    {
+        $this->auditRow($this->client(), '4', AutoAuditResult::MATCHED, '2026-06-01', '2026-06-30');
     }
 
     private function finding(AutoAuditResult $result, ?CarbonImmutable $openedAt = null): AutoAuditFinding

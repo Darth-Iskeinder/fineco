@@ -8,6 +8,7 @@
     use App\Services\AutoAudit\AutoAuditRunner;
     use App\Services\AutoAudit\AutoAuditSources;
     use App\Services\AutoAudit\DocumentPeriod;
+    use Carbon\CarbonImmutable;
 
     $client     = $row['client'];
     $key        = $focus->format('Y-m');
@@ -26,6 +27,17 @@
     $hasTaxTask  = collect($cell['tasks'])->contains('side', 'tax');
     $quarterEnd  = $focus->month % 3 ? $focus->addMonths(3 - $focus->month % 3) : null;
     $quarterNote = $row['hasTax'] && !$hasTaxTask && $quarterEnd ? 'Отчёт по ЕН квартальный, его сверка в ' . DocumentPeriod::of($quarterEnd->year, $quarterEnd->month)->title() . '.' : null;
+
+    // «Не проверено» без единой строки сверки: задачи закрыты, а пары документов за один
+    // период нет. Раньше карточка писала тут «Ничего не требует внимания» и ставила задачам
+    // зелёные галочки, хотя сверки не было (Дипмаркет, 09.10.2026: ОСВ за август 2025).
+    $unpaired  = $status === Board::UNVERIFIED && !$cell['issues'] && !$openTasks;
+    $withFiles = collect($doneTasks)->filter(fn (array $t) => $t['log']?->documents?->isNotEmpty())->pluck('side')->unique();
+    $bothSides = $withFiles->contains('osv') && $withFiles->contains(fn ($side) => $side !== 'osv');
+    $okTasks   = $unpaired ? [] : $doneTasks;
+    $readTitle = fn ($read) => $read?->period_from && $read?->period_to
+        ? (new DocumentPeriod(CarbonImmutable::parse($read->period_from->toDateString()), CarbonImmutable::parse($read->period_to->toDateString())))->title()
+        : null;
 
     // Кто делал задачи строки: исполнители из «откуда взято», иначе бухгалтер клиента.
     $doers = fn (AutoAuditResult $r) => collect($r->sources ?? [])->pluck('employee')->filter()->unique()->implode(', ') ?: $short($row['accountant']);
@@ -133,6 +145,40 @@
                 </div>
             @endforeach
         </section>
+    @elseif ($unpaired)
+        <section class="border-b border-slate-100 px-6 py-4 space-y-3">
+            <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-500">Почему не проверено</h3>
+            <p class="text-sm text-orange-700">
+                @if ($bothSides)
+                    Сверка не сложилась: ОСВ и отчёт есть, но периоды в документах не совпали. Проверьте, за какой период каждый файл.
+                @else
+                    Сверять не с чем: для сверки нужны ОСВ и отчёт по ЕН или форма 161 за один месяц.
+                @endif
+            </p>
+
+            @foreach ($doneTasks as $task)
+                <div class="grid grid-cols-[18px_minmax(0,1fr)] gap-x-2.5">
+                    <span class="text-center font-bold text-orange-500">?</span>
+                    <div>
+                        <div class="font-medium text-slate-900">{{ $task['name'] }}</div>
+                        <div class="text-[13px] text-slate-500">{{ $short($task['assignee']) }}</div>
+                        @if ($task['forced'])
+                            <div class="text-[13px] text-slate-500">закрыта без файла: {{ $task['log']->forceCloseNote() ?? 'причина не указана' }}</div>
+                        @endif
+                        @forelse ($task['log']?->documents ?? [] as $document)
+                            @php $period = $readTitle($reads->get($document->id)); @endphp
+                            <div class="text-[13px] text-slate-500">
+                                <b class="font-semibold text-slate-900">{{ $document->name }}</b>@if ($period), прочитан как {{ $period }}@elseif ($reads->has($document->id)), период не прочитан@endif
+                            </div>
+                        @empty
+                            @unless ($task['forced'])
+                                <div class="text-[13px] text-slate-500">файла нет</div>
+                            @endunless
+                        @endforelse
+                    </div>
+                </div>
+            @endforeach
+        </section>
     @elseif ($status !== Board::NONE)
         <section class="border-b border-slate-100 px-6 py-4">
             <p class="text-sm text-emerald-700">✓ Ничего не требует внимания</p>
@@ -145,13 +191,13 @@
         </section>
     @endif
 
-    @if ($doneTasks || $fine)
+    @if ($okTasks || $fine)
         <details class="border-b border-slate-100 px-6 py-4" @if (!$openTasks && !$problems) open @endif>
             <summary class="cursor-pointer font-medium text-indigo-600">
-                ✓ В порядке: {{ Board::count(count($doneTasks), ['задача', 'задачи', 'задач']) }}, {{ Board::count(count($fine), ['сверка', 'сверки', 'сверок']) }}
+                ✓ В порядке: {{ Board::count(count($okTasks), ['задача', 'задачи', 'задач']) }}, {{ Board::count(count($fine), ['сверка', 'сверки', 'сверок']) }}
             </summary>
             <div class="mt-3 space-y-2">
-                @foreach ($doneTasks as $task)
+                @foreach ($okTasks as $task)
                     @php $files = $task['log']?->documents?->pluck('name')->filter()->implode(', '); @endphp
                     <div class="grid grid-cols-[18px_minmax(0,1fr)] gap-x-2.5">
                         <span class="text-center font-bold text-emerald-600">✓</span>

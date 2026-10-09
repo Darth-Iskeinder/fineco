@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AutoAuditDocumentRead;
 use App\Models\Client;
 use App\Models\Tenant;
 use App\Services\AutoAudit\AutoAuditClientBoard;
@@ -124,12 +125,19 @@ class AutoAuditClientsController extends Controller
         abort_unless($row, 404);
 
         $employees = $data['employees'];
+        $cell      = $row['cells'][$focus->format('Y-m')];
+
+        // Какой период система прочитала из каждого файла месяца. Нужен, когда сверка не
+        // сложилась: так видно, что ОСВ «за август 2026» на деле за август 2025.
+        $documentIds = collect($cell['tasks'])->flatMap(fn (array $t) => $t['log']?->documents?->pluck('id') ?? [])->all();
+        $reads       = $documentIds ? AutoAuditDocumentRead::whereIn('document_id', $documentIds)->get()->keyBy('document_id') : collect();
 
         return view('auto-audit.clients-card', [
             'row'       => $row,
             'months'    => $months,
             'focus'     => $focus,
-            'cell'      => $row['cells'][$focus->format('Y-m')],
+            'cell'      => $cell,
+            'reads'     => $reads,
             'name'      => fn (?int $id) => $id ? ($employees[$id] ?? 'сотрудник удалён') : 'не назначен',
             'checkedAt' => $board->checkedAt()?->setTimezone(config('app.display_timezone')),
             'today'     => $today,
