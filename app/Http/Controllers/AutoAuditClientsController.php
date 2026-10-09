@@ -38,6 +38,7 @@ class AutoAuditClientsController extends Controller
         AutoAuditClientBoard::WAITING_RUN => ['cell' => 'bg-sky-50 text-sky-700',         'dot' => 'bg-sky-500'],
         AutoAuditClientBoard::IN_PROGRESS => ['cell' => 'bg-slate-100 text-slate-500',    'dot' => 'bg-slate-300'],
         AutoAuditClientBoard::OK          => ['cell' => 'bg-emerald-50 text-emerald-700', 'dot' => 'bg-emerald-600'],
+        AutoAuditClientBoard::NOTHING     => ['cell' => 'bg-slate-50 text-slate-400',     'dot' => 'bg-slate-400'],
         AutoAuditClientBoard::NONE        => ['cell' => 'text-slate-300',                 'dot' => 'bg-slate-200'],
     ];
 

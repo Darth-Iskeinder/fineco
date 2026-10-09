@@ -28,12 +28,11 @@
     $quarterEnd  = $focus->month % 3 ? $focus->addMonths(3 - $focus->month % 3) : null;
     $quarterNote = $row['hasTax'] && !$hasTaxTask && $quarterEnd ? 'Отчёт по ЕН квартальный, его сверка в ' . DocumentPeriod::of($quarterEnd->year, $quarterEnd->month)->title() . '.' : null;
 
-    // «Не проверено» без единой строки сверки: задачи закрыты, а пары документов за один
+    // «Не проверено» без единой строки сверки: ОСВ и отчёт сданы с файлами, а пары за один
     // период нет. Раньше карточка писала тут «Ничего не требует внимания» и ставила задачам
     // зелёные галочки, хотя сверки не было (Дипмаркет, 09.10.2026: ОСВ за август 2025).
+    // Если сдана одна сторона, это не «Не проверено», а «Сверять нечего» (см. Board::NOTHING).
     $unpaired  = $status === Board::UNVERIFIED && !$cell['issues'] && !$openTasks;
-    $withFiles = collect($doneTasks)->filter(fn (array $t) => $t['log']?->documents?->isNotEmpty())->pluck('side')->unique();
-    $bothSides = $withFiles->contains('osv') && $withFiles->contains(fn ($side) => $side !== 'osv');
     $okTasks   = $unpaired ? [] : $doneTasks;
     $readTitle = fn ($read) => $read?->period_from && $read?->period_to
         ? (new DocumentPeriod(CarbonImmutable::parse($read->period_from->toDateString()), CarbonImmutable::parse($read->period_to->toDateString())))->title()
@@ -149,11 +148,7 @@
         <section class="border-b border-slate-100 px-6 py-4 space-y-3">
             <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-500">Почему не проверено</h3>
             <p class="text-sm text-orange-700">
-                @if ($bothSides)
-                    Сверка не сложилась: ОСВ и отчёт есть, но периоды в документах не совпали. Проверьте, за какой период каждый файл.
-                @else
-                    Сверять не с чем: для сверки нужны ОСВ и отчёт по ЕН или форма 161 за один месяц.
-                @endif
+                Сверка не сложилась: ОСВ и отчёт есть, но периоды в документах не совпали. Проверьте, за какой период каждый файл.
             </p>
 
             @foreach ($doneTasks as $task)
@@ -178,6 +173,10 @@
                     </div>
                 </div>
             @endforeach
+        </section>
+    @elseif ($status === Board::NOTHING)
+        <section class="border-b border-slate-100 px-6 py-4">
+            <p class="text-sm text-slate-600">○ Сверять нечего: {{ $cell['note'] }}. Для сверки нужны ОСВ и отчёт по ЕН или форма 161 за один месяц. Ничего делать не нужно.</p>
         </section>
     @elseif ($status !== Board::NONE)
         <section class="border-b border-slate-100 px-6 py-4">

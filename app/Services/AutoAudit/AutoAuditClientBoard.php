@@ -36,6 +36,8 @@ use Illuminate\Support\Collection;
  *   - сверку не удалось провести: скан, «не удалось проверить» или не с чем сверить;
  *   - месяц идёт: задачи открыты, срок не прошёл;
  *   - сверки сошлись;
+ *   - сверять нечего: задачи закрыты, но сдана одна сторона (только ОСВ при квартальном
+ *     отчёте по ЕН, только форма 161). Никто ничего не нарушил, действия не нужно;
  *   - нет задач автоаудита.
  *
  * Запросов на всю фирму постоянное число, сколько бы ни было клиентов: всё грузится разом
@@ -50,6 +52,7 @@ class AutoAuditClientBoard
     public const WAITING_RUN = 'waiting_run';
     public const IN_PROGRESS = 'in_progress';
     public const OK          = 'ok';
+    public const NOTHING     = 'nothing';
     public const NONE        = 'none';
 
     /**
@@ -64,6 +67,7 @@ class AutoAuditClientBoard
         self::WAITING_RUN => ['letter' => '↻', 'label' => 'Ждёт проверки',     'hint' => 'Задачу закрыли или файл заменили после последней проверки. Проверим ночью'],
         self::IN_PROGRESS => ['letter' => '…', 'label' => 'Месяц идёт',        'hint' => 'Задачи ещё открыты, срок не прошёл'],
         self::OK          => ['letter' => '✓', 'label' => 'Сверки сошлись',    'hint' => 'Все сверки месяца сошлись или объяснение принято'],
+        self::NOTHING     => ['letter' => '○', 'label' => 'Сверять нечего',    'hint' => 'Задачи закрыты, но сдана одна сторона: например, только ОСВ, а отчёт по ЕН квартальный'],
         self::NONE        => ['letter' => '·', 'label' => 'Нет задач',         'hint' => 'За этот месяц у клиента нет задач, которые проверяет автоаудит'],
     ];
 
@@ -302,6 +306,7 @@ class AutoAuditClientBoard
             'done'      => $done,
             'forced'    => (bool) $log?->force_closed,
             'touchedAt' => $done ? $touched : null,
+            'hasFile'   => $lastFile !== null,
         ];
     }
 
@@ -430,11 +435,38 @@ class AutoAuditClientBoard
                 reset($open)['name'] . (reset($open)['due'] ? ': срок ' . reset($open)['due']->format('d.m') : ''),
                 null,
             ],
-            !$matched => [self::UNVERIFIED, 'задачи закрыты, сверить не с чем', null],
+            !$matched && !$this->bothSides($tasks) => [self::NOTHING, $this->onlySide($tasks), null],
+            !$matched => [self::UNVERIFIED, 'документы есть, а сверка не сложилась', null],
             default => [self::OK, self::count(count($matched), ['сверка сошлась', 'сверки сошлись', 'сверок сошлись']), null],
         };
 
         return $this->cell($status, $tasks, $issues, $note, $since);
+    }
+
+    /**
+     * Сданы ли обе стороны сверки: ОСВ и отчёт по ЕН или форма 161, закрытые с файлом.
+     *
+     * Задача, закрытая без файла («Раз в квартал», «Другое»), стороной не считается: сверять
+     * с ней нечего. «Нулевой» и «Освобождён» сюда не доходят, по ним прогон сверяет с нулём.
+     * Обе стороны есть, а строк сверки нет, значит пара не сложилась: это «Не проверено».
+     */
+    private function bothSides(array $tasks): bool
+    {
+        $sides = array_unique(array_column(array_filter($tasks, fn (array $t) => $t['hasFile']), 'side'));
+
+        return in_array('osv', $sides, true) && count($sides) > 1;
+    }
+
+    /** «есть только ОСВ», «есть только форма 161», «файлов нет». */
+    private function onlySide(array $tasks): string
+    {
+        $names  = ['osv' => 'ОСВ', 'tax' => 'отчёт по ЕН', 'f161' => 'форма 161'];
+        $labels = array_map(
+            fn (string $side) => $names[$side] ?? $side,
+            array_unique(array_filter(array_column(array_filter($tasks, fn (array $t) => $t['hasFile']), 'side'))),
+        );
+
+        return $labels ? 'есть только ' . implode(', ', $labels) : 'задачи закрыты без файлов';
     }
 
     private function cell(string $status, array $tasks, array $issues, string $note = '', ?int $days = null): array

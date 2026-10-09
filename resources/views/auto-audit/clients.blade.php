@@ -75,7 +75,7 @@
         </div>
 
         {{-- Плитки статусов за выбранный месяц. Клик выбирает статус, повторный снимает. --}}
-        <div class="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-8 gap-px bg-slate-100 border-t border-slate-100 rounded-b-2xl overflow-hidden">
+        <div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-9 gap-px bg-slate-100 border-t border-slate-100 rounded-b-2xl overflow-hidden">
             @foreach (Board::STATUSES as $s => $def)
                 @php $count = $counts[$s] ?? 0; @endphp
                 <a href="{{ route('auto-audit.clients', $with(['status' => $status === $s ? null : $s])) }}"

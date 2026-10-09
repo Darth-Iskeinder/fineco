@@ -376,8 +376,28 @@ class AutoAuditClientsPageTest extends TestCase
             ->assertDontSee('В порядке');
     }
 
-    /** Только ОСВ: сверять её не с чем, и карточка так и говорит, без зелёных галочек. */
-    public function test_card_with_only_a_sheet_says_there_is_nothing_to_compare(): void
+    /**
+     * Только ОСВ: сверять её не с чем, и это не повод для действия. Клиент не в «Не
+     * проверено» и не в списке по умолчанию. На бою за август таких было 8 из 15 «?».
+     */
+    public function test_only_a_sheet_is_nothing_to_compare(): void
+    {
+        $client = $this->client(['name' => 'ИП Только ОСВ']);
+        $this->fileRead($this->doneTask($client, $this->item($client, $this->osv)), 'осв.pdf', '2026-09-01', '2026-09-30');
+        $this->checkedAfterTasks();
+
+        $cell = $this->cell($client, '2026-09');
+
+        $this->assertSame(AutoAuditClientBoard::NOTHING, $cell['status']);
+        $this->assertSame('есть только ОСВ', $cell['note']);
+
+        $this->asVendor()->get(route('auto-audit.clients', ['month' => '2026-09']))
+            ->assertOk()
+            ->assertDontSee('ИП Только ОСВ');
+    }
+
+    /** Карточка «Сверять нечего»: спокойное пояснение, без оранжевого блока, задачи в порядке. */
+    public function test_card_of_nothing_to_compare_explains_it_calmly(): void
     {
         $client = $this->client();
         $this->fileRead($this->doneTask($client, $this->item($client, $this->osv)), 'осв.pdf', '2026-09-01', '2026-09-30');
@@ -385,9 +405,35 @@ class AutoAuditClientsPageTest extends TestCase
 
         $this->asVendor()->get(route('auto-audit.clients.card', [$client->id, 'month' => '2026-09']))
             ->assertOk()
-            ->assertSee('Сверять не с чем')
-            ->assertDontSee('Сверка не сложилась')
+            ->assertSee('Сверять нечего: есть только ОСВ')
+            ->assertSee('В порядке')
+            ->assertDontSee('Почему не проверено')
             ->assertDontSee('Ничего не требует внимания');
+    }
+
+    /** Только форма 161, ведомости нет: сверять тоже нечего. */
+    public function test_only_a_form_is_nothing_to_compare(): void
+    {
+        $client = $this->client();
+        $this->fileRead($this->doneTask($client, $this->item($client, $this->form161)), 'форма.pdf', '2026-09-01', '2026-09-30');
+        $this->checkedAfterTasks();
+
+        $cell = $this->cell($client, '2026-09');
+
+        $this->assertSame(AutoAuditClientBoard::NOTHING, $cell['status']);
+        $this->assertSame('есть только форма 161', $cell['note']);
+    }
+
+    /** Отчёт по ЕН закрыт без файла как «Раз в квартал»: стороной он не считается. */
+    public function test_tax_closed_as_quarterly_without_a_file_is_not_a_side(): void
+    {
+        $client = $this->client();
+        $this->fileRead($this->doneTask($client, $this->item($client, $this->osv)), 'осв.pdf', '2026-09-01', '2026-09-30');
+        $this->doneTask($client, $this->item($client, $this->tax))
+            ->forceFill(['force_closed' => true, 'force_close_reason' => BuhTaskLog::FORCE_QUARTERLY])->save();
+        $this->checkedAfterTasks();
+
+        $this->assertSame(AutoAuditClientBoard::NOTHING, $this->statusOf($client, '2026-09'));
     }
 
     /** Требование: таблица грузит итог константным числом запросов, сколько бы ни было клиентов. */
