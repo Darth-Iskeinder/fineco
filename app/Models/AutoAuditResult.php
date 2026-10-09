@@ -28,6 +28,7 @@ class AutoAuditResult extends Model
     public const UNVERIFIED       = 'unverified';        // одно из чисел прочитать не удалось: вердикта нет
     public const MISSING_DOCUMENT = 'missing_document';  // задача закрыта без файла, или у квартала нет ведомости за месяц
     public const WRONG_DOCUMENT   = 'wrong_document';    // все файлы задачи прочитаны, но нужной формы среди них нет
+    public const WRONG_PERIOD     = 'wrong_period';      // форма та, но ни один файл задачи не за тот месяц, что нужен
     public const SCAN             = 'scan';              // среди файлов скан или фото, нужную форму не прочитать
     public const UNREADABLE       = 'unreadable';        // файл не открылся: битый или его нет на диске
 
@@ -38,12 +39,13 @@ class AutoAuditResult extends Model
         self::UNVERIFIED       => 'Не удалось проверить',
         self::MISSING_DOCUMENT => 'Нет документа',
         self::WRONG_DOCUMENT   => 'Не тот документ',
+        self::WRONG_PERIOD     => 'Не тот период',
         self::SCAN             => 'Скан, не прочитать',
         self::UNREADABLE       => 'Файл не открылся',
     ];
 
-    /** Файлы есть, но прочитать нужную форму не вышло. Период у таких строк взят по задаче. */
-    public const DOCUMENT_PROBLEMS = [self::WRONG_DOCUMENT, self::SCAN, self::UNREADABLE];
+    /** Беда с файлами задачи: не та форма, не тот период, скан, не открылся. Период у таких строк взят по задаче. */
+    public const DOCUMENT_PROBLEMS = [self::WRONG_DOCUMENT, self::WRONG_PERIOD, self::SCAN, self::UNREADABLE];
 
     /**
      * Итоги, по которым ждём ответа бухгалтера: по ним прогон открывает находку.
@@ -51,7 +53,7 @@ class AutoAuditResult extends Model
      * Скан и «Не удалось проверить» сюда не входят. Скан система не читает, а «не удалось
      * проверить» значит, что не уверена она сама: спрашивать за это с бухгалтера нечестно.
      */
-    public const FINDING_OUTCOMES = [self::MISMATCH, self::MISSING_DOCUMENT, self::WRONG_DOCUMENT, self::UNREADABLE];
+    public const FINDING_OUTCOMES = [self::MISMATCH, self::MISSING_DOCUMENT, self::WRONG_DOCUMENT, self::WRONG_PERIOD, self::UNREADABLE];
 
     protected $fillable = [
         'client_id', 'rule', 'period_from', 'period_to', 'outcome',

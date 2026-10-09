@@ -4,6 +4,7 @@ namespace App\Services\AutoAudit;
 
 use App\Models\AutoAuditResult;
 use App\Models\AutoAuditWatchRun;
+use App\Models\BuhTaskDocument;
 use App\Models\BuhTaskLog;
 use App\Models\Client;
 use App\Models\Service;
@@ -171,6 +172,12 @@ class AutoAuditRunner
      * копеек, перестал бы верить странице. Сом выбрал Искендер.
      */
     private const TOLERANCE = 1.00;
+
+    /**
+     * С какого отчётного месяца ловим документ не за тот период. Новая проверка не лезет в
+     * прошлое: начали с августа 2026 (задачи сентября), так решил Искендер 09.10.2026.
+     */
+    private const WRONG_PERIOD_FROM = '2026-08';
 
     /**
      * Счета ОСВ, которые проверка берёт в этой фирме: свои, если фирме их задали, иначе
@@ -412,6 +419,12 @@ class AutoAuditRunner
             foreach ($this->documentProblems($client, $side, $found) as $row) {
                 $rows[] = array_merge($row, ['rule' => implode(',', $numbers)]);
             }
+
+            // Файл не за тот период в пары не ставим: ОСВ за август 2025 в задаче 2026 года
+            // встала бы к чужим отчётам. О нём уже сказала строка «Не тот период».
+            $documents[$side] = $found
+                ->reject(fn (array $pair) => $this->periodMismatch($pair[0], $side, $this->probe($client, $side, $pair[1])) !== null)
+                ->values();
         }
 
         $logs = [];
@@ -615,6 +628,9 @@ class AutoAuditRunner
      *   - все файлы открылись и прочитались, но это другие формы или другая организация:
      *     вот тогда «не тот документ».
      *
+     * Форма опознана, но ни один файл задачи не за тот месяц, что нужен по задаче: «не тот
+     * период» (см. periodMismatch). Если хоть один файл за нужный месяц, вопроса нет.
+     *
      * Отчётный период из такого файла не прочитать, а на странице строки выбираются по
      * периоду. Берём месяц перед месяцем задачи: отчёт за июль сдают в августовской задаче.
      */
@@ -625,22 +641,44 @@ class AutoAuditRunner
         foreach ($documents->groupBy(fn (array $pair) => $pair[0]->id) as $pairs) {
             $sources    = [];
             $recognized = false;
+            $inPeriod   = false;
+            $mismatches = [];
 
             foreach ($pairs as [$log, $document]) {
-                $value = $this->sources->read($client, $side, AutoAuditSources::SIDES[$side]['probe'], $document);
+                $value = $this->probe($client, $side, $document);
 
                 // Период читалка отдаёт, только когда форма опознана.
                 $recognized = $recognized || $value->period !== null;
                 $sources[]  = $this->sources->source($side, $log, $document, $value);
+
+                if ($value->period !== null) {
+                    $mismatch = $this->periodMismatch($log, $side, $value);
+                    $inPeriod = $inPeriod || $mismatch === null;
+
+                    if ($mismatch !== null) {
+                        $mismatches[] = sprintf('файл «%s» за %s', $document->name, $mismatch);
+                    }
+                }
             }
 
-            if ($recognized) {
+            if ($recognized && $inPeriod) {
                 continue;
             }
 
             $statuses = array_column($sources, 'status');
 
             [$outcome, $reason] = match (true) {
+                $recognized => [
+                    AutoAuditResult::WRONG_PERIOD,
+                    sprintf(
+                        'В задаче за %02d.%d %s, а нужен за %s%s',
+                        $log->month,
+                        $log->year,
+                        implode(', ', $mismatches),
+                        $this->expectedMonth($log)->title(),
+                        $side === 'tax' ? ' или за квартал' : '',
+                    ),
+                ],
                 in_array(DocumentValue::SCAN, $statuses, true) => [
                     AutoAuditResult::SCAN,
                     'Документ отсканирован или сфотографирован, прочитать его пока нельзя',
@@ -661,9 +699,7 @@ class AutoAuditRunner
                 ],
             };
 
-            // С первого числа, иначе «31 августа минус месяц» перельётся мимо июля.
-            $month  = CarbonImmutable::create($log->year, $log->month, 1)->subMonth();
-            $period = DocumentPeriod::of($month->year, $month->month);
+            $period = $this->expectedMonth($log);
 
             $rows[] = [
                 'client_id'   => $client->id,
@@ -680,6 +716,49 @@ class AutoAuditRunner
         }
 
         return $rows;
+    }
+
+    /** Файл, прочитанный ради периода: тем же числом, что и documentProblems, из кеша. */
+    private function probe(Client $client, string $side, BuhTaskDocument $document): DocumentValue
+    {
+        return $this->sources->read($client, $side, AutoAuditSources::SIDES[$side]['probe'], $document);
+    }
+
+    /** Отчётный месяц задачи: работу за июль делают в августе. */
+    private function expectedMonth(BuhTaskLog $log): DocumentPeriod
+    {
+        // С первого числа, иначе «31 августа минус месяц» перельётся мимо июля.
+        $month = CarbonImmutable::create($log->year, $log->month, 1)->subMonth();
+
+        return DocumentPeriod::of($month->year, $month->month);
+    }
+
+    /**
+     * За какой период файл, если не за тот, что нужен по задаче, иначе null.
+     *
+     * Месячный документ должен быть ровно за месяц перед задачей. Квартальный отчёт по ЕН
+     * сдают не всегда сразу: годится квартал, который кончился в одном из трёх месяцев перед
+     * задачей. Всё остальное не тот период: ОСВ за август 2025 в задаче 2026 года (Дипмаркет,
+     * 09.10.2026), ОСВ за год, ОСВ с 1 по 15 число. Файл без периода сюда не попадает, о нём
+     * говорят другие исходы.
+     */
+    private function periodMismatch(BuhTaskLog $log, string $side, DocumentValue $value): ?string
+    {
+        $period   = $value->period;
+        $expected = $this->expectedMonth($log);
+
+        if ($period === null || $expected->from->format('Y-m') < self::WRONG_PERIOD_FROM || $period->equals($expected)) {
+            return null;
+        }
+
+        $months  = count($period->months());
+        $quarter = $side === 'tax'
+            && $months === 3
+            && $period->from->day === 1
+            && $period->to->isSameDay($period->to->endOfMonth())
+            && $period->to->startOfMonth()->betweenIncluded($expected->from->subMonths(2), $expected->from);
+
+        return $quarter ? null : $period->title();
     }
 
     /** Причина про чужой ИНН среди файлов задачи, если она там есть. */

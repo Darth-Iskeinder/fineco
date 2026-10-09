@@ -15,6 +15,7 @@
         AutoAuditResult::UNVERIFIED       => 'bg-orange-50 text-orange-700',
         AutoAuditResult::MISSING_DOCUMENT => 'bg-amber-50 text-amber-700',
         AutoAuditResult::WRONG_DOCUMENT   => 'bg-amber-50 text-amber-700',
+        AutoAuditResult::WRONG_PERIOD     => 'bg-amber-50 text-amber-700',
         AutoAuditResult::SCAN             => 'bg-slate-100 text-slate-600',
         AutoAuditResult::UNREADABLE       => 'bg-slate-100 text-slate-600',
     ];
@@ -26,6 +27,7 @@
         AutoAuditResult::UNVERIFIED       => 'bg-orange-500',
         AutoAuditResult::MISSING_DOCUMENT => 'bg-amber-600',
         AutoAuditResult::WRONG_DOCUMENT   => 'bg-amber-600',
+        AutoAuditResult::WRONG_PERIOD     => 'bg-amber-600',
         AutoAuditResult::SCAN             => 'bg-slate-300',
         AutoAuditResult::UNREADABLE       => 'bg-slate-300',
     ];
@@ -37,6 +39,7 @@
         AutoAuditResult::UNVERIFIED       => 'Система не уверена в числах и вердикт не выносит. Сверить глазами',
         AutoAuditResult::MISSING_DOCUMENT => 'Задача закрыта, а нужного документа к ней не приложили',
         AutoAuditResult::WRONG_DOCUMENT   => 'К задаче приложен не тот документ или документ другой фирмы',
+        AutoAuditResult::WRONG_PERIOD     => 'Документ тот, но за другой месяц или год, чем нужен по задаче',
         AutoAuditResult::SCAN             => 'Приложен скан или фото, система такие не читает',
         AutoAuditResult::UNREADABLE       => 'Файл повреждён или пропал',
     ];

@@ -1011,6 +1011,80 @@ class AutoAuditRunTest extends TestCase
      * Форма 161 вместо отчёта по налогу: в сверку файл не идёт, зато под проверками
      * клиента стоит «не тот документ». Остальных клиентов это не задевает.
      */
+    // ── Не тот период ─────────────────────────────────────────────────────
+
+    /**
+     * ОСВ за август 2025 в задаче за 09.2026: вопрос «Не тот период», и в пару с отчётом за
+     * август 2026 она не встаёт. Так было на бою у Дипмаркета 09.10.2026.
+     */
+    public function test_sheet_of_another_year_is_a_wrong_period(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00], month: 8, taskMonth: 9);
+        $this->sheets['осв.xls']['month'] = [2025, 8];
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00, month: 8, taskMonth: 9);
+
+        $results = $this->runAudit();
+        $row     = $results->sole();
+
+        $this->assertSame(AutoAuditResult::WRONG_PERIOD, $row->outcome);
+        $this->assertSame('В задаче за 09.2026 файл «осв.xls» за август 2025, а нужен за август 2026', $row->reason);
+        $this->assertSame(['2026-08-01', '2026-08-31'], [$row->period_from->toDateString(), $row->period_to->toDateString()]);
+        $this->assertSame([1, 3], $row->ruleNumbers());
+        $this->assertSame(1, AutoAuditFinding::where('key', $row->key())->count());
+    }
+
+    /** ОСВ за нужный месяц: вопроса про период нет, сверка идёт как обычно. */
+    public function test_sheet_of_the_right_month_is_checked_as_usual(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00], month: 8, taskMonth: 9);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00, month: 8, taskMonth: 9);
+
+        $results = $this->runAudit();
+
+        $this->assertSame([AutoAuditResult::MATCHED], $results->pluck('outcome')->unique()->values()->all());
+    }
+
+    /** В задаче два файла, один из них за нужный месяц: это не ошибка, вопроса нет. */
+    public function test_one_file_of_the_right_month_is_enough(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00], month: 8, taskMonth: 9);
+        $this->addFile(BuhTaskLog::latest('id')->first(), 'осв-прошлый-год.xls');
+        $this->sheets['осв-прошлый-год.xls'] = ['month' => [2025, 8], 'accounts' => ['3210' => 999.00, '3410' => 9.00]];
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00, month: 8, taskMonth: 9);
+
+        $results = $this->runAudit();
+
+        $this->assertSame([AutoAuditResult::MATCHED], $results->pluck('outcome')->unique()->values()->all());
+        $this->assertSame(['осв.xls', 'отчёт.pdf'], collect($results->first()->sources)->pluck('name')->all());
+    }
+
+    /** Квартал сдали через месяц после конца: это нормально, вопроса про период нет. */
+    public function test_quarter_filed_a_month_late_is_not_a_wrong_period(): void
+    {
+        $client = $this->client();
+        $this->attachQuarterReport($client, 'отчёт-кв3.pdf', base: 300.00, tax: 12.00, month: 11);
+        $this->reports['отчёт-кв3.pdf']['period'] = new DocumentPeriod(DocumentPeriod::of(2026, 7)->from, DocumentPeriod::of(2026, 9)->to);
+
+        $results = $this->runAudit();
+
+        $this->assertCount(0, $results->where('outcome', AutoAuditResult::WRONG_PERIOD));
+    }
+
+    /** Июль раньше старта проверки: старые задачи вопросов про период не получают. */
+    public function test_wrong_period_before_august_2026_is_not_asked(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00], month: 7, taskMonth: 8);
+        $this->sheets['осв.xls']['month'] = [2025, 7];
+
+        $results = $this->runAudit();
+
+        $this->assertCount(0, $results->where('outcome', AutoAuditResult::WRONG_PERIOD));
+    }
+
     public function test_wrong_document_is_listed_and_does_not_block_others(): void
     {
         $broken = $this->client();
@@ -4186,6 +4260,14 @@ class AutoAuditRunTest extends TestCase
             'inn'   => $inn ?? $client->inn,
         ];
         $this->attachLog($client, $item ?? $this->item($client, $this->taxService), $file, $status, $taskMonth);
+    }
+
+    /** Ещё один файл в ту же задачу. */
+    private function addFile(BuhTaskLog $log, string $file): void
+    {
+        $path = "buh_task_documents/{$log->id}/{$file}";
+        Storage::disk('local')->put($path, 'x');
+        $log->documents()->create(['path' => $path, 'name' => $file]);
     }
 
     /** Задача за август (отчитываются в следующем месяце) с приложенным файлом. */
