@@ -1272,14 +1272,14 @@ class AutoAuditRunTest extends TestCase
     }
 
     /**
-     * Оборота в ведомости нет, и в документе тоже ноль.
+     * Оборота в ведомости нет, и в документе прочитан ноль: операций не было, это «Совпало».
      *
-     * Раньше это было «Совпало»: 1С не печатает счёт без оборотов, и ноль слева считался
-     * честным. Но справа ноль мог быть и непрочитанным числом, а зелёная плашка говорила,
-     * что всё сверено. Так собиралось ложное «Совпало» из двух чисел, которых никто не
-     * печатал, и ради этого случая исход «Не удалось проверить» и появился.
+     * С 18.09.2026 это было «Не удалось проверить»: справа ноль мог оказаться непрочитанным
+     * числом. Теперь «не разобрали число» отдельный исход, и ноль справа прочитан, а не
+     * подставлен. Искендер вернул «Совпало» 09.10.2026: у ИП без работников такие «?»
+     * шли десятками в месяц. Пометка в строке говорит, что это ноль с нулём.
      */
-    public function test_two_zeros_do_not_make_a_match(): void
+    public function test_empty_sheet_and_zero_in_document_match(): void
     {
         $client = $this->client();
         $this->attachSheet($client, 'осв.xls', ['3210' => 100.00]);
@@ -1287,17 +1287,29 @@ class AutoAuditRunTest extends TestCase
 
         $results = $this->runAudit();
 
-        // Проверка №1 сверяет настоящие числа с обеих сторон и проходит как раньше.
         $this->assertSame(AutoAuditResult::MATCHED, $results->firstWhere('rule', '1')->outcome);
 
         $tax = $results->firstWhere('rule', '3');
-        $this->assertSame(AutoAuditResult::UNVERIFIED, $tax->outcome);
-        $this->assertNull($tax->left_value);
-        $this->assertNull($tax->right_value);
-        $this->assertNull($tax->difference);
-        $this->assertStringContainsString('нет оборота по счёту 3410', $tax->reason);
-        // Документы видны рядом: человек откроет их и проверит сам.
+        $this->assertSame(AutoAuditResult::MATCHED, $tax->outcome);
+        $this->assertSame(['0.00', '0.00', '0.00'], [$tax->left_value, $tax->right_value, $tax->difference]);
+        $this->assertSame('Оборота нет ни в учёте, ни в документе: в ведомости за июль 2026 нет оборота по счёту 3410', $tax->reason);
         $this->assertSame(['осв.xls', 'отчёт.pdf'], array_column($tax->sources, 'name'));
+    }
+
+    /**
+     * В ведомости пусто, а в документе копейки: по допуску в сом это сошлось бы, но откуда
+     * 50 тыйынов при пустом счёте, непонятно. Вердикт не выносим.
+     */
+    public function test_empty_sheet_against_copecks_is_not_verified(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 0.50);
+
+        $tax = $this->runAudit()->firstWhere('rule', '3');
+
+        $this->assertSame(AutoAuditResult::UNVERIFIED, $tax->outcome);
+        $this->assertStringContainsString('нет оборота по счёту 3410', $tax->reason);
     }
 
     /**
@@ -1939,9 +1951,10 @@ class AutoAuditRunTest extends TestCase
     /** Новый исход виден на странице: своя подпись, свой счётчик и свой фильтр. */
     public function test_unverified_is_shown_and_filtered_on_the_page(): void
     {
+        // Число в ячейке 3410 есть, но не разобрано: вердикта нет.
         $unclear = $this->client(['name' => 'ООО Непонятно ' . uniqid()]);
-        $this->attachSheet($unclear, 'осв-непонятно.xls', ['3210' => 100.00]);
-        $this->attachReport($unclear, 'отчёт-непонятно.pdf', base: 100.00, tax: 0.00);
+        $this->attachSheet($unclear, 'осв-непонятно.xls', ['3210' => 100.00, '3410' => null]);
+        $this->attachReport($unclear, 'отчёт-непонятно.pdf', base: 100.00, tax: 4.00);
 
         $matched = $this->client(['name' => 'ООО Сошлось ' . uniqid()]);
         $this->attachSheet($matched, 'осв-сошлось.xls', ['3210' => 100.00, '3410' => 4.00]);
@@ -3588,8 +3601,8 @@ class AutoAuditRunTest extends TestCase
         $this->assertSame(AutoAuditResult::MATCHED, $this->runAudit()->firstWhere('rule', '3')->outcome);
     }
 
-    /** Нет ни одного счёта фирмы: как и с одним счётом, ноль против нуля не считаем проверкой. */
-    public function test_no_firm_account_in_sheet_is_not_a_match(): void
+    /** Нет ни одного счёта фирмы, и в документе ноль: как и с одним счётом, это «Совпало» с пометкой. */
+    public function test_no_firm_account_in_sheet_and_zero_in_document_match(): void
     {
         $this->tenant->setAutoAuditAccounts(3, ['3410', '3490'], 'вендор');
         $client = $this->client();
@@ -3598,8 +3611,8 @@ class AutoAuditRunTest extends TestCase
 
         $tax = $this->runAudit()->firstWhere('rule', '3');
 
-        $this->assertSame(AutoAuditResult::UNVERIFIED, $tax->outcome);
-        $this->assertStringContainsString('нет оборота по счетам 3410, 3490', $tax->reason);
+        $this->assertSame(AutoAuditResult::MATCHED, $tax->outcome);
+        $this->assertStringContainsString('Оборота нет ни в учёте, ни в документе: в ведомости за июль 2026 нет оборота по счетам 3410, 3490', $tax->reason);
     }
 
     /** Фирма без своих счетов: источник и пометки ровно прежние, прогон не видит изменений. */
