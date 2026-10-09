@@ -2646,6 +2646,26 @@ class AutoAuditRunTest extends TestCase
             ->assertSee('Без ответа: 1');
     }
 
+    /**
+     * Двойной клик по «Отправить бухгалтеру» пишет одно «Не принято», а не два. Другой текст
+     * следом это уже новое сообщение. 07.10.2026 на бою у «Нова Трек» легло два одинаковых.
+     */
+    public function test_double_click_on_a_decision_writes_it_once(): void
+    {
+        [, $mismatch] = $this->mismatchRow();
+        $finding = AutoAuditFinding::sole();
+        $reject  = fn (string $body) => $this->asVendor()
+            ->post(route('auto-audit.findings.reject', $finding), ['result_id' => $mismatch->id, 'body' => $body])
+            ->assertSessionHasNoErrors();
+
+        $reject('Где пояснение?');
+        $reject('Где пояснение?');
+        $this->assertSame(1, AutoAuditFindingMessage::count());
+
+        $reject('И приложите ОСВ');
+        $this->assertSame(2, AutoAuditFindingMessage::count());
+    }
+
     /** Между загрузкой страницы и кликом прошёл прогон: решение по старой строке не пишем. */
     public function test_decision_on_a_changed_row_is_refused(): void
     {
@@ -3061,6 +3081,24 @@ class AutoAuditRunTest extends TestCase
 
         $this->assertSame(0, AutoAuditFindingMessage::count());
         $this->assertSame(['осв.xls'], $this->logOf('осв.xls')->documents()->pluck('name')->all());
+    }
+
+    /** Двойной клик по «Отправить руководителю» пишет одно объяснение. */
+    public function test_double_click_on_an_explanation_writes_it_once(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $doer = $this->accountant();
+        [, $mismatch] = $this->mismatchRow();
+        $this->ownedBy('осв.xls', $doer);
+        $finding = AutoAuditFinding::sole();
+
+        foreach ([1, 2] as $click) {
+            $this->actingAs($doer, 'employee')
+                ->postJson(route('buhtasks.audit-questions.explain', $finding), ['result_id' => $mismatch->id, 'body' => 'Возврат покупателю'])
+                ->assertOk();
+        }
+
+        $this->assertSame(1, AutoAuditFindingMessage::count());
     }
 
     /** Между загрузкой страницы и ответом прошёл прогон и итог сменился: ответ не пишем. */
@@ -3887,6 +3925,10 @@ class AutoAuditRunTest extends TestCase
             $run->checks_by_month, $run->alarms, $run->alarms_by_month,
         ]);
         $this->assertSame(0, $run->clients()->count());
+
+        $this->artisan('autoaudit:watch', ['--tenant' => $this->tenant->id])
+            ->expectsOutputToContain('проверять никого не нужно')
+            ->assertSuccessful();
     }
 
     /** Файлы за новый месяц: задет только он, июль перепроверять не нужно. */

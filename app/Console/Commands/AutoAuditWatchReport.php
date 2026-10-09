@@ -72,9 +72,14 @@ class AutoAuditWatchReport extends Command
         $clients = $run->clients()->with('client:id,name')->get();
 
         $this->newLine();
-        $this->line('Последний прогон по причинам:');
 
-        foreach ($clients->groupBy('reason') as $reason => $group) {
+        if ($clients->where('reason', '!=', AutoAuditWatchClient::SAME)->isEmpty()) {
+            $this->line('Последний прогон: проверять никого не нужно');
+        } else {
+            $this->line('Последний прогон по причинам:');
+        }
+
+        foreach ($clients->where('reason', '!=', AutoAuditWatchClient::SAME)->groupBy('reason') as $reason => $group) {
             $this->line(sprintf('  %s: %d', AutoAuditWatchClient::REASONS[$reason] ?? $reason, $group->count()));
         }
 

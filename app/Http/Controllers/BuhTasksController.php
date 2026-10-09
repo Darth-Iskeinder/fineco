@@ -1084,7 +1084,7 @@ class BuhTasksController extends Controller
 
     private function answerAuditQuestion(array $question, string $kind, string $body): void
     {
-        $question['finding']->messages()->create([
+        $question['finding']->addMessage([
             'result_id'   => $question['result']->id,
             'employee_id' => auth('employee')->id(),
             'by_vendor'   => Impersonation::isActive(),

@@ -307,20 +307,21 @@
 
                                         @if ($findingState !== AutoAuditFinding::ACCEPTED)
                                             <div class="flex items-start gap-2 pt-1">
-                                                <form method="POST" action="{{ route('auto-audit.findings.accept', $finding) }}">
+                                                {{-- Кнопка гаснет после первого нажатия: двойной клик давал два одинаковых решения. --}}
+                                                <form method="POST" action="{{ route('auto-audit.findings.accept', $finding) }}" onsubmit="this.querySelector('button').disabled = true">
                                                     @csrf
                                                     <input type="hidden" name="result_id" value="{{ $result->id }}">
-                                                    <button type="submit" class="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 font-semibold hover:bg-emerald-100 transition-colors">Принять</button>
+                                                    <button type="submit" class="px-2 py-1 rounded-lg bg-emerald-50 text-emerald-700 font-semibold hover:bg-emerald-100 disabled:opacity-50 transition-colors">Принять</button>
                                                 </form>
                                                 {{-- Комментарий обязателен: бухгалтеру надо понять, что не так. --}}
                                                 <details class="flex-1">
                                                     <summary class="inline-block px-2 py-1 rounded-lg bg-red-50 text-red-700 font-semibold cursor-pointer" style="list-style: none">Не принято</summary>
-                                                    <form method="POST" action="{{ route('auto-audit.findings.reject', $finding) }}" class="mt-2 space-y-2">
+                                                    <form method="POST" action="{{ route('auto-audit.findings.reject', $finding) }}" class="mt-2 space-y-2" onsubmit="this.querySelector('button').disabled = true">
                                                         @csrf
                                                         <input type="hidden" name="result_id" value="{{ $result->id }}">
                                                         <textarea name="body" rows="3" required maxlength="2000" placeholder="Что не так с ответом"
                                                                   class="w-full rounded-lg border border-slate-200 text-xs px-2 py-1"></textarea>
-                                                        <button type="submit" class="px-2 py-1 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 transition-colors">Отправить бухгалтеру</button>
+                                                        <button type="submit" class="px-2 py-1 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-700 disabled:opacity-50 transition-colors">Отправить бухгалтеру</button>
                                                     </form>
                                                 </details>
                                             </div>

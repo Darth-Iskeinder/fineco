@@ -174,7 +174,7 @@ class AutoAuditController extends Controller
             return back()->with('error', 'После вашего входа на страницу прошла проверка и строка изменилась. Обновите страницу и посмотрите ещё раз');
         }
 
-        $finding->messages()->create([
+        $finding->addMessage([
             'result_id'   => $result->id,
             'employee_id' => auth('employee')->id(),
             'by_vendor'   => Impersonation::isActive(),

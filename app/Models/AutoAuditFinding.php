@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Находка автоаудита: проблемная строка, по которой ждём ответа бухгалтера.
@@ -49,6 +50,35 @@ class AutoAuditFinding extends Model
     public function scopeOpen(Builder $query): void
     {
         $query->whereNull('closed_at');
+    }
+
+    /**
+     * Записать сообщение по находке. Все ответы и решения идут только через этот метод.
+     *
+     * Точно такое же сообщение подряд (тот же человек, то же действие, тот же текст, та же
+     * строка) не пишется: это двойной клик. 07.10.2026 «Не принято» по «Нова Трек» легло
+     * дважды в одну минуту. Строку находки блокируем на время проверки, иначе два запроса,
+     * пришедшие одновременно, оба увидели бы, что такого сообщения ещё нет.
+     */
+    public function addMessage(array $attributes): AutoAuditFindingMessage
+    {
+        return DB::transaction(function () use ($attributes) {
+            self::whereKey($this->id)->lockForUpdate()->first();
+
+            $last = $this->messages()->reorder('id', 'desc')->first();
+
+            if (
+                $last
+                && $last->kind === $attributes['kind']
+                && (int) $last->employee_id === (int) ($attributes['employee_id'] ?? 0)
+                && (int) $last->result_id === (int) ($attributes['result_id'] ?? 0)
+                && (string) $last->body === (string) ($attributes['body'] ?? '')
+            ) {
+                return $last;
+            }
+
+            return $this->messages()->create($attributes);
+        });
     }
 
     /**

@@ -3138,6 +3138,8 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         /** Ответ ушёл: вопрос пропадает из списка, пока руководитель не решит или прогон не покажет новое. */
         async submitAuditQuestion() {
             const m = this.auditModal;
+            // Второй клик, пока первый ещё отправляется: кнопка гаснет не мгновенно.
+            if (m.saving) return;
             m.error = '';
             let data;
 
