@@ -436,6 +436,28 @@ class AutoAuditClientsPageTest extends TestCase
         $this->assertSame(AutoAuditClientBoard::NOTHING, $this->statusOf($client, '2026-09'));
     }
 
+    /**
+     * Ответ ждёт решения: карточка пишет «Ход руководителя», а не имя главбуха клиента, и
+     * даёт ссылку на ту же строку на «Все сверки». Решает там руководитель (09.10.2026).
+     */
+    public function test_card_sends_the_answer_to_the_manager_on_all_checks(): void
+    {
+        $client = $this->client();
+        $this->doneTask($client, $this->item($client, $this->osv));
+        $result  = $this->auditRow($client, '4', AutoAuditResult::MISMATCH);
+        $finding = $this->finding($result);
+        $finding->messages()->create([
+            'result_id' => $result->id, 'employee_id' => $this->admin->id,
+            'kind' => AutoAuditFindingMessage::EXPLAINED, 'body' => 'Взнос ИП за себя',
+        ]);
+
+        $this->asVendor()->get(route('auto-audit.clients.card', [$client->id, 'month' => '2026-09']))
+            ->assertOk()
+            ->assertSee('Ход руководителя')
+            ->assertDontSee('Ход главбуха')
+            ->assertSee(route('auto-audit.index', ['period' => '2026-09-01..2026-09-30', 'rule' => 4, 'status' => AutoAuditResult::MISMATCH]));
+    }
+
     /** Требование: таблица грузит итог константным числом запросов, сколько бы ни было клиентов. */
     public function test_query_count_does_not_grow_with_clients(): void
     {

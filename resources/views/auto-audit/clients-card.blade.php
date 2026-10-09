@@ -124,11 +124,18 @@
                                 @case(Board::TURN_ACCOUNTANT)
                                     <div><span class="font-semibold text-amber-700">Ход бухгалтера {{ $doers($result) }}</span>, висит {{ $days($issue['days']) }}</div>
                                     @if ($last?->kind === AutoAuditFindingMessage::REJECTED)
-                                        <div>Главбух не принял ответ, {{ $last->created_at->copy()->setTimezone(config('app.display_timezone'))->format('d.m') }}: «{{ $last->body }}»</div>
+                                        {{-- Не принять ответ может руководитель или вендор, не обязательно главбух клиента. --}}
+                                        <div>Ответ не принят, {{ AutoAuditSources::shortName($last->authorName()) }}, {{ $last->created_at->copy()->setTimezone(config('app.display_timezone'))->format('d.m') }}: «{{ $last->body }}»</div>
                                     @endif
                                     @break
                                 @case(Board::TURN_CHIEF)
-                                    <div><span class="font-semibold text-violet-700">Ход главбуха {{ $short($row['chief']) }}</span>, ответ висит {{ $days($issue['days']) }}</div>
+                                    {{-- Решает руководитель на «Все сверки», а не главбух клиента: тот часто сам и отвечал.
+                                         Ссылка открывает ту же строку: период, проверка и статус. --}}
+                                    <div>
+                                        <span class="font-semibold text-violet-700">Ход руководителя</span>, ответ висит {{ $days($issue['days']) }}.
+                                        <a href="{{ route('auto-audit.index', array_filter(['period' => $result->periodKey(), 'rule' => $result->ruleNumbers()[0] ?? null, 'status' => $result->outcome])) }}"
+                                           class="text-indigo-600 hover:underline">Решить на «Все сверки»</a>
+                                    </div>
                                     @break
                                 @case(Board::TURN_RUN)
                                     <div><span class="font-semibold text-sky-700">Бухгалтер исправил</span>, проверим ночью</div>

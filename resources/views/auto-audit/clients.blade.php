@@ -137,7 +137,7 @@
                class="flex-1 min-w-0 basis-56 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
         @php $onlyAction = !$all && !$status; @endphp
         <a href="{{ route('auto-audit.clients', $with(['all' => $onlyAction ? 1 : null, 'status' => null])) }}"
-           title="Просрочено, ждёт бухгалтера, ждёт главбуха, не проверено"
+           title="Просрочено, ждёт бухгалтера, ждёт руководителя, не проверено"
            @class(['rounded-lg border px-3 py-2 text-sm transition-colors', 'border-indigo-200 bg-indigo-50 text-indigo-700' => $onlyAction, 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50' => !$onlyAction])>
             Только требующие действия
         </a>
