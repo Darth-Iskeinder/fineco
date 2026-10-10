@@ -33,7 +33,19 @@
     // зелёные галочки, хотя сверки не было (Дипмаркет, 09.10.2026: ОСВ за август 2025).
     // Если сдана одна сторона, это не «Не проверено», а «Сверять нечего» (см. Board::NOTHING).
     $unpaired  = $status === Board::UNVERIFIED && !$cell['issues'] && !$openTasks;
-    $okTasks   = $unpaired ? [] : $doneTasks;
+
+    // Задачи, чьи файлы попали в открытый вопрос: номера проверок по задаче. Галочка у задачи
+    // значит «сдана и по её файлам всё сошлось», а не только «закрыта с файлом» (ФинЭко,
+    // 10.10.2026: №3 не сошлось, а ОСВ и отчёт по ЕН стояли в «В порядке»).
+    $questioned = [];
+    foreach ($problems as $issue) {
+        foreach (collect($issue['result']->sources ?? [])->pluck('log_id')->filter()->unique() as $logId) {
+            $questioned[(int) $logId] = array_unique(array_merge($questioned[(int) $logId] ?? [], $issue['result']->ruleNumbers()));
+        }
+    }
+    $isQuestioned = fn (array $t) => $t['log'] && isset($questioned[$t['log']->id]);
+    $askedTasks   = $unpaired ? [] : array_filter($doneTasks, $isQuestioned);
+    $okTasks      = $unpaired ? [] : array_filter($doneTasks, fn (array $t) => !$isQuestioned($t));
     $readTitle = fn ($read) => $read?->period_from && $read?->period_to
         ? (new DocumentPeriod(CarbonImmutable::parse($read->period_from->toDateString()), CarbonImmutable::parse($read->period_to->toDateString())))->title()
         : null;
@@ -155,6 +167,19 @@
                             @if ($answer && $issue['turn'] !== Board::TURN_ACCOUNTANT)
                                 <div><b class="font-semibold">{{ AutoAuditSources::shortName($answer->authorName()) }}</b>, {{ $answer->created_at->copy()->setTimezone(config('app.display_timezone'))->format('d.m') }}: «{{ $answer->body ?: AutoAuditFindingMessage::LABELS[$answer->kind] }}»</div>
                             @endif
+                        </div>
+                    </div>
+                </div>
+            @endforeach
+
+            @foreach ($askedTasks as $task)
+                @php $numbers = $questioned[$task['log']->id]; sort($numbers); @endphp
+                <div class="grid grid-cols-[18px_minmax(0,1fr)] gap-x-2.5">
+                    <span class="text-center font-bold text-slate-400">•</span>
+                    <div>
+                        <div class="font-medium text-slate-900">{{ $task['name'] }}</div>
+                        <div class="text-[13px] text-slate-500">
+                            {{ $short($task['assignee']) }} · сдана, но есть вопрос {{ implode(', ', array_map(fn ($n) => '№' . $n, $numbers)) }}
                         </div>
                     </div>
                 </div>

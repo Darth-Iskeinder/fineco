@@ -458,6 +458,32 @@ class AutoAuditClientsPageTest extends TestCase
             ->assertSee(route('auto-audit.index', ['period' => '2026-09-01..2026-09-30', 'rule' => 4, 'status' => AutoAuditResult::MISMATCH]));
     }
 
+    /**
+     * Сверка по файлам ОСВ не сошлась: задача ОСВ не в «В порядке», а с пометкой о вопросе.
+     * Форма 161 в вопрос не попала и остаётся с галочкой. На бою 10.10.2026 так ФинЭко.
+     */
+    public function test_card_does_not_tick_a_task_whose_file_has_a_question(): void
+    {
+        $client = $this->client();
+        $osv    = $this->doneTask($client, $this->item($client, $this->osv));
+        $form   = $this->item($client, $this->form161);
+        $form->update(['name' => 'Форма без вопросов']);
+        $this->doneTask($client, $form);
+        $result = $this->auditRow($client, '3', AutoAuditResult::MISMATCH);
+        $result->update(['sources' => [['log_id' => $osv->id, 'name' => 'осв.pdf']]]);
+        $this->finding($result);
+
+        $html = $this->asVendor()->get(route('auto-audit.clients.card', [$client->id, 'month' => '2026-09']))
+            ->assertOk()
+            ->assertSee('сдана, но есть вопрос №3')
+            ->assertSee('В порядке: 1 задача')
+            ->getContent();
+
+        // Задача с вопросом стоит в «Что не так», до блока «В порядке», а форма после него.
+        $this->assertLessThan(strpos($html, 'В порядке'), strpos($html, 'сдана, но есть вопрос'));
+        $this->assertGreaterThan(strpos($html, 'В порядке'), strpos($html, 'Форма без вопросов'));
+    }
+
     /** Начатая и брошенная задача видна как «на паузе», а не просто «не закрыта». */
     public function test_card_shows_a_paused_overdue_task_as_paused(): void
     {
