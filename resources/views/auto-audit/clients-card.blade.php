@@ -38,6 +38,14 @@
         ? (new DocumentPeriod(CarbonImmutable::parse($read->period_from->toDateString()), CarbonImmutable::parse($read->period_to->toDateString())))->title()
         : null;
 
+    // Где открытая задача: журнала нет или он не тронут, значит не начата.
+    $taskState = fn ($log) => match ($log?->status) {
+        'running' => 'в работе',
+        'paused'  => 'на паузе',
+        'rework'  => 'на доработке',
+        default   => 'не начата',
+    };
+
     // Кто делал задачи строки: исполнители из «откуда взято», иначе бухгалтер клиента.
     $doers = fn (AutoAuditResult $r) => collect($r->sources ?? [])->pluck('employee')->filter()->unique()->implode(', ') ?: $short($row['accountant']);
 @endphp
@@ -83,7 +91,8 @@
                     <div>
                         <div class="font-medium text-slate-900">{{ $task['name'] }}</div>
                         <div @class(['text-[13px]', 'text-red-700' => $late, 'text-slate-500' => !$late])>
-                            {{ $short($task['assignee']) }} · {{ $task['log'] ? 'не закрыта' : 'не начата' }}@if ($task['due']), срок {{ $late ? 'был ' : '' }}{{ $task['due']->format('d.m') }}@endif
+                            {{-- Как в БухЗадачнике: «не начата» и «начата и стоит на паузе» для руководителя разные вещи. --}}
+                            {{ $short($task['assignee']) }} · {{ $taskState($task['log']) }}@if ($task['due']), срок {{ $late ? 'был ' : '' }}{{ $task['due']->format('d.m') }}@endif
                         </div>
                     </div>
                 </div>

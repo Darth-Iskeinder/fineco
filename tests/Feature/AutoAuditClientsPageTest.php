@@ -458,6 +458,22 @@ class AutoAuditClientsPageTest extends TestCase
             ->assertSee(route('auto-audit.index', ['period' => '2026-09-01..2026-09-30', 'rule' => 4, 'status' => AutoAuditResult::MISMATCH]));
     }
 
+    /** Начатая и брошенная задача видна как «на паузе», а не просто «не закрыта». */
+    public function test_card_shows_a_paused_overdue_task_as_paused(): void
+    {
+        $client = $this->client();
+        BuhTaskLog::create([
+            'employee_id' => $this->admin->id, 'client_id' => $client->id,
+            'estimate_item_id' => $this->item($client, $this->osv)->id,
+            'year' => 2026, 'month' => 10, 'status' => 'paused',
+        ]);
+
+        $this->asVendor()->get(route('auto-audit.clients.card', [$client->id, 'month' => '2026-09']))
+            ->assertOk()
+            ->assertSee('на паузе, срок был 05.10')
+            ->assertDontSee('не закрыта');
+    }
+
     /** Требование: таблица грузит итог константным числом запросов, сколько бы ни было клиентов. */
     public function test_query_count_does_not_grow_with_clients(): void
     {
