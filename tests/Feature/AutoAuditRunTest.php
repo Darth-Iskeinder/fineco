@@ -433,6 +433,28 @@ class AutoAuditRunTest extends TestCase
             ]);
     }
 
+    /**
+     * Форму 161 закрыли как «Нулевой», но файл приложили. Задача единственная: раньше её не
+     * ждали ни от кого, и №4-№7 уходили в «не нашли задачу» (Вектор Лоджик, 10.10.2026).
+     * Теперь верим файлу и пишем пометку.
+     */
+    public function test_force_closed_task_with_a_file_is_checked_by_the_file(): void
+    {
+        $f161   = $this->service('Форма 161 и зарплатные налоги', AutoAuditRunner::REF_FORM_161, splitsByBranch: true);
+        $client = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL, 'inn' => '00907202510583']);
+        $this->attachSheet($client, 'осв.xls', ['3520' => 25000.00]);
+        $this->attachForm($client, $f161, 'форма-161.pdf', income: 25000.00, inn: '00907202510583');
+        BuhTaskLog::where('client_id', $client->id)
+            ->whereHas('documents', fn ($q) => $q->where('name', 'форма-161.pdf'))
+            ->update(['force_closed' => true, 'force_close_reason' => BuhTaskLog::FORCE_ZERO]);
+
+        $row = $this->runAudit()->firstWhere('rule', '4');
+
+        $this->assertSame(AutoAuditResult::MATCHED, $row->outcome);
+        $this->assertSame('25000.00', $row->right_value);
+        $this->assertStringContainsString('Задача закрыта принудительно («Нулевой»), но файл приложен: сверили по файлу', $row->reason);
+    }
+
     /** Чужая форма 161: ИНН не тот, что в карточке. Это «не тот документ», а не расхождение в цифрах. */
     public function test_form_161_of_another_company_is_a_wrong_document(): void
     {

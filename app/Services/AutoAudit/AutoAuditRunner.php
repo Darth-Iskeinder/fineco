@@ -1082,17 +1082,26 @@ class AutoAuditRunner
      * количеством филиалов, и два файла от одного филиала закрывали дыру за второй: суммы
      * складывались, выходило «Совпало» по половине оборота, и ни одной пометки рядом.
      *
-     * Задача, закрытая как нулевая, тоже сдача: её ноль стоит среди отчётов.
+     * Задача, закрытая как нулевая, тоже сдача: её ноль стоит среди отчётов. Принудительно
+     * закрытая с прочитанным файлом тоже: сверяем по файлу и пишем об этом пометку.
      *
      * @return array{0: string[], 1: string[]} почему число неизвестно, и пометки к строке
      */
     private function branchIssues(Collection $reportLogs, DocumentPeriod $period, array $reports): array
     {
-        $counted = array_column(
+        // Принудительно закрытая задача, к которой всё же приложили прочитанный файл: верим
+        // файлу, филиал сдал. Иначе единственный такой филиал не ждали бы ни от кого, и
+        // сверка уходила в «не нашли задачу» (Вектор Лоджик, 10.10.2026: «Нулевой» и форма 161).
+        $forcedLogs = $reportLogs->where('force_closed', true)->keyBy('id');
+        $withFile   = array_filter(
+            $reports,
+            fn (array $report) => $report['status'] !== self::SOURCE_FORCED_ZERO && $forcedLogs->has($report['log_id'] ?? 0),
+        );
+        $counted  = array_column(
             array_filter($reports, fn (array $report) => $report['status'] === self::SOURCE_FORCED_ZERO),
             'log_id',
         );
-        $expected = $this->expectedBranches($reportLogs, $period, $counted);
+        $expected = $this->expectedBranches($reportLogs, $period, [...$counted, ...array_column($withFile, 'log_id')]);
         $filed    = [];
         $unknown  = [];
         $notes    = [];
@@ -1120,10 +1129,9 @@ class AutoAuditRunner
             }
         }
 
-        // Документ от филиала, которого мы не ждали: его задачу закрыли принудительно, а файл
-        // всё же приложили. Сумму это не портит, но человеку стоит знать, откуда лишний файл.
-        if ($expected && array_diff(array_keys($filed), $expected)) {
-            $notes[] = 'Среди документов есть отчёт филиала, чья задача закрыта принудительно';
+        foreach (array_unique(array_column($withFile, 'log_id')) as $logId) {
+            $reason  = BuhTaskLog::FORCE_REASONS[$forcedLogs[$logId]->force_close_reason][1] ?? null;
+            $notes[] = 'Задача закрыта принудительно' . ($reason ? " («{$reason}»)" : '') . ', но файл приложен: сверили по файлу';
         }
 
         return [$unknown, $notes];

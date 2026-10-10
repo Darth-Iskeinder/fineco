@@ -154,7 +154,7 @@ class AutoAuditSources
     {
         return BuhTaskLog::where('client_id', $client->id)
             ->whereHas('estimateItem', fn ($q) => $q->where('service_id', $service->id))
-            ->get(['id', 'estimate_item_id', 'year', 'month', 'force_closed']);
+            ->get(['id', 'estimate_item_id', 'year', 'month', 'force_closed', 'force_close_reason']);
     }
 
     /**
