@@ -38,10 +38,20 @@ trait HasWorkClock
         $this->save();
     }
 
+    /** Ночной прогон по Бишкеку: гасит то, что запустили после вечерней паузы. */
+    public const CLOCK_NIGHT_STOP = '03:00';
+
+    /** Сколько максимум засчитывается за один ночной запуск. */
+    public const CLOCK_NIGHT_MAX_SECONDS = 2 * 3600;
+
     /**
-     * Ближайшие 20:00 по Бишкеку после последнего запуска: до этого момента таймер считает
-     * честно, дальше его забыли. Считаем от запуска, а не от «сегодня», чтобы пропущенный
-     * вечерний прогон не засчитал человеку целые сутки.
+     * До какого момента таймер считает честно, дальше его забыли. Считаем от последнего
+     * запуска, а не от «сегодня», чтобы пропущенный прогон не засчитал человеку целые сутки.
+     *
+     * Днём (с 03:00 до 20:00) это ближайшие 20:00. Ночью (с 20:00 до 03:00) не больше двух
+     * часов и не дальше конца ночи: полуночи для вечернего запуска, 03:00 для запуска после
+     * полуночи. Раньше ночной запуск шёл до 20:00 следующего дня, и «Старт» в 20:02 с уходом
+     * домой давал 13 часов.
      */
     public function clockDailyStopAfterResume(): ?Carbon
     {
@@ -49,15 +59,25 @@ trait HasWorkClock
             return null;
         }
 
-        [$hour, $minute] = array_map('intval', explode(':', self::CLOCK_DAILY_STOP));
         $resumed = $this->resumed_at->copy()->setTimezone(self::CLOCK_TIMEZONE);
-        $stop    = $resumed->copy()->setTime($hour, $minute);
+        $evening = self::clockTimeOn($resumed, self::CLOCK_DAILY_STOP);
+        $night   = self::clockTimeOn($resumed, self::CLOCK_NIGHT_STOP);
 
-        if ($stop->lessThanOrEqualTo($resumed)) {
-            $stop->addDay();
+        if ($resumed->greaterThanOrEqualTo($night) && $resumed->lessThan($evening)) {
+            $stop = $evening;
+        } else {
+            $nightEnd = $resumed->greaterThanOrEqualTo($evening) ? $resumed->copy()->addDay()->startOfDay() : $night;
+            $stop     = $resumed->copy()->addSeconds(self::CLOCK_NIGHT_MAX_SECONDS)->min($nightEnd);
         }
 
         return $stop->setTimezone(config('app.timezone'));
+    }
+
+    private static function clockTimeOn(Carbon $day, string $time): Carbon
+    {
+        [$hour, $minute] = array_map('intval', explode(':', $time));
+
+        return $day->copy()->setTime($hour, $minute);
     }
 
     /**
