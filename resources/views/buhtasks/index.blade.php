@@ -2870,6 +2870,24 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             this.taskModalIdx = idx;
         },
 
+        // Ссылка ?open=planned-ID или adhoc-ID (из таймера в шапке): сразу открываем карточку
+        // задачи, чтобы не искать её в списке. Метку из адреса убираем, иначе карточка
+        // открывалась бы снова при каждом обновлении страницы.
+        openTaskFromUrl() {
+            const params = new URLSearchParams(location.search);
+            const m = /^(planned|adhoc)-(\d+)$/.exec(params.get('open') || '');
+            if (!m) return;
+
+            params.delete('open');
+            const qs = params.toString();
+            window.history.replaceState(null, '', qs ? location.pathname + '?' + qs : location.pathname);
+
+            const id = Number(m[2]);
+            const idx = this.tasks.findIndex(t => t.type === m[1]
+                && (m[1] === 'adhoc' ? t.adhoc_id === id : t.log_id === id));
+            if (idx !== -1) this.openTaskModal(idx);
+        },
+
         closeTaskModal() {
             this.taskModalIdx = null;
         },
@@ -3553,8 +3571,10 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             );
             this.ticker = setInterval(() => { this.now = Math.floor(Date.now() / 1000); }, 1000);
 
-            // Паузу нажали в шапке: показываем её и на строке задачи.
-            window.addEventListener('kubik-clock-paused', (e) => this.applyClockLogs([e.detail]));
+            // Паузу или завершение нажали в шапке: показываем это и на строке задачи.
+            window.addEventListener('kubik-clock-updated', (e) => this.applyClockLogs([e.detail]));
+
+            this.openTaskFromUrl();
 
             // Печать не должна ждать пересчёта: отбор запускаем, когда человек
             // остановился. Задержка маленькая, на глаз она читается как «мгновенно».

@@ -338,7 +338,7 @@
                              задаче нельзя было забыть: забытый таймер набивает часы по задаче. --}}
                         @if(auth('employee')->user()->hasAccessToModule('buhtasks'))
                             <div x-data="runningClock()" x-show="task" style="display:none"
-                                 class="flex items-center gap-2 pl-3 pr-1 py-1 rounded-xl bg-indigo-50 border border-indigo-100">
+                                 class="relative flex items-center gap-2 pl-3 pr-1 py-1 rounded-xl bg-indigo-50 border border-indigo-100">
                                 <span class="w-2 h-2 rounded-full bg-indigo-500 animate-pulse"></span>
                                 <a href="{{ route('buhtasks.index') }}"
                                    class="text-sm text-indigo-700 max-w-xs truncate"
@@ -349,6 +349,52 @@
                                         class="w-7 h-7 flex items-center justify-center rounded-lg text-indigo-500 hover:bg-indigo-100 transition-colors">
                                     <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M7 5h3v14H7zM14 5h3v14h-3z"/></svg>
                                 </button>
+                                {{-- Завершить отсюда же: после паузы задача уходит из виду, и её ищут по списку. --}}
+                                <button type="button" @click="confirming = true; problem = null" :disabled="busy" title="Завершить"
+                                        class="w-7 h-7 flex items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-100 transition-colors">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                                </button>
+
+                                {{-- Окно как на странице задач («Начать выполнение задачи?»). Выносим в body:
+                                     у шапки размытый фон, и внутри неё окно обрезалось бы её краями. --}}
+                                <template x-teleport="body">
+                                    <div x-show="confirming || problem"
+                                         x-transition:enter="ease-out duration-200" x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+                                         x-transition:leave="ease-in duration-150" x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+                                         class="fixed inset-0 z-[60] flex items-center justify-center bg-black/40"
+                                         @click.self="confirming = false; problem = null"
+                                         @keydown.escape.window="confirming = false; problem = null"
+                                         style="display:none">
+                                        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6">
+                                            <div class="flex items-start gap-4">
+                                                <div class="flex-shrink-0 w-11 h-11 rounded-full flex items-center justify-center"
+                                                     :class="problem ? 'bg-amber-100' : 'bg-emerald-100'">
+                                                    <svg x-show="!problem" class="w-5 h-5 text-emerald-600" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                                                    <svg x-show="problem" class="w-5 h-5 text-amber-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+                                                </div>
+                                                <div class="flex-1 min-w-0">
+                                                    <h3 class="text-base font-semibold text-slate-800"
+                                                        x-text="problem ? 'Задачу не удалось завершить' : 'Завершить задачу?'"></h3>
+                                                    <p class="mt-1 text-sm text-slate-500"
+                                                       x-text="problem ? problem.message : '«' + (task?.name || '') + '»' + (task?.client_name ? ', ' + task.client_name : '')"></p>
+                                                </div>
+                                            </div>
+                                            <div class="flex gap-3 mt-6">
+                                                <button type="button" @click="confirming = false; problem = null"
+                                                        class="flex-1 py-2.5 px-4 border border-slate-200 text-slate-600 text-sm font-medium rounded-xl hover:bg-slate-50 transition-colors"
+                                                        x-text="problem ? 'Закрыть' : 'Отмена'"></button>
+                                                <button type="button" x-show="!problem" @click="complete()" :disabled="busy"
+                                                        class="flex-1 py-2.5 px-4 bg-emerald-600 text-white text-sm font-medium rounded-xl hover:bg-emerald-700 transition-colors">
+                                                    Завершить
+                                                </button>
+                                                <a x-show="problem" :href="problem?.url"
+                                                   class="flex-1 py-2.5 px-4 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 transition-colors text-center">
+                                                    Открыть задачу
+                                                </a>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </template>
                             </div>
                         @endif
 
@@ -601,6 +647,8 @@
                 loadedAt: 0,
                 now: Date.now(),
                 busy: false,
+                confirming: false,
+                problem: null, // { message, url }: завершить не вышло, ведём в карточку задачи
 
                 init() {
                     this.load();
@@ -637,16 +685,50 @@
                             },
                         });
                         const data = await r.json().catch(() => ({}));
-                        // Страница БухЗадачника, если открыта, покажет паузу на своей строке.
-                        if (data.success) {
-                            window.dispatchEvent(new CustomEvent('kubik-clock-paused', {
-                                detail: { type: this.task.type, log: data.log },
-                            }));
-                        }
+                        if (data.success) this.tellPage(data.log);
                     } finally {
                         this.busy = false;
                         this.load();
                     }
+                },
+
+                // Завершение теми же правилами, что кнопка в строке: нужна проверка, уйдёт
+                // на проверку. Не хватает документа или галочек, задача не закроется, и мы
+                // ведём в её карточку, а не оставляем человека искать её в списке.
+                async complete() {
+                    if (!this.task || this.busy) return;
+                    this.busy = true;
+                    const task = this.task;
+                    try {
+                        const r = await fetch(task.complete_url, {
+                            method: 'POST',
+                            headers: {
+                                'Accept': 'application/json',
+                                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+                            },
+                        });
+                        const data = await r.json().catch(() => ({}));
+                        this.confirming = false;
+                        if (data.success) {
+                            this.tellPage(data.log, task.type);
+                        } else {
+                            this.problem = {
+                                message: data.message || 'Не удалось завершить задачу. Откройте её и попробуйте там.',
+                                url: task.open_url,
+                            };
+                        }
+                    } catch (e) {
+                        this.confirming = false;
+                        this.problem = { message: 'Нет связи с сервером. Попробуйте ещё раз.', url: task.open_url };
+                    } finally {
+                        this.busy = false;
+                        this.load();
+                    }
+                },
+
+                // Страница БухЗадачника, если открыта, покажет новое состояние на своей строке.
+                tellPage(log, type = this.task?.type) {
+                    window.dispatchEvent(new CustomEvent('kubik-clock-updated', { detail: { type, log } }));
                 },
             };
         }

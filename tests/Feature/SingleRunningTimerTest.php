@@ -230,7 +230,33 @@ class SingleRunningTimerTest extends TestCase
             ->assertJsonPath('running.type', 'adhoc')
             ->assertJsonPath('running.id', $adhoc->id)
             ->assertJsonPath('running.name', $adhoc->name)
-            ->assertJsonPath('running.pause_url', route('buhtasks.adhoc.pause', $adhoc));
+            ->assertJsonPath('running.pause_url', route('buhtasks.adhoc.pause', $adhoc))
+            ->assertJsonPath('running.complete_url', route('buhtasks.adhoc.complete', $adhoc))
+            ->assertJsonPath('running.open_url', route('buhtasks.index', ['open' => 'adhoc-' . $adhoc->id]));
+    }
+
+    /** Завершить из шапки: ссылка ведёт на обычное завершение, и шапка после него пустая. */
+    public function test_running_task_can_be_completed_from_header(): void
+    {
+        $log = $this->log();
+        $this->actingAs($this->accountant, 'employee')
+            ->postJson(route('buhtasks.logs.start', $log))->assertOk();
+
+        $running = $this->actingAs($this->accountant, 'employee')
+            ->getJson(route('buhtasks.running'))
+            ->assertOk()
+            ->assertJsonPath('running.open_url', route('buhtasks.index', ['open' => 'planned-' . $log->id]))
+            ->json('running');
+
+        $this->actingAs($this->accountant, 'employee')
+            ->postJson($running['complete_url'])
+            ->assertOk()
+            ->assertJsonPath('success', true);
+
+        $this->assertContains($log->fresh()->status, ['completed', 'review']);
+        $this->actingAs($this->accountant, 'employee')
+            ->getJson(route('buhtasks.running'))
+            ->assertJsonPath('running', null);
     }
 
     /** Вечером в 20:00 по Бишкеку забытый таймер встаёт на паузу, время засчитано до 20:00. */

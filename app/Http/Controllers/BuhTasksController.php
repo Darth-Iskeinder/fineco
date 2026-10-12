@@ -1217,6 +1217,10 @@ class BuhTasksController extends Controller
             'client_name'     => $task->client?->name,
             'elapsed_seconds' => $this->calcElapsed($task),
             'pause_url'       => $planned ? route('buhtasks.logs.pause', $task) : route('buhtasks.adhoc.pause', $task),
+            // Завершить прямо из шапки: после паузы задачу иначе приходится искать в списке.
+            'complete_url'    => $planned ? route('buhtasks.logs.complete', $task) : route('buhtasks.adhoc.complete', $task),
+            // Не закрылась (нет документа, не отмечены подпункты): ведём сразу в карточку задачи.
+            'open_url'        => route('buhtasks.index', ['open' => ($planned ? 'planned-' : 'adhoc-') . $task->id]),
         ]]);
     }
 
