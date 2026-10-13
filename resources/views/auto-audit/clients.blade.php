@@ -7,6 +7,7 @@
     use App\Http\Controllers\AutoAuditClientsController as Page;
     use App\Services\AutoAudit\AutoAuditClientBoard as Board;
     use App\Services\AutoAudit\DocumentPeriod;
+    use Carbon\CarbonImmutable;
 
     $monthTitle = fn ($m) => DocumentPeriod::of($m->year, $m->month)->title();
     $days       = fn (int $n) => Board::count($n, ['день', 'дня', 'дней']);
@@ -91,18 +92,79 @@
         </div>
     </div>
 
+    {{-- Ответы бухгалтеров ждут решения руководителя, за любой месяц. Стоит первым: это его
+         дела, и решать их можно прямо здесь (13.10.2026). --}}
+    @if ($queue)
+        <div class="bg-white rounded-2xl shadow-sm border border-violet-200" x-data="{ more: false }" data-queue>
+            <div class="px-6 py-4 flex flex-wrap items-baseline justify-between gap-2">
+                <h2 class="text-[15px] font-semibold text-slate-800">
+                    Ждут вашего решения: {{ Board::count(count($queue), ['ответ бухгалтера', 'ответа бухгалтеров', 'ответов бухгалтеров']) }}
+                </h2>
+                <span class="text-[13px] text-slate-500">за все месяцы, старые сверху</span>
+            </div>
+            <ul class="divide-y divide-slate-100 border-t border-slate-100">
+                @foreach ($queue as $i => $issue)
+                    @php
+                        $result  = $issue['result'];
+                        $finding = $issue['finding'];
+                        $answer  = $finding->messages->last();
+                    @endphp
+                    <li class="px-6 py-3 space-y-1 text-sm" @if ($i >= 5) x-show="more" style="display: none" @endif>
+                        <div class="flex flex-wrap items-baseline gap-x-2">
+                            <button type="button" class="font-medium text-slate-900 hover:text-indigo-700 text-left"
+                                    @click="open({{ $result->client_id }}, '{{ $result->period_to->format('Y-m') }}')">{{ $result->client->name }}</button>
+                            <span class="text-slate-500">{{ $result->periodLabel() }}</span>
+                            <span @class(['text-[13px]', 'text-red-700' => $issue['days'] >= 5, 'text-slate-500' => $issue['days'] < 5])>· висит {{ $days($issue['days']) }}</span>
+                        </div>
+                        @foreach ($result->ruleNumbers() as $number)
+                            <div class="text-[13px] text-slate-700">№{{ $number }} {{ \App\Services\AutoAudit\AutoAuditRunner::RULES[$number]['name'] ?? '' }}</div>
+                        @endforeach
+                        @if ($result->outcome === \App\Models\AutoAuditResult::MISMATCH)
+                            <div class="text-[13px] text-slate-500">
+                                В учёте (ОСВ) <b class="font-semibold tabular-nums whitespace-nowrap text-slate-900">{{ number_format((float) $result->left_value, 2, ',', ' ') }}</b>,
+                                в документе <b class="font-semibold tabular-nums whitespace-nowrap text-slate-900">{{ number_format((float) $result->right_value, 2, ',', ' ') }}</b>,
+                                разница <b class="font-semibold tabular-nums whitespace-nowrap text-slate-900">{{ number_format((float) $result->difference, 2, ',', ' ') }}</b>
+                            </div>
+                        @elseif ($result->reason)
+                            <div class="text-[13px] text-slate-500">{{ $result->reason }}</div>
+                        @endif
+                        @if ($answer)
+                            <div class="rounded-lg bg-slate-50 px-3 py-2 text-[13px] text-slate-700">
+                                <b class="font-semibold">{{ \App\Services\AutoAudit\AutoAuditSources::shortName($answer->authorName()) }}</b>,
+                                {{ $answer->created_at->copy()->setTimezone(config('app.display_timezone'))->format('d.m') }}:
+                                «{{ $answer->body ?: \App\Models\AutoAuditFindingMessage::LABELS[$answer->kind] }}»
+                            </div>
+                        @endif
+                        @if ($canDecide)
+                            @include('auto-audit._decide', ['finding' => $finding, 'result' => $result])
+                        @endif
+                    </li>
+                @endforeach
+            </ul>
+            @if (count($queue) > 5)
+                <button type="button" x-show="!more" @click="more = true"
+                        class="w-full border-t border-slate-100 px-6 py-3 text-sm text-indigo-600 hover:bg-slate-50 rounded-b-2xl">
+                    Показать ещё {{ count($queue) - 5 }}
+                </button>
+            @endif
+        </div>
+    @endif
+
     {{-- Сводка по бухгалтерам. Клик по строке оставляет в таблице только его клиентов. --}}
     @if ($team)
         <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-x-auto">
-            <div class="px-6 py-4"><h2 class="text-[15px] font-semibold text-slate-800">Бухгалтеры, {{ $monthTitle($focus) }}</h2></div>
+            <div class="px-6 py-4">
+                <h2 class="text-[15px] font-semibold text-slate-800">Бухгалтеры</h2>
+                <p class="text-[13px] text-slate-500">Вопросы за все месяцы таблицы, просрочки за {{ $monthTitle($focus) }}</p>
+            </div>
             <table class="min-w-full text-sm">
                 <thead class="bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                     <tr>
                         <th class="px-4 py-3">Бухгалтер</th>
                         <th class="px-4 py-3 text-right">Клиентов</th>
-                        @foreach ([Board::ACCOUNTANT, Board::CHIEF, Board::OVERDUE] as $s)
+                        @foreach ([Board::ACCOUNTANT => 'Вопросов ждут бухгалтера', Board::CHIEF => 'Ждут руководителя', Board::OVERDUE => 'Просрочено'] as $s => $label)
                             <th class="px-4 py-3 text-right whitespace-nowrap" title="{{ Board::STATUSES[$s]['hint'] }}">
-                                <span class="inline-grid place-items-center w-[18px] h-4 rounded text-[10px] font-bold mr-1 {{ Page::STYLES[$s]['cell'] }}">{{ Board::STATUSES[$s]['letter'] }}</span>{{ Board::STATUSES[$s]['label'] }}
+                                <span class="inline-grid place-items-center w-[18px] h-4 rounded text-[10px] font-bold mr-1 {{ Page::STYLES[$s]['cell'] }}">{{ Board::STATUSES[$s]['letter'] }}</span>{{ $label }}
                             </th>
                         @endforeach
                         <th class="px-4 py-3 text-right whitespace-nowrap" title="Сколько дней висит самый старый вопрос или ответ">Дольше всего</th>
@@ -180,6 +242,16 @@
                                 <span @class(['text-red-700 font-semibold' => $cell['status'] === Board::OVERDUE, 'text-slate-700' => in_array($cell['status'], [Board::ACCOUNTANT, Board::CHIEF], true), 'text-slate-500' => !in_array($cell['status'], [Board::OVERDUE, Board::ACCOUNTANT, Board::CHIEF], true)])>{{ $cell['note'] ?: Board::STATUSES[$cell['status']]['label'] }}</span>
                                 @if ($cell['days'] !== null && in_array($cell['status'], [Board::ACCOUNTANT, Board::CHIEF], true))
                                     <span class="text-slate-500">· висит {{ $days($cell['days']) }}</span>
+                                @endif
+                                @if ($cell['late'])
+                                    <span class="block text-red-700">ещё просрочено: {{ $cell['late'] }}</span>
+                                @endif
+                                {{-- Вопрос другого месяца виден и тогда, когда выбранный месяц в порядке. --}}
+                                @if ($row['elsewhere'])
+                                    @php $e = $row['elsewhere'][0]; $em = CarbonImmutable::parse($e['month'] . '-01'); @endphp
+                                    <span @class(['block', 'text-amber-700' => $e['status'] === Board::ACCOUNTANT, 'text-violet-700' => $e['status'] === Board::CHIEF])>
+                                        {{ mb_convert_case($monthTitle($em), MB_CASE_TITLE) }}: {{ $e['note'] }} · висит {{ $days($e['days']) }}@if (count($row['elsewhere']) > 1), и ещё {{ Board::count(count($row['elsewhere']) - 1, ['месяц', 'месяца', 'месяцев']) }}@endif
+                                    </span>
                                 @endif
                             </td>
                             @foreach ($months as $m)

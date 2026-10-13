@@ -27,10 +27,12 @@ use Illuminate\Support\Collection;
  * квартала (решение 08.10.2026): сверить его можно, только когда есть все три ведомости.
  *
  * Статус клетки один, первый подходящий по списку (monthCell):
- *   - задача просрочена;
  *   - вопрос ждёт бухгалтера: ответа нет или руководитель его не принял;
- *   - ответ ждёт решения руководителя. Решает он на «Все сверки», а не главбух клиента:
+ *   - ответ ждёт решения руководителя. Решает руководитель, а не главбух клиента:
  *     главбух часто сам и отвечал (Матраева у Темирбаевой, 09.10.2026);
+ *   - задача просрочена. Найденное расхождение важнее просрочки (13.10.2026): раньше
+ *     просрочка стояла первой и прятала вопрос, который висел 24 дня. Если есть и то и
+ *     другое, просрочка дописывается в пояснение клетки;
  *   - ждёт ночной проверки: бухгалтер написал «Исправил», задачу закрыли или файл
  *     заменили после последнего прогона. Раньше «не проверено»: старый скан мог уже
  *     смениться настоящим файлом;
@@ -61,9 +63,9 @@ class AutoAuditClientBoard
      * letter: буква в клетке (решено 07.10.2026 вместо значков).
      */
     public const STATUSES = [
-        self::OVERDUE     => ['letter' => '!', 'label' => 'Просрочено',        'hint' => 'Срок задачи прошёл, а она не закрыта'],
         self::ACCOUNTANT  => ['letter' => 'Б', 'label' => 'Ждёт бухгалтера',   'hint' => 'Есть вопрос по сверке, бухгалтер не ответил или ответ не приняли'],
-        self::CHIEF       => ['letter' => 'Р', 'label' => 'Ждёт руководителя', 'hint' => 'Бухгалтер ответил, решение за руководителем на «Все сверки»'],
+        self::CHIEF       => ['letter' => 'Р', 'label' => 'Ждёт руководителя', 'hint' => 'Бухгалтер ответил, решение за руководителем'],
+        self::OVERDUE     => ['letter' => '!', 'label' => 'Просрочено',        'hint' => 'Срок задачи прошёл, а она не закрыта'],
         self::UNVERIFIED  => ['letter' => '?', 'label' => 'Не проверено',      'hint' => 'Система не смогла сверить: скан, непрочитанное число или нет пары документов'],
         self::WAITING_RUN => ['letter' => '↻', 'label' => 'Ждёт проверки',     'hint' => 'Задачу закрыли или файл заменили после последней проверки. Проверим ночью'],
         self::IN_PROGRESS => ['letter' => '…', 'label' => 'Месяц идёт',        'hint' => 'Задачи ещё открыты, срок не прошёл'],
@@ -405,12 +407,9 @@ class AutoAuditClientBoard
 
         $days = fn (string $turn) => max([0, ...array_column(array_filter($issues, fn (array $i) => $i['turn'] === $turn), 'days')]);
 
+        $late = $overdue ? reset($overdue)['name'] . ': срок был ' . reset($overdue)['due']->format('d.m') : null;
+
         [$status, $note, $since] = match (true) {
-            (bool) $overdue => [
-                self::OVERDUE,
-                reset($overdue)['name'] . ': срок был ' . reset($overdue)['due']->format('d.m'),
-                (int) reset($overdue)['due']->diffInDays($this->today),
-            ],
             isset($turns[self::TURN_ACCOUNTANT]) => [
                 self::ACCOUNTANT,
                 self::count($turns[self::TURN_ACCOUNTANT], ['вопрос', 'вопроса', 'вопросов']),
@@ -420,6 +419,11 @@ class AutoAuditClientBoard
                 self::CHIEF,
                 self::count($turns[self::TURN_CHIEF], ['ответ ждёт', 'ответа ждут', 'ответов ждут']) . ' решения',
                 $days(self::TURN_CHIEF),
+            ],
+            (bool) $overdue => [
+                self::OVERDUE,
+                $late,
+                (int) reset($overdue)['due']->diffInDays($this->today),
             ],
             isset($turns[self::TURN_RUN]) || (bool) $touched => [
                 self::WAITING_RUN,
@@ -441,7 +445,10 @@ class AutoAuditClientBoard
             default => [self::OK, self::count(count($matched), ['сверка сошлась', 'сверки сошлись', 'сверок сошлись']), null],
         };
 
-        return $this->cell($status, $tasks, $issues, $note, $since);
+        $cell = $this->cell($status, $tasks, $issues, $note, $since);
+        $cell['late'] = $status !== self::OVERDUE ? $late : null;
+
+        return $cell;
     }
 
     /**
@@ -470,9 +477,35 @@ class AutoAuditClientBoard
         return $labels ? 'есть только ' . implode(', ', $labels) : 'задачи закрыты без файлов';
     }
 
+    /** late: просроченная задача, если клетку заняло что-то важнее просрочки. */
     private function cell(string $status, array $tasks, array $issues, string $note = '', ?int $days = null): array
     {
-        return ['status' => $status, 'note' => $note, 'days' => $days, 'tasks' => $tasks, 'issues' => $issues];
+        return ['status' => $status, 'note' => $note, 'days' => $days, 'tasks' => $tasks, 'issues' => $issues, 'late' => null];
+    }
+
+    /**
+     * Ответы бухгалтеров, которые ждут решения руководителя, за любой месяц, старые сверху.
+     *
+     * Не зависит от выбранного месяца и окна таблицы: раньше вопрос за август пропадал из
+     * виду, как только страница открывалась на сентябре (13.10.2026). Три запроса на фирму.
+     *
+     * @return array<int, array{result: AutoAuditResult, finding: AutoAuditFinding, days: int}>
+     */
+    public function chiefQueue(): array
+    {
+        $results = AutoAuditResult::current()
+            ->whereIn('outcome', AutoAuditResult::FINDING_OUTCOMES)
+            ->with('client:id,name')
+            ->get();
+
+        $findings = $this->findings($results, true);
+
+        return $results
+            ->map(fn (AutoAuditResult $r) => $this->issue($r, $findings[$r->key()] ?? null))
+            ->filter(fn (array $i) => $i['turn'] === self::TURN_CHIEF && $i['result']->client)
+            ->sortByDesc('days')
+            ->values()
+            ->all();
     }
 
     /** Строка результата, за кем по ней ход и сколько дней он там. */

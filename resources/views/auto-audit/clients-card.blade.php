@@ -74,6 +74,9 @@
             {{ Board::STATUSES[$status]['label'] }}, {{ $monthTitle($focus) }}
             @if ($cell['note'])
                 <small class="block font-normal text-slate-500">{{ $cell['note'] }}@if ($cell['days'] !== null && in_array($status, [Board::ACCOUNTANT, Board::CHIEF], true)), висит {{ $days($cell['days']) }}@endif</small>
+                @if ($cell['late'])
+                    <small class="block font-normal text-red-700">Ещё просрочено: {{ $cell['late'] }}</small>
+                @endif
             @endif
         </div>
     </div>
@@ -150,12 +153,12 @@
                                     @endif
                                     @break
                                 @case(Board::TURN_CHIEF)
-                                    {{-- Решает руководитель на «Все сверки», а не главбух клиента: тот часто сам и отвечал.
-                                         Ссылка открывает ту же строку: период, проверка и статус. --}}
+                                    {{-- Решает руководитель, а не главбух клиента: тот часто сам и отвечал.
+                                         Кнопки здесь же (13.10.2026), ссылка ведёт на ту же строку «Все сверки». --}}
                                     <div>
                                         <span class="font-semibold text-violet-700">Ход руководителя</span>, ответ висит {{ $days($issue['days']) }}.
                                         <a href="{{ route('auto-audit.index', array_filter(['period' => $result->periodKey(), 'rule' => $result->ruleNumbers()[0] ?? null, 'status' => $result->outcome])) }}"
-                                           class="text-indigo-600 hover:underline">Решить на «Все сверки»</a>
+                                           class="text-indigo-600 hover:underline">Открыть на «Все сверки»</a>
                                     </div>
                                     @break
                                 @case(Board::TURN_RUN)
@@ -166,6 +169,9 @@
                             @endswitch
                             @if ($answer && $issue['turn'] !== Board::TURN_ACCOUNTANT)
                                 <div><b class="font-semibold">{{ AutoAuditSources::shortName($answer->authorName()) }}</b>, {{ $answer->created_at->copy()->setTimezone(config('app.display_timezone'))->format('d.m') }}: «{{ $answer->body ?: AutoAuditFindingMessage::LABELS[$answer->kind] }}»</div>
+                            @endif
+                            @if ($issue['turn'] === Board::TURN_CHIEF && $canDecide && $finding)
+                                @include('auto-audit._decide', ['finding' => $finding, 'result' => $result])
                             @endif
                         </div>
                     </div>

@@ -267,13 +267,31 @@ class AutoAuditClientsPageTest extends TestCase
         $this->assertSame(AutoAuditClientBoard::UNVERIFIED, $this->statusOf($client, '2026-09'));
     }
 
-    public function test_overdue_wins_over_a_question(): void
+    /**
+     * Найденное расхождение важнее просрочки: раньше «!» прятал вопрос, висевший 24 дня
+     * (13.10.2026). Просрочка не теряется, она в пояснении клетки.
+     */
+    public function test_question_wins_over_overdue(): void
     {
         $client = $this->client();
         $this->item($client, $this->osv);
         $this->finding($this->auditRow($client, '4', AutoAuditResult::MISMATCH));
 
-        $this->assertSame(AutoAuditClientBoard::OVERDUE, $this->statusOf($client, '2026-09'));
+        $cell = $this->cell($client, '2026-09');
+
+        $this->assertSame(AutoAuditClientBoard::ACCOUNTANT, $cell['status']);
+        $this->assertStringContainsString('срок был 05.10', $cell['late']);
+    }
+
+    public function test_overdue_alone_has_no_extra_note(): void
+    {
+        $client = $this->client();
+        $this->item($client, $this->osv);
+
+        $cell = $this->cell($client, '2026-09');
+
+        $this->assertSame(AutoAuditClientBoard::OVERDUE, $cell['status']);
+        $this->assertNull($cell['late']);
     }
 
     public function test_client_without_full_service_is_not_connected(): void
@@ -498,6 +516,120 @@ class AutoAuditClientsPageTest extends TestCase
             ->assertOk()
             ->assertSee('на паузе, срок был 05.10')
             ->assertDontSee('не закрыта');
+    }
+
+    // ── Решения руководителя ──────────────────────────────────────────────
+
+    /**
+     * Ответ бухгалтера за месяц далеко за окном таблицы всё равно наверху страницы, с
+     * кнопками. Раньше его надо было искать на «Все сверки» (13.10.2026).
+     */
+    public function test_answers_of_any_month_wait_on_top_with_buttons(): void
+    {
+        $client = $this->client(['name' => 'ОсОО Февраль']);
+        $this->item($client, $this->osv);
+        $result  = $this->auditRow($client, '4', AutoAuditResult::MISMATCH, '2026-02-01', '2026-02-28');
+        $finding = $this->finding($result);
+        $finding->messages()->create([
+            'result_id' => $result->id, 'employee_id' => $this->admin->id,
+            'kind' => AutoAuditFindingMessage::EXPLAINED, 'body' => 'Полис УСМЗ',
+        ]);
+
+        $this->asVendor()->get(route('auto-audit.clients'))
+            ->assertOk()
+            ->assertSee('Ждут вашего решения: 1 ответ бухгалтера')
+            ->assertSee('ОсОО Февраль')
+            ->assertSee('«Полис УСМЗ»', false)
+            ->assertSee(route('auto-audit.findings.accept', $finding))
+            ->assertSee(route('auto-audit.findings.reject', $finding));
+    }
+
+    public function test_no_decision_block_without_answers(): void
+    {
+        $client = $this->client();
+        $this->item($client, $this->osv);
+        $this->finding($this->auditRow($client, '4', AutoAuditResult::MISMATCH));
+
+        $this->asVendor()->get(route('auto-audit.clients'))
+            ->assertOk()
+            ->assertDontSee('Ждут вашего решения');
+    }
+
+    /** «Принять» из карточки или блока возвращает на эту же страницу, а не на «Все сверки». */
+    public function test_accept_returns_to_the_clients_page(): void
+    {
+        $client = $this->client();
+        $this->doneTask($client, $this->item($client, $this->osv));
+        $result  = $this->auditRow($client, '4', AutoAuditResult::MISMATCH);
+        $finding = $this->finding($result);
+        $finding->messages()->create([
+            'result_id' => $result->id, 'employee_id' => $this->admin->id,
+            'kind' => AutoAuditFindingMessage::EXPLAINED, 'body' => 'Взнос ИП',
+        ]);
+
+        $page = route('auto-audit.clients', ['month' => '2026-09']);
+
+        $this->asVendor()->from($page)
+            ->post(route('auto-audit.findings.accept', $finding), ['result_id' => $result->id])
+            ->assertRedirect($page);
+
+        $this->assertSame(AutoAuditClientBoard::OK, $this->statusOf($client, '2026-09'));
+    }
+
+    public function test_card_has_buttons_for_an_answer(): void
+    {
+        $client = $this->client();
+        $this->doneTask($client, $this->item($client, $this->osv));
+        $result  = $this->auditRow($client, '4', AutoAuditResult::MISMATCH);
+        $finding = $this->finding($result);
+        $finding->messages()->create([
+            'result_id' => $result->id, 'employee_id' => $this->admin->id,
+            'kind' => AutoAuditFindingMessage::EXPLAINED, 'body' => 'Взнос ИП',
+        ]);
+
+        $this->asVendor()->get(route('auto-audit.clients.card', [$client->id, 'month' => '2026-09']))
+            ->assertOk()
+            ->assertSee(route('auto-audit.findings.accept', $finding))
+            ->assertSee('Не принято');
+    }
+
+    // ── Вопросы других месяцев ────────────────────────────────────────────
+
+    /**
+     * Сентябрь у клиента в порядке, а вопрос за август висит: клиент всё равно в списке
+     * «требующих действия», и строка говорит, за какой месяц вопрос.
+     */
+    public function test_question_of_another_month_keeps_the_client_in_the_list(): void
+    {
+        $this->checkedAfterTasks();
+        $client = $this->client(['name' => 'ОсОО Августовский вопрос']);
+        $item   = $this->item($client, $this->osv);
+        $this->doneTask($client, $item, month: 9, completedAt: '2026-09-06 10:00:00');
+        $this->doneTask($client, $item, month: 10, completedAt: '2026-10-06 10:00:00');
+        $this->finding($this->auditRow($client, '4', AutoAuditResult::MISMATCH, '2026-08-01', '2026-08-31'), CarbonImmutable::parse('2026-09-14'));
+        $this->auditRow($client, '4', AutoAuditResult::MATCHED);
+
+        $this->assertSame(AutoAuditClientBoard::OK, $this->statusOf($client, '2026-09'));
+
+        $this->asVendor()->get(route('auto-audit.clients', ['month' => '2026-09']))
+            ->assertOk()
+            ->assertSee('ОсОО Августовский вопрос')
+            ->assertSee('Август 2026: 1 вопрос · висит 24 дня');
+    }
+
+    /** Сводка по бухгалтерам считает вопросы всех месяцев таблицы, а не только выбранного. */
+    public function test_team_counts_questions_of_all_months(): void
+    {
+        $client = $this->client();
+        $this->item($client, $this->osv);
+        $this->finding($this->auditRow($client, '4', AutoAuditResult::MISMATCH, '2026-07-01', '2026-07-31'), CarbonImmutable::parse('2026-08-20'));
+        $this->finding($this->auditRow($client, '5', AutoAuditResult::MISMATCH, '2026-08-01', '2026-08-31'));
+
+        $team = collect($this->asVendor()->get(route('auto-audit.clients', ['month' => '2026-09']))->assertOk()->viewData('team'));
+        $mine = $team->firstWhere('id', $this->admin->id);
+
+        $this->assertSame(2, $mine['accountant']);
+        $this->assertSame(49, $mine['oldest']);
     }
 
     /** Требование: таблица грузит итог константным числом запросов, сколько бы ни было клиентов. */

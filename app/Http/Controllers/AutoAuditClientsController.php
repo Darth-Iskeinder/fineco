@@ -6,6 +6,7 @@ use App\Models\AutoAuditDocumentRead;
 use App\Models\Client;
 use App\Models\Tenant;
 use App\Services\AutoAudit\AutoAuditClientBoard;
+use App\Services\AutoAudit\AutoAuditQuestions;
 use App\Support\Impersonation;
 use App\Support\TenantContext;
 use Carbon\CarbonImmutable;
@@ -15,7 +16,8 @@ use Illuminate\View\View;
 /**
  * Вкладка автоаудита «По клиентам»: клиенты по месяцам, за кем ход, сводка по бухгалтерам.
  *
- * Только чтение. Видят вендор, зашедший в фирму, и руководитель, если фирме открыли и
+ * Решения по ответам бухгалтеров («Принять», «Не принято») принимаются прямо здесь, теми же
+ * маршрутами, что на «Все сверки». Остальное только чтение. Видят вендор, зашедший в фирму, и руководитель, если фирме открыли и
  * страницу автоаудита, и эту вкладку (autoaudit:access --on --clients-on). Остальным 404.
  *
  * Страница не грузит всё сразу (требование Искендера 06.10.2026):
@@ -67,6 +69,9 @@ class AutoAuditClientsController extends Controller
         $employees = $data['employees'];
         $name      = fn (?int $id) => $id ? ($employees[$id] ?? 'сотрудник удалён') : 'не назначен';
 
+        // Вопросы других месяцев окна: висят, даже если выбранный месяц в порядке.
+        $rows = $rows->map(fn (array $r) => $r + ['elsewhere' => $this->elsewhere($r, $key)]);
+
         // Плитки и сводка по бухгалтерам считаются до фильтров: числа не должны прыгать от
         // того, что выбрано ниже.
         $counts = $rows->countBy(fn (array $r) => $r['cells'][$key]['status']);
@@ -75,14 +80,14 @@ class AutoAuditClientsController extends Controller
         $filtered = $rows
             ->filter(fn (array $r) => $status
                 ? $r['cells'][$key]['status'] === $status
-                : ($all || in_array($r['cells'][$key]['status'], AutoAuditClientBoard::ACTION, true)))
+                : ($all || in_array($r['cells'][$key]['status'], AutoAuditClientBoard::ACTION, true) || $r['elsewhere']))
             ->filter(fn (array $r) => !$acc || $r['accountant'] === $acc)
             ->filter(fn (array $r) => $q === ''
                 || mb_stripos($r['client']->name, $q) !== false
                 || mb_stripos($name($r['accountant']), $q) !== false)
             ->sortBy([
-                fn (array $a, array $b) => $this->rank($a['cells'][$key]['status']) <=> $this->rank($b['cells'][$key]['status']),
-                fn (array $a, array $b) => ($b['cells'][$key]['days'] ?? -1) <=> ($a['cells'][$key]['days'] ?? -1),
+                fn (array $a, array $b) => $this->rowRank($a, $key) <=> $this->rowRank($b, $key),
+                fn (array $a, array $b) => $this->rowDays($b, $key) <=> $this->rowDays($a, $key),
                 fn (array $a, array $b) => mb_strtolower($a['client']->name) <=> mb_strtolower($b['client']->name),
             ])
             ->values();
@@ -108,6 +113,8 @@ class AutoAuditClientsController extends Controller
             'checkedAt'    => $board->checkedAt()?->setTimezone(config('app.display_timezone')),
             'vendor'       => Impersonation::isActive(),
             'openToManager' => $this->openToManager(),
+            'queue'        => $board->chiefQueue(),
+            'canDecide'    => AutoAuditQuestions::enabled(),
         ]);
     }
 
@@ -142,30 +149,34 @@ class AutoAuditClientsController extends Controller
             'name'      => fn (?int $id) => $id ? ($employees[$id] ?? 'сотрудник удалён') : 'не назначен',
             'checkedAt' => $board->checkedAt()?->setTimezone(config('app.display_timezone')),
             'today'     => $today,
+            'canDecide' => AutoAuditQuestions::enabled(),
         ]);
     }
 
     /**
-     * Сводка по бухгалтерам за выбранный месяц: сколько у кого клиентов, сколько ждут его,
-     * главбуха и просрочено, и сколько дней висит самый старый вопрос.
+     * Сводка по бухгалтерам: сколько у кого клиентов, сколько вопросов ждут его и
+     * руководителя, сколько дней висит самый старый, и просрочки выбранного месяца.
+     *
+     * Вопросы считаются за все месяцы таблицы, а не за выбранный: страница открывается на
+     * прошлом месяце, и вопросы позапрошлого из сводки пропадали (13.10.2026).
      */
     private function team($rows, string $key, callable $name): array
     {
         return $rows
             ->groupBy(fn (array $r) => $r['accountant'] ?? 0)
             ->map(function ($group, $id) use ($key, $name) {
-                $cells = $group->map(fn (array $r) => $r['cells'][$key]);
-                $count = fn (string $s) => $cells->where('status', $s)->count();
+                $issues = $group->flatMap(fn (array $r) => collect($r['cells'])->flatMap(fn (array $c) => $c['issues']));
+                $turn   = fn (string $t) => $issues->where('turn', $t);
 
                 return [
                     'id'         => (int) $id ?: null,
                     'name'       => $name((int) $id ?: null),
                     'clients'    => $group->count(),
-                    'accountant' => $count(AutoAuditClientBoard::ACCOUNTANT),
-                    'chief'      => $count(AutoAuditClientBoard::CHIEF),
-                    'overdue'    => $count(AutoAuditClientBoard::OVERDUE),
-                    'oldest'     => (int) $cells
-                        ->whereIn('status', [AutoAuditClientBoard::ACCOUNTANT, AutoAuditClientBoard::CHIEF])
+                    'accountant' => $turn(AutoAuditClientBoard::TURN_ACCOUNTANT)->count(),
+                    'chief'      => $turn(AutoAuditClientBoard::TURN_CHIEF)->count(),
+                    'overdue'    => $group->where(fn (array $r) => $r['cells'][$key]['status'] === AutoAuditClientBoard::OVERDUE)->count(),
+                    'oldest'     => (int) $issues
+                        ->whereIn('turn', [AutoAuditClientBoard::TURN_ACCOUNTANT, AutoAuditClientBoard::TURN_CHIEF])
                         ->max('days'),
                 ];
             })
@@ -181,6 +192,32 @@ class AutoAuditClientsController extends Controller
     private function rank(string $status): int
     {
         return array_search($status, array_keys(AutoAuditClientBoard::STATUSES), true);
+    }
+
+    /**
+     * Вопросы клиента в других месяцах таблицы, старые сверху: месяц, статус, пояснение и
+     * сколько дней висит.
+     */
+    private function elsewhere(array $row, string $key): array
+    {
+        return collect($row['cells'])
+            ->filter(fn (array $c, string $k) => $k !== $key
+                && in_array($c['status'], [AutoAuditClientBoard::ACCOUNTANT, AutoAuditClientBoard::CHIEF], true))
+            ->map(fn (array $c, string $k) => ['month' => $k, 'status' => $c['status'], 'note' => $c['note'], 'days' => (int) $c['days']])
+            ->sortByDesc('days')
+            ->values()
+            ->all();
+    }
+
+    /** Место строки: по выбранному месяцу, но вопрос другого месяца поднимает её не ниже себя. */
+    private function rowRank(array $row, string $key): int
+    {
+        return min([$this->rank($row['cells'][$key]['status']), ...array_map(fn (array $e) => $this->rank($e['status']), $row['elsewhere'])]);
+    }
+
+    private function rowDays(array $row, string $key): int
+    {
+        return max([$row['cells'][$key]['days'] ?? -1, ...array_column($row['elsewhere'], 'days')]);
     }
 
     /** Выбранный месяц из адреса, «2026-09». Кривой или будущий даёт месяц по умолчанию. */
