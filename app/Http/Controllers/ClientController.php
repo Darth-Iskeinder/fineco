@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Client;
+use App\Rules\Inn;
 use App\Models\ClientDocument;
 use App\Models\ClientStatus;
 use App\Models\Employee;
@@ -212,7 +213,7 @@ class ClientController extends Controller
             // мимо фильтра по фирме (оно смотрит таблицу напрямую), поэтому
             // ограничиваем вручную. Иначе фирма получала бы «ИНН занят» из-за
             // чужого клиента, которого не видит и найти не может.
-            'inn' => ['required', 'string', 'max:14', $this->innIsFreeInTenant()],
+            'inn' => ['required', 'string', new Inn(), $this->innIsFreeInTenant()],
             'company_number' => $this->companyNumberRules(),
             'tax_system_id' => ['nullable', 'exists:tax_systems,id'],
             'tariff_id' => ['nullable', 'exists:tariffs,id'],
@@ -302,7 +303,7 @@ class ClientController extends Controller
         $validated = $request->validateWithBag('updateClient', [
             'name' => ['required', 'string', 'max:255'],
             'organization_form_id' => ['nullable', 'exists:organization_forms,id'],
-            'inn' => ['required', 'string', 'max:14', $this->innIsFreeInTenant($client->id)],
+            'inn' => ['required', 'string', new Inn(), $this->innIsFreeInTenant($client->id)],
             'company_number' => $this->companyNumberRules($client->id),
             'tax_system_id' => ['nullable', 'exists:tax_systems,id'],
             'tariff_id' => ['nullable', 'exists:tariffs,id'],
@@ -367,7 +368,7 @@ class ClientController extends Controller
             'basic' => [
                 'name' => ['required', 'string', 'max:255'],
                 'organization_form_id' => ['nullable', 'exists:organization_forms,id'],
-                'inn' => ['required', 'string', 'max:14', $this->innIsFreeInTenant($client->id)],
+                'inn' => ['required', 'string', new Inn(), $this->innIsFreeInTenant($client->id)],
                 'company_number' => $this->companyNumberRules($client->id),
                 'director_inn' => ['nullable', 'string', 'max:14'],
                 'tax_office_code' => ['nullable', 'string', 'max:10'],

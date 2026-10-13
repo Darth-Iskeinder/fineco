@@ -65,7 +65,7 @@ class ClientInlineUpdateTest extends TestCase
     {
         return Client::create([
             'name' => $name . ' ' . uniqid(),
-            'inn'  => (string) random_int(100000000000, 999999999999),
+            'inn'  => (string) random_int(10000000000000, 29999999999999),
         ]);
     }
 
@@ -129,6 +129,19 @@ class ClientInlineUpdateTest extends TestCase
             ->assertJsonValidationErrors('inn');
 
         $this->assertSame($second->inn, $second->fresh()->inn, 'Клиент не должен был измениться');
+    }
+
+    /** ИНН без ведущего нуля карточка не принимает и говорит, что с ним не так. */
+    public function test_inn_without_leading_zero_is_refused(): void
+    {
+        $client = $this->client();
+
+        $response = $this->actingAs($this->admin, 'employee')
+            ->putJson('/clients/' . $client->id, $this->payload($client, ['inn' => '1512202310049']))
+            ->assertStatus(422);
+
+        $this->assertStringContainsString('потерялся ноль в начале', $response->json('errors.inn.0'));
+        $this->assertSame($client->inn, $client->fresh()->inn);
     }
 
     /** Без JS форма уходит обычной отправкой, и ответ по-прежнему редирект. */

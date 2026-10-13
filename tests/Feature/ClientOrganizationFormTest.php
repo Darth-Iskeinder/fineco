@@ -60,7 +60,7 @@ class ClientOrganizationFormTest extends TestCase
 
     private function inn(): string
     {
-        return strtoupper(substr(md5(uniqid()), 0, 12));
+        return (string) random_int(10000000000000, 29999999999999);
     }
 
     /** Попап создания передаёт форму, и она сохраняется. */

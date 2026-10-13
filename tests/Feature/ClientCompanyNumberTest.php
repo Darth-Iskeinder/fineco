@@ -64,7 +64,7 @@ class ClientCompanyNumberTest extends TestCase
     {
         return Client::create(array_merge([
             'name' => $name . ' ' . uniqid(),
-            'inn'  => (string) random_int(100000000000, 999999999999),
+            'inn'  => (string) random_int(10000000000000, 29999999999999),
         ], $attributes));
     }
 
@@ -76,7 +76,7 @@ class ClientCompanyNumberTest extends TestCase
         $this->actingAs($this->admin, 'employee')
             ->post('/clients', [
                 'name' => 'ОсОО Номерная ' . uniqid(),
-                'inn'  => (string) random_int(100000000000, 999999999999),
+                'inn'  => (string) random_int(10000000000000, 29999999999999),
                 'company_number' => $number,
             ])
             ->assertRedirect();
@@ -90,7 +90,7 @@ class ClientCompanyNumberTest extends TestCase
         $this->actingAs($this->admin, 'employee')
             ->post('/clients', [
                 'name' => $name = 'ОсОО Без номера ' . uniqid(),
-                'inn'  => (string) random_int(100000000000, 999999999999),
+                'inn'  => (string) random_int(10000000000000, 29999999999999),
                 'company_number' => '',
             ])
             ->assertRedirect();
@@ -107,7 +107,7 @@ class ClientCompanyNumberTest extends TestCase
         $this->actingAs($this->admin, 'employee')
             ->post('/clients', [
                 'name' => 'ОсОО Вторая ' . uniqid(),
-                'inn'  => (string) random_int(100000000000, 999999999999),
+                'inn'  => (string) random_int(10000000000000, 29999999999999),
                 'company_number' => $number,
             ])
             ->assertSessionHasErrors('company_number', null, 'createClient');
@@ -131,14 +131,14 @@ class ClientCompanyNumberTest extends TestCase
 
         $theirs = TenantContext::for($tenant, fn () => Client::create([
             'name' => 'ОсОО Соседи ' . uniqid(),
-            'inn' => (string) random_int(100000000000, 999999999999),
+            'inn' => (string) random_int(10000000000000, 29999999999999),
             'company_number' => $number,
         ]));
 
         $this->actingAs($this->admin, 'employee')
             ->post('/clients', [
                 'name' => $name = 'ОсОО Наша ' . uniqid(),
-                'inn'  => (string) random_int(100000000000, 999999999999),
+                'inn'  => (string) random_int(10000000000000, 29999999999999),
                 'company_number' => $number,
             ])
             ->assertRedirect()
@@ -173,7 +173,7 @@ class ClientCompanyNumberTest extends TestCase
             $this->actingAs($this->admin, 'employee')
                 ->post('/clients', [
                     'name' => 'ОсОО Нулевая ' . uniqid(),
-                    'inn'  => (string) random_int(100000000000, 999999999999),
+                    'inn'  => (string) random_int(10000000000000, 29999999999999),
                     'company_number' => $wrong,
                 ])
                 ->assertSessionHasErrors('company_number', null, 'createClient');

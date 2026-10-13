@@ -84,7 +84,7 @@ class TenantIsolationTest extends TestCase
     {
         return TenantContext::for($tenant, fn () => Client::create([
             'name' => $name,
-            'inn'  => strtoupper(substr(md5(uniqid()), 0, 12)),
+            'inn'  => (string) random_int(10000000000000, 29999999999999),
         ]));
     }
 
@@ -136,7 +136,7 @@ class TenantIsolationTest extends TestCase
     {
         $this->actingAs($this->myEmployee, 'employee')->post('/clients', [
             'name' => 'ОсОО Новый от меня',
-            'inn'  => strtoupper(substr(md5(uniqid()), 0, 12)),
+            'inn'  => (string) random_int(10000000000000, 29999999999999),
         ]);
 
         $created = Client::acrossTenants()->where('name', 'ОсОО Новый от меня')->first();
@@ -326,7 +326,7 @@ class TenantIsolationTest extends TestCase
         TenantContext::forget();
         TenantContext::strictly(fn () => Client::create([
             'name' => 'ОсОО Без фирмы',
-            'inn'  => strtoupper(substr(md5(uniqid()), 0, 12)),
+            'inn'  => (string) random_int(10000000000000, 29999999999999),
         ]));
     }
 

@@ -83,7 +83,7 @@ class FiredEmployeeNotOfferedTest extends TestCase
 
         $this->client = Client::create([
             'name' => 'ТОО Увольнение ' . uniqid(),
-            'inn' => strtoupper(substr(md5(uniqid()), 0, 12)),
+            'inn' => (string) random_int(10000000000000, 29999999999999),
             'responsible_employee_id' => $this->head->id,
         ]);
     }
@@ -216,7 +216,7 @@ class FiredEmployeeNotOfferedTest extends TestCase
         $this->actingAs($this->manager, 'employee')
             ->post(route('clients.store'), [
                 'name' => 'ТОО Новый ' . uniqid(),
-                'inn'  => strtoupper(substr(md5(uniqid()), 0, 12)),
+                'inn'  => (string) random_int(10000000000000, 29999999999999),
                 'responsible_employee_id' => $this->fired->id,
             ])
             ->assertSessionHasErrors('responsible_employee_id', null, 'createClient');

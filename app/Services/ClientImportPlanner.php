@@ -8,6 +8,7 @@ use App\Models\ClientStatus;
 use App\Models\Employee;
 use App\Models\OrganizationForm;
 use App\Models\TaxSystem;
+use App\Rules\Inn;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Validator;
 
@@ -111,12 +112,11 @@ final class ClientImportPlanner
 
         $validator = Validator::make($values, [
             'name' => ['required', 'string', 'max:255'],
-            'inn'  => ['required', 'string', 'max:14'],
+            'inn'  => ['required', 'string', new Inn(fromFile: true)],
         ], [
             'name.required' => 'не заполнено название',
             'name.max'      => 'слишком длинное название',
             'inn.required'  => 'не заполнен ИНН',
-            'inn.max'       => 'ИНН длиннее 14 знаков',
         ]);
 
         if ($validator->fails()) {

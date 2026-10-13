@@ -79,7 +79,7 @@ class ClientResponsibleTransferTest extends TestCase
 
         $this->client = Client::create([
             'name' => 'ОсОО Крепость ' . uniqid(),
-            'inn'  => (string) random_int(100000000000, 999999999999),
+            'inn'  => (string) random_int(10000000000000, 29999999999999),
             'responsible_employee_id' => $this->oldHead->id,
         ]);
 

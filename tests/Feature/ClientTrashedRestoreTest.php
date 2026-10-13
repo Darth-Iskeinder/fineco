@@ -72,7 +72,7 @@ class ClientTrashedRestoreTest extends TestCase
     {
         return Client::create(array_merge([
             'name' => $name . ' ' . uniqid(),
-            'inn'  => (string) random_int(100000000000, 999999999999),
+            'inn'  => (string) random_int(10000000000000, 29999999999999),
         ], $attributes));
     }
 
@@ -205,7 +205,7 @@ class ClientTrashedRestoreTest extends TestCase
         return TenantContext::for($tenant, function () use ($attributes) {
             $client = Client::create(array_merge([
                 'name' => 'ОсОО Чужая удалённая ' . uniqid(),
-                'inn'  => (string) random_int(100000000000, 999999999999),
+                'inn'  => (string) random_int(10000000000000, 29999999999999),
             ], $attributes));
             $client->delete();
 
@@ -267,7 +267,7 @@ class ClientTrashedRestoreTest extends TestCase
         $this->actingAs($this->admin, 'employee')
             ->post('/clients', [
                 'name' => 'ОсОО Нумерованная ' . uniqid(),
-                'inn' => (string) random_int(100000000000, 999999999999),
+                'inn' => (string) random_int(10000000000000, 29999999999999),
                 'company_number' => $number,
             ])
             ->assertRedirect()

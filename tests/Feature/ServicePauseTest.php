@@ -82,7 +82,7 @@ class ServicePauseTest extends TestCase
 
         $this->client = Client::create([
             'name' => 'ООО Перерыв ' . uniqid(),
-            'inn' => strtoupper(substr(md5(uniqid()), 0, 12)),
+            'inn' => (string) random_int(10000000000000, 29999999999999),
             'responsible_employee_id' => $this->employee->id,
             'service_start_date' => '2026-01-01',
             'client_status_id' => $this->clientStatus('Активен')->id,

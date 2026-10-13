@@ -67,7 +67,7 @@ class ClientCsvImportTest extends TestCase
 
     private function inn(): string
     {
-        return (string) random_int(100000000000, 999999999999);
+        return (string) random_int(10000000000000, 29999999999999);
     }
 
     /** @return array{0: \Illuminate\Testing\TestResponse, 1: string} ответ и токен загрузки */
@@ -360,6 +360,18 @@ class ClientCsvImportTest extends TestCase
         $this->assertStringContainsString('название', $plan[0]['reason']);
         $this->assertSame('error', $plan[1]['verdict']);
         $this->assertStringContainsString('ИНН', $plan[1]['reason']);
+    }
+
+    /** Excel срезал ведущий ноль: строку не берём и подсказываем, что сделать с колонкой (КЛВ, 13.10.2026). */
+    public function test_inn_without_leading_zero_is_rejected_with_a_hint(): void
+    {
+        [$response] = $this->preview($this->importer(), $this->csv([";ОсОО Без нуля;1512202310049;;;да;;"]));
+
+        $plan = $response->viewData('plan');
+
+        $this->assertSame('error', $plan[0]['verdict']);
+        $this->assertStringContainsString('потерялся ноль в начале', $plan[0]['reason']);
+        $this->assertStringContainsString('сделайте колонку ИНН текстовой', $plan[0]['reason']);
     }
 
     public function test_same_inn_twice_in_one_file_takes_only_the_first_row(): void

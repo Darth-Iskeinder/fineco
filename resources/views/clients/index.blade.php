@@ -898,7 +898,7 @@
 
                             <div>
                                 <label for="create_inn" class="block text-sm font-medium text-slate-700 mb-2">ИНН <span class="text-red-500">*</span></label>
-                                <input type="text" name="inn" id="create_inn" required maxlength="14" value="{{ old('inn') }}" class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200 font-mono" placeholder="1234567890">
+                                <input type="text" name="inn" id="create_inn" required maxlength="14" value="{{ old('inn') }}" class="block w-full px-4 py-2.5 border border-slate-200 rounded-xl bg-slate-50/50 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 focus:bg-white transition-all duration-200 font-mono" placeholder="14 цифр">
                                 <p class="mt-1 text-xs text-slate-500">До 14 цифр</p>
                             </div>
 

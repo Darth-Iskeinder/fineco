@@ -157,7 +157,7 @@ class HiddenSettingsSectionsTest extends TestCase
     {
         $client = Client::create([
             'name' => 'ТОО Метод Учёта',
-            'inn'  => strtoupper(substr(md5(uniqid()), 0, 12)),
+            'inn'  => (string) random_int(10000000000000, 29999999999999),
         ]);
 
         $html = $this->actingAs($this->admin, 'employee')
@@ -255,7 +255,7 @@ class HiddenSettingsSectionsTest extends TestCase
     {
         $this->actingAs($this->admin, 'employee')->post('/clients', [
             'name' => 'ТОО Проверка Статуса',
-            'inn'  => strtoupper(substr(md5(uniqid()), 0, 12)),
+            'inn'  => (string) random_int(10000000000000, 29999999999999),
         ]);
 
         $client = Client::where('name', 'ТОО Проверка Статуса')->first();
