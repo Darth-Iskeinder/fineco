@@ -100,17 +100,22 @@ class SingleTaxReportReader
         $lines    = $this->dataLines($body);
         $rateless = $this->ratelessLines($body);
         $totals   = array_pop($rateless);   // последняя строка без ставки — она и есть итог
+        $edition  = 'итог = сумма строк, база × ставка = налог';
+
+        if (!$totals && $totals = $this->taxOnlyTotals($rows, $body, $lines)) {
+            $edition = 'итога дохода в бланке нет (редакция 2025): доход = сумма строк, налог = поле 179, база × ставка = налог';
+        }
 
         if (!$totals) {
-            return DocumentValue::wrongDocument('Не нашли итоговую строку (поля 186 и 187)');
+            return $this->unread($rows, $period, 'Не нашли итоговую строку (поля 186 и 187 или поле 179)');
         }
 
         if (!$lines && !$rateless) {
-            return DocumentValue::wrongDocument('Не нашли ни одной заполненной строки бланка');
+            return $this->unread($rows, $period, 'Не нашли ни одной заполненной строки бланка');
         }
 
         if ($mismatch = $this->checkArithmetic(array_merge($lines, $rateless), $totals)) {
-            return $mismatch;
+            return $this->unread($rows, $period, $mismatch);
         }
 
         return DocumentValue::found($totals[$field], [
@@ -118,8 +123,83 @@ class SingleTaxReportReader
             'база'        => number_format($totals['base'], 2, ',', ' '),
             'налог'       => number_format($totals['tax'], 2, ',', ' '),
             'строк'       => count($lines) + count($rateless),
-            'сходимость'  => 'итог = сумма строк, база × ставка = налог',
+            'сходимость'  => $edition,
         ], $period, PdfBlank::inn($rows));
+    }
+
+    /**
+     * Итог бланка редакции 2025 года («FORM STI-091_7»): итоговой строки дохода в нём нет.
+     *
+     * Старая редакция подводит итог дважды: доход (поле 186) и налог (поле 187). Новая только
+     * налогом, полем 179 в самом низу. Без строки дохода разбор отказывал с «не нашли
+     * итоговую строку», и каждый отчёт из кабинета налоговой у КЛВ выходил «не тем
+     * документом» (Купавский, Интермед-РК, 13.10.2026).
+     *
+     * Доход здесь сумма строк деятельности, налог последняя строка, где есть только налог.
+     * Выше неё стоят подытоги разделов (поля 059, 066 и другие), они такие же, но выше.
+     * Сверка налога с суммой строк и база × ставка в каждой строке остаются: по ним видно,
+     * что строки и поле 179 взяты верно.
+     *
+     * Форма 161 сюда не пройдёт: она альбомная, клетки у неё правее колонки налога, а в
+     * отчёте по ЕН правее неё нет ничего. Без этой защиты строка нулей формы 161 сошла бы
+     * за строку деятельности нулевого отчёта.
+     *
+     * @return array{base: float, rate: null, tax: float}|null
+     */
+    private function taxOnlyTotals(array $rows, array $body, array $lines): ?array
+    {
+        if (!$lines || $this->landscape($rows)) {
+            return null;
+        }
+
+        $tax = null;
+
+        foreach ($body as $cells) {
+            if ($this->column($cells, self::COLUMN_BASE) === null && $this->column($cells, self::COLUMN_RATE) === null) {
+                $tax = $this->column($cells, self::COLUMN_TAX) ?? $tax;
+            }
+        }
+
+        if ($tax === null) {
+            return null;
+        }
+
+        return ['base' => array_sum(array_column($lines, 'base')), 'rate' => null, 'tax' => $tax];
+    }
+
+    /**
+     * Бланк с периодом отчёта по ЕН, из которого число взять не удалось.
+     *
+     * Строка периода у него наша, значит, это отчёт по ЕН, просто его раскладку мы не
+     * поняли: новая редакция, съехавшая строка. «Не тот документ» здесь неправда, бухгалтер
+     * приложил то, что нужно. Так было с бланком 2025 года у КЛВ, 13.10.2026: отчёты за
+     * чужой квартал шли «не тем документом», а не «не тем периодом». Отдаём период, и прогон
+     * сам решит: период чужой, значит «Не тот период», свой, значит «Не удалось проверить».
+     *
+     * Альбомный бланк остаётся «не тем документом»: это форма 161 с похожей строкой периода,
+     * и о ней скажет читалка формы 161 (AutoAuditSources::otherForm).
+     */
+    private function unread(array $rows, DocumentPeriod $period, string $reason): DocumentValue
+    {
+        if ($this->landscape($rows)) {
+            return DocumentValue::wrongDocument($reason);
+        }
+
+        return DocumentValue::uncertain($reason, [], $period, PdfBlank::inn($rows));
+    }
+
+    /** Есть клетки правее колонки налога: в отчёте по ЕН их нет, в альбомной форме 161 есть. */
+    private function landscape(array $rows): bool
+    {
+        foreach ($rows as $cells) {
+            foreach ($cells as $cell) {
+                if ($cell['left'] > self::COLUMN_TAX[1]) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -127,26 +207,27 @@ class SingleTaxReportReader
      *
      * Разошлось — значит разбор взял не те клетки. Числа при этом выглядят настоящими,
      * поэтому единственный честный ответ — отказ, а не «скорее всего вот столько».
+     * Возвращает причину отказа или null, если сошлось.
      */
-    private function checkArithmetic(array $lines, array $totals): ?DocumentValue
+    private function checkArithmetic(array $lines, array $totals): ?string
     {
         $sumBase = array_sum(array_column($lines, 'base'));
         $sumTax  = array_sum(array_column($lines, 'tax'));
 
         if (abs($sumBase - $totals['base']) > self::TOLERANCE) {
-            return DocumentValue::wrongDocument(sprintf(
+            return sprintf(
                 'Бланк не сходится: итоговая база %s, а сумма строк %s',
                 number_format($totals['base'], 2, ',', ' '),
                 number_format($sumBase, 2, ',', ' '),
-            ));
+            );
         }
 
         if (abs($sumTax - $totals['tax']) > self::TOLERANCE) {
-            return DocumentValue::wrongDocument(sprintf(
+            return sprintf(
                 'Бланк не сходится: итоговый налог %s, а сумма строк %s',
                 number_format($totals['tax'], 2, ',', ' '),
                 number_format($sumTax, 2, ',', ' '),
-            ));
+            );
         }
 
         foreach ($lines as $line) {
@@ -158,13 +239,13 @@ class SingleTaxReportReader
             $expected = $line['base'] * $line['rate'] / 100;
 
             if (abs($expected - $line['tax']) > self::TOLERANCE) {
-                return DocumentValue::wrongDocument(sprintf(
+                return sprintf(
                     'Строка не сходится: %s по ставке %s%% даёт %s, а в бланке %s',
                     number_format($line['base'], 2, ',', ' '),
                     rtrim(rtrim(number_format($line['rate'], 2, ',', ' '), '0'), ','),
                     number_format($expected, 2, ',', ' '),
                     number_format($line['tax'], 2, ',', ' '),
-                ));
+                );
             }
         }
 

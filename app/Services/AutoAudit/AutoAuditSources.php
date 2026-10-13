@@ -305,7 +305,7 @@ class AutoAuditSources
         }
 
         try {
-            return match ($side) {
+            $value = match ($side) {
                 'osv'  => $this->balanceSheet->turnover($path, $field, 'credit'),
                 'tax'  => $field === 'tax' ? $this->taxReport->totalTax($path) : $this->taxReport->taxableBase($path),
                 'f161' => $this->form161->read($path, $field),
@@ -314,6 +314,37 @@ class AutoAuditSources
             // Один кривой файл не должен ронять проверку всей фирмы.
             return DocumentValue::unreadable(class_basename($e) . ': ' . $e->getMessage());
         }
+
+        return $value->status === DocumentValue::WRONG_DOC ? ($this->otherForm($side, $path) ?? $value) : $value;
+    }
+
+    /**
+     * Не та форма, но какая именно: отчёт по ЕН и форму 161 путают местами.
+     *
+     * КЛВ, 13.10.2026: нулевая форма 161 лежала в задаче по ЕН у Гринстона и Мейды, отчёт по
+     * ЕН в задаче на 161 у Сахно. Читалка своей формы писала «не нашли итоговую строку», и
+     * бухгалтер искал беду в отчёте, а не в том, куда его положил.
+     *
+     * Период чужой формы наружу не отдаём: форма 161 за сентябрь в задаче по ЕН за сентябрь
+     * иначе сошла бы за отчёт нужного периода. Только называем её в причине.
+     */
+    private function otherForm(string $side, string $path): ?DocumentValue
+    {
+        try {
+            [$value, $name, $needed] = match ($side) {
+                'tax'   => [$this->form161->income($path), 'форма 161', 'отчёт по единому налогу'],
+                'f161'  => [$this->taxReport->taxableBase($path), 'отчёт по единому налогу', 'форма 161'],
+                default => [null, null, null],
+            };
+        } catch (Throwable) {
+            return null;
+        }
+
+        if ($value?->period === null) {
+            return null;
+        }
+
+        return DocumentValue::wrongDocument("Это {$name} за {$value->period->title()}, а не {$needed}");
     }
 
     /**

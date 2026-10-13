@@ -173,7 +173,10 @@ class SingleTaxReportReaderTest extends TestCase
 
         $result = $this->reader($words)->taxableBase('отчёт.pdf');
 
-        $this->assertSame(DocumentValue::WRONG_DOC, $result->status);
+        // Период наш, значит это отчёт по ЕН: не «не тот документ», а «число не прочитано».
+        $this->assertSame(DocumentValue::UNCERTAIN, $result->status);
+        $this->assertNull($result->value);
+        $this->assertNotNull($result->period);
         $this->assertStringContainsString('не сходится', $result->reason);
     }
 
@@ -188,7 +191,10 @@ class SingleTaxReportReaderTest extends TestCase
 
         $result = $this->reader($words)->taxableBase('отчёт.pdf');
 
-        $this->assertSame(DocumentValue::WRONG_DOC, $result->status);
+        // Период наш, значит это отчёт по ЕН: не «не тот документ», а «число не прочитано».
+        $this->assertSame(DocumentValue::UNCERTAIN, $result->status);
+        $this->assertNull($result->value);
+        $this->assertNotNull($result->period);
         $this->assertStringContainsString('ставке', $result->reason);
     }
 
@@ -241,7 +247,10 @@ class SingleTaxReportReaderTest extends TestCase
 
         $result = $this->reader($words)->taxableBase('отчёт.pdf');
 
-        $this->assertSame(DocumentValue::WRONG_DOC, $result->status);
+        // Период наш, значит это отчёт по ЕН: не «не тот документ», а «число не прочитано».
+        $this->assertSame(DocumentValue::UNCERTAIN, $result->status);
+        $this->assertNull($result->value);
+        $this->assertNotNull($result->period);
         $this->assertStringContainsString('итоговую строку', $result->reason);
     }
 
@@ -307,6 +316,111 @@ class SingleTaxReportReaderTest extends TestCase
 
         $this->assertTrue($result->isFound(), $result->reason ?? '');
         $this->assertSame(450000.00, $result->value);
+    }
+
+    /** Подытог раздела или поле 179: заполнена только колонка налога. */
+    private function taxOnly(float $top, string $tax): array
+    {
+        return $this->number(self::X_TAX, $top, $tax);
+    }
+
+    /**
+     * Редакция 2025 года («FORM STI-091_7»): итога дохода нет, налог в поле 179 внизу.
+     * Числа из отчёта Купавского за 4 квартал 2025, его выгрузили из кабинета налоговой.
+     */
+    private function report2025(string $total = '18170,00'): array
+    {
+        return array_merge(
+            $this->periodRow('01102025', '31122025'),
+            $this->line(190, '0,00', '0,50', '0,00'),
+            $this->line(205, '0,00', '4,00', '0,00'),
+            $this->taxOnly(240, '0,00'),
+            $this->line(277, '908 500,00', '2,00', '18 170,00'),
+            $this->taxOnly(291, '18 170,00'),
+            $this->line(500, '0,00', '8,00', '0,00'),
+            $this->line(520, '0', '1', '0'),
+            $this->taxOnly(629, $total),
+        );
+    }
+
+    public function test_reads_2025_edition_without_base_total(): void
+    {
+        $base = $this->reader($this->report2025())->taxableBase('отчёт.pdf');
+        $tax  = $this->reader($this->report2025())->totalTax('отчёт.pdf');
+
+        $this->assertTrue($base->isFound(), $base->reason ?? '');
+        $this->assertSame(908500.00, $base->value);
+        $this->assertSame(18170.00, $tax->value);
+        $this->assertSame('01.10.2025 – 31.12.2025', $base->period->label());
+    }
+
+    /** Нулевой отчёт новой редакции: ноль, а не «не тот документ». */
+    public function test_reads_zero_2025_edition(): void
+    {
+        $words = array_merge(
+            $this->periodRow('01072026', '30092026'),
+            $this->line(190, '0,00', '0,50', '0,00'),
+            $this->line(277, '0,00', '2,00', '0,00'),
+            $this->taxOnly(291, '0,00'),
+            $this->taxOnly(629, '0,00'),
+        );
+
+        $result = $this->reader($words)->taxableBase('отчёт.pdf');
+
+        $this->assertTrue($result->isFound(), $result->reason ?? '');
+        $this->assertSame(0.0, $result->value);
+    }
+
+    /** Поле 179 обязано равняться сумме налога по строкам, иначе разбор взял не ту клетку. */
+    public function test_rejects_2025_edition_where_field_179_does_not_match(): void
+    {
+        $result = $this->reader($this->report2025('18 000,00'))->totalTax('отчёт.pdf');
+
+        // Период наш, значит это отчёт по ЕН: не «не тот документ», а «число не прочитано».
+        $this->assertSame(DocumentValue::UNCERTAIN, $result->status);
+        $this->assertNull($result->value);
+        $this->assertNotNull($result->period);
+        $this->assertStringContainsString('не сходится', $result->reason);
+    }
+
+    /**
+     * Нулевая форма 161 не должна сойти за нулевой отчёт по ЕН: у неё та же строка периода
+     * и строка нулей, но бланк альбомный, клетки правее колонки налога (КЛВ, Гринстон).
+     */
+    public function test_landscape_form_is_not_a_2025_edition(): void
+    {
+        $words = array_merge(
+            $this->periodRow('01092026', '30092026'),
+            $this->line(400, '0', '0', '0'),
+            $this->taxOnly(420, '0'),
+            $this->number(682.0, 400, '0'),
+        );
+
+        $result = $this->reader($words)->taxableBase('161.pdf');
+
+        $this->assertSame(DocumentValue::WRONG_DOC, $result->status);
+        $this->assertStringContainsString('итоговую строку', $result->reason);
+    }
+
+    /**
+     * Отчёт по ЕН, который не разобрали, всё равно говорит свой период и ИНН: по ним прогон
+     * отличит отчёт за чужой квартал («Не тот период») от непрочитанного своего.
+     */
+    public function test_unread_report_keeps_period_and_inn(): void
+    {
+        $inn = [];
+
+        foreach (str_split('23101197800053') as $i => $digit) {
+            $inn[] = new PdfWord(69.7 + $i * 13.8, 90.0, $digit);
+        }
+
+        $words = array_merge($inn, $this->periodRow('01102025', '31122025'), $this->line(300, '908 500,00', '2,00', '18 170,00'));
+
+        $result = $this->reader($words)->taxableBase('отчёт.pdf');
+
+        $this->assertSame(DocumentValue::UNCERTAIN, $result->status);
+        $this->assertSame('4 квартал 2025', $result->period->title());
+        $this->assertSame('23101197800053', $result->inn);
     }
 
     /** Отрицательное число не должно потеряться при разборе. */

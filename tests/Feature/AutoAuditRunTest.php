@@ -189,6 +189,11 @@ class AutoAuditRunTest extends TestCase
 
         $period = $report['period'] ?? DocumentPeriod::of(...$report['month']);
 
+        // Бланк узнан по периоду, а число из него не разобрали (новая редакция, съехавшая строка).
+        if (isset($report['unread'])) {
+            return DocumentValue::uncertain($report['unread'], [], $period, $report['inn'] ?? null);
+        }
+
         // null в тесте: ИНН из шапки прочитать не удалось.
         return DocumentValue::found($report[$field], [], $period, $report['inn'] ?? null);
     }
@@ -1140,6 +1145,84 @@ class AutoAuditRunTest extends TestCase
 
         // Из файла период не прочитать: берём месяц перед августовской задачей.
         $this->assertSame('июль 2026', $issue->periodLabel());
+    }
+
+    /**
+     * Форма 161 в задаче по ЕН: называем её, а не пишем «не нашли итоговую строку».
+     * Её период наружу не идёт, иначе форма за нужный месяц сошла бы за отчёт (КЛВ, Гринстон).
+     */
+    public function test_form_161_in_a_tax_task_is_named(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00]);
+        $this->forms['161ф за июль.pdf'] = ['month' => [2026, 7], 'income' => 0.0, 'inn' => $client->inn];
+        $this->attachLog($client, $this->item($client, $this->taxService), '161ф за июль.pdf');
+
+        $issue = $this->runAudit()->firstWhere('outcome', AutoAuditResult::WRONG_DOCUMENT);
+
+        $this->assertSame('Это форма 161 за июль 2026, а не отчёт по единому налогу', $issue->reason);
+        $this->assertNull($issue->sources[0]['value']);
+    }
+
+    /** И наоборот: отчёт по ЕН в задаче на форму 161 (КЛВ, Сахно). */
+    public function test_tax_report_in_a_form_161_task_is_named(): void
+    {
+        $f161   = $this->service('Форма 161 и зарплатные налоги', AutoAuditRunner::REF_FORM_161);
+        $client = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL]);
+        $this->attachSheet($client, 'осв.xls', ['3520' => 25000.00]);
+        $this->reports['единый.pdf'] = [
+            'period' => new DocumentPeriod(DocumentPeriod::of(2026, 4)->from, DocumentPeriod::of(2026, 6)->to),
+            'base'   => 924840.70,
+            'tax'    => 18496.81,
+            'inn'    => $client->inn,
+        ];
+        $this->attachLog($client, $this->item($client, $f161), 'единый.pdf');
+
+        $issue = $this->runAudit()->firstWhere('outcome', AutoAuditResult::WRONG_DOCUMENT);
+
+        $this->assertSame('4,5,6,7', $issue->rule);
+        $this->assertSame('Это отчёт по единому налогу за 2 квартал 2026, а не форма 161', $issue->reason);
+    }
+
+    /**
+     * Отчёт по ЕН за чужой квартал, из которого число не разобрали: это «Не тот период», а
+     * не «Не тот документ». Так шли отчёты КЛВ в бланке 2025 года (Купавский, 13.10.2026).
+     */
+    public function test_unread_tax_report_of_another_quarter_is_a_wrong_period(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00], month: 9, taskMonth: 10);
+        $this->reports['отчёт-2025.pdf'] = [
+            'period' => new DocumentPeriod(DocumentPeriod::of(2025, 10)->from, DocumentPeriod::of(2025, 12)->to),
+            'unread' => 'Не нашли итоговую строку (поля 186 и 187 или поле 179)',
+            'inn'    => $client->inn,
+        ];
+        $this->attachLog($client, $this->item($client, $this->taxService), 'отчёт-2025.pdf', month: 10);
+
+        $results = $this->runAudit();
+
+        $this->assertCount(0, $results->where('outcome', AutoAuditResult::WRONG_DOCUMENT));
+        $issue = $results->firstWhere('outcome', AutoAuditResult::WRONG_PERIOD);
+        $this->assertStringContainsString('за 4 квартал 2025, а нужен за сентябрь 2026', $issue->reason);
+    }
+
+    /** Свой период, а число не разобрали: «Не удалось проверить», бухгалтера не спрашиваем. */
+    public function test_unread_tax_report_of_its_month_is_unverified(): void
+    {
+        $client = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 100.00, '3410' => 4.00], month: 9, taskMonth: 10);
+        $this->reports['отчёт.pdf'] = [
+            'month'  => [2026, 9],
+            'unread' => 'Бланк не сходится: итоговый налог 5,00, а сумма строк 4,00',
+            'inn'    => $client->inn,
+        ];
+        $this->attachLog($client, $this->item($client, $this->taxService), 'отчёт.pdf', month: 10);
+
+        $results = $this->runAudit();
+
+        $this->assertSame([AutoAuditResult::UNVERIFIED], $results->pluck('outcome')->unique()->values()->all());
+        $this->assertStringContainsString('Бланк не сходится', $results->first()->reason);
+        $this->assertSame(0, AutoAuditFinding::count());
     }
 
     /** Квитанция рядом с настоящим отчётом не ошибка: нужная форма в задаче есть. */
