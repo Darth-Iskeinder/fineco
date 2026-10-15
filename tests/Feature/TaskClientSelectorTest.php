@@ -93,8 +93,9 @@ class TaskClientSelectorTest extends TestCase
     }
 
     /**
-     * Компанию и услугу в модалке выбирают полем с поиском, а не длинным селектом:
-     * и компаний, и БП в каталоге сотни, прокруткой нужную не найти.
+     * Сотрудника и услугу в модалке выбирают полем с поиском, а не длинным селектом:
+     * и людей, и БП в каталоге много, прокруткой нужное не найти. Компании отмечают
+     * галочками под каждым сотрудником, там свой поиск.
      */
     public function test_company_and_catalog_are_picked_by_search(): void
     {
@@ -106,7 +107,7 @@ class TaskClientSelectorTest extends TestCase
 
         // Поля с поиском на месте: подсказка ввода и обработчики выбора.
         $page->assertSee('Начните вводить название...', false);
-        $page->assertSee("pickClient(c)", false);
+        $page->assertSee("pickAssignee(emp)", false);
         $page->assertSee("pickService(svc)", false);
 
         // Старых выпадающих списков в форме не осталось.
@@ -131,7 +132,7 @@ class TaskClientSelectorTest extends TestCase
             ->assertOk()
             ->getContent();
 
-        $this->assertSame(1, substr_count($html, 'get clientPickerOptions()'), 'Геттер поиска компаний объявлен не один раз');
+        $this->assertSame(1, substr_count($html, 'get assigneePickerOptions()'), 'Геттер поиска сотрудников объявлен не один раз');
         $this->assertSame(1, substr_count($html, 'get facetSource()'), 'Источник значений воронок объявлен не один раз');
         $this->assertStringContainsString("filters['client']", $html, 'Колонка «Компания» потеряла воронку');
     }

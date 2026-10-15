@@ -238,6 +238,7 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/logs/{log}/documents/{document}/delete', [BuhTasksController::class, 'deleteDocument'])->name('logs.document-delete');
         // Внеплановые задачи
         Route::post('/adhoc', [BuhTasksController::class, 'storeAdhoc'])->name('adhoc.store');
+        Route::post('/adhoc/batch', [BuhTasksController::class, 'storeAdhocBatch'])->name('adhoc.store-batch');
         Route::post('/adhoc/{task}/start', [BuhTasksController::class, 'startAdhoc'])->name('adhoc.start');
         Route::post('/adhoc/{task}/pause', [BuhTasksController::class, 'pauseAdhoc'])->name('adhoc.pause');
         Route::post('/adhoc/{task}/complete', [BuhTasksController::class, 'completeAdhoc'])->name('adhoc.complete');

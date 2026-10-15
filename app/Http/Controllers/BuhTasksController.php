@@ -13,6 +13,7 @@ use App\Models\Estimate;
 use App\Models\EstimateItem;
 use App\Models\Service;
 use App\Models\TaskReminder;
+use App\Services\AdhocAssignments;
 use App\Services\AutoAudit\AutoAuditQuestions;
 use App\Services\AutoAudit\SourceDocumentLinks;
 use App\Services\EventTriggeredTasks;
@@ -209,16 +210,10 @@ class BuhTasksController extends Controller
             ->orderBy('name')
             ->get();
 
-        // Компании для селектора «Добавить задачу»: админ/руководитель — все активные;
-        // остальные (включая главбуха) — только свои: где ответственный или исполнитель БП.
-        // Ставить задачу по чужой компании нельзя — иначе поставивший её потом не увидит.
-        if ($employee->isAdmin() || $employee->isManager()) {
-            $allClients = Client::active()->orderBy('name')->get(['id', 'name']);
-        } else {
-            $allClients = Client::query()
-                ->where($assignedToEmployee)
-                ->orderBy('name')->get(['id', 'name']);
-        }
+        // Компании для формы «Добавить задачу»: те, что видит автор, и среди них — какие
+        // закреплены за каждым сотрудником. Под сотрудником форма показывает только его.
+        $allClients      = AdhocAssignments::authorClients($employee);
+        $employeeClients = AdhocAssignments::linkedClientIds($allClients->pluck('id'));
 
         // Правила активного списка:
         //  - просроченные невыполненные — показываем ВСЕ, пока не закроют;
@@ -957,7 +952,7 @@ class BuhTasksController extends Controller
             $auditQuestions = [];
         }
 
-        return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'reminders', 'reminderCounts', 'completed', 'completedDays', 'employees', 'catalog', 'teamTasks', 'teamMembers', 'assignedTasks', 'assignedAlertCount', 'assignedDoneDays', 'auditQuestions'));
+        return view('buhtasks.index', compact('year', 'month', 'employee', 'tasks', 'allClients', 'employeeClients', 'reminders', 'reminderCounts', 'completed', 'completedDays', 'employees', 'catalog', 'teamTasks', 'teamMembers', 'assignedTasks', 'assignedAlertCount', 'assignedDoneDays', 'auditQuestions'));
     }
 
     // =============================================
@@ -1474,13 +1469,83 @@ class BuhTasksController extends Controller
     // ВНЕПЛАНОВЫЕ ЗАДАЧИ (BuhAdhocTask)
     // =============================================
 
+    /**
+     * Одна задача одному сотруднику. Форма страницы шлёт пачку (storeAdhocBatch), этот
+     * адрес остался для прежних вызовов и отвечает в прежнем виде. Правила те же: компания
+     * должна быть закреплена за исполнителем.
+     */
     public function storeAdhoc(Request $request)
+    {
+        $validated = $request->validate($this->adhocRules() + [
+            'employee_id' => 'required|integer',
+            'client_id'   => 'nullable|integer',
+        ], $this->adhocMessages());
+
+        $author = auth('employee')->user();
+        [[$assignee, $clients]] = AdhocAssignments::resolve($author, [[
+            'employee_id' => (int) $validated['employee_id'],
+            'client_ids'  => !empty($validated['client_id']) ? [(int) $validated['client_id']] : [],
+        ]]);
+
+        $adhoc = $this->createAdhocTasks($author, $validated, [[$assignee, $clients]], $request->file('file'))[0];
+
+        return response()->json([
+            'success' => true,
+            // Добавлять в текущий список — только если назначено себе
+            'mine'    => $assignee->id === $author->id,
+            'assignee_name' => $assignee->full_name,
+            // Поручение другому сотруднику — строка для вкладки «Я поручил»: она появляется
+            // там сразу, иначе задача пропадала бы с экрана до перезагрузки страницы.
+            'assigned' => $assignee->id === $author->id
+                ? null
+                : $this->assignedRow($adhoc->load('client:id,name', 'employee:id,full_name'), CarbonImmutable::now()->toDateString()),
+            // Строка для списка на экране — общая с задачами, рождёнными по событию.
+            'task' => $this->adhocTaskRow($adhoc),
+        ]);
+    }
+
+    /**
+     * Пачка задач из формы «Добавить задачу»: несколько сотрудников, у каждого свои
+     * компании. Каждая пара «сотрудник + компания» — отдельная задача, как если бы её
+     * завели руками; сотрудник без компаний получает одну задачу без компании.
+     */
+    public function storeAdhocBatch(Request $request)
+    {
+        $validated = $request->validate($this->adhocRules() + [
+            'assignments'               => 'required|array|min:1',
+            'assignments.*.employee_id' => 'required|integer|distinct',
+            'assignments.*.client_ids'  => 'array',
+            'assignments.*.client_ids.*' => 'integer',
+        ], $this->adhocMessages() + [
+            'assignments.required' => 'Выберите сотрудника',
+        ]);
+
+        $author = auth('employee')->user();
+        $batch  = AdhocAssignments::resolve($author, array_map(fn (array $a) => [
+            'employee_id' => (int) $a['employee_id'],
+            'client_ids'  => array_map('intval', $a['client_ids'] ?? []),
+        ], $validated['assignments']));
+
+        $tasks = $this->createAdhocTasks($author, $validated, $batch, $request->file('file'));
+        $today = CarbonImmutable::now()->toDateString();
+
+        return response()->json([
+            'success' => true,
+            'created' => $tasks->count(),
+            // Свои задачи — в список на экране, поручения — во вкладку «Я поручил».
+            'tasks'    => $tasks->filter(fn ($t) => $t->employee_id === $author->id)
+                ->map(fn ($t) => $this->adhocTaskRow($t))->values(),
+            'assigned' => $tasks->reject(fn ($t) => $t->employee_id === $author->id)
+                ->map(fn ($t) => $this->assignedRow($t->load('client:id,name', 'employee:id,full_name'), $today))->values(),
+        ]);
+    }
+
+    /** Поля самой задачи — общие для одной задачи и для пачки. */
+    private function adhocRules(): array
     {
         // Произвольная задача: не в смете, без стоимости, с датой-напоминанием,
         // назначается любому активному сотруднику (по умолчанию — себе). Клиент необязателен.
-        $validated = $request->validate([
-            'employee_id'     => 'required|exists:employees,id',
-            'client_id'       => 'nullable|exists:clients,id',
+        return [
             'service_id'      => 'nullable|exists:services,id', // выбор из каталога
             'name'            => 'required|string|max:255',
             'description'     => 'nullable|string|max:2000',
@@ -1488,17 +1553,29 @@ class BuhTasksController extends Controller
             'requires_review' => 'boolean',
             'due_date'        => 'required|date',
             'file'            => $this->documentFileRules(required: false), // необязательный документ
-        ], [
+        ];
+    }
+
+    private function adhocMessages(): array
+    {
+        return [
             'employee_id.required' => 'Выберите сотрудника',
             'name.required'        => 'Введите название задачи',
             'due_date.required'    => 'Укажите дату',
             'file.max'             => 'Файл не должен превышать 40 МБ',
-        ]);
+        ];
+    }
 
-        $author   = auth('employee')->user();
-        // Тот же отбор, что и в списке: форму можно отправить и в обход него.
-        $assignee = Employee::assignable()->findOrFail($validated['employee_id']);
-        $due      = CarbonImmutable::parse($validated['due_date']);
+    /**
+     * Создать задачи по разобранной пачке ([[Employee, [Client|null, ...]], ...]) одной
+     * транзакцией: или все, или ни одной. Файл, если он есть, кладётся в каждую задачу
+     * своей копией — задачи живут отдельно, и удаление файла в одной не задевает другие.
+     *
+     * @return Collection<int, BuhAdhocTask>
+     */
+    private function createAdhocTasks(Employee $author, array $validated, array $batch, ?UploadedFile $file): Collection
+    {
+        $due = CarbonImmutable::parse($validated['due_date']);
 
         // Из каталога забираем название, описание и подпункты — СНИМКОМ, а не ссылкой:
         // правка услуги задним числом не должна менять уже созданные и закрытые задачи.
@@ -1523,54 +1600,60 @@ class BuhTasksController extends Controller
             }
         }
 
-        $adhoc = BuhAdhocTask::create([
-            'employee_id'     => $assignee->id,
-            'created_by'      => $author->id, // поручение: попадёт во вкладку «Я поручил», ему же на проверку
-            // Задачу себе сотрудник и так только что видел — уведомляем лишь того, кому поручили
-            'assign_seen_at'  => $assignee->id === $author->id ? now() : null,
-            'rework_seen_at'  => now(),
-            'client_id'       => $validated['client_id'] ?? null,
-            'service_id'      => $validated['service_id'] ?? null,
-            'name'            => $name,
-            'description'     => $description,
-            'clarification'   => $validated['clarification'] ?? null,
-            'checklist'       => $checklist,
-            // Поручение сотрудник не закрывает сам: выполнил — сдал, принимает автор.
-            // Тумблер «на проверку» остаётся только у задач, заведённых себе.
-            'requires_review' => $assignee->id !== $author->id
-                ? true
-                : (bool) ($validated['requires_review'] ?? false),
-            'cost'            => 0,
-            'year'            => $due->year,
-            'month'           => $due->month,
-            'due_day'         => $due->day,
-            'status'          => 'pending',
-            'paused_seconds'  => 0,
-        ]);
+        $stored = [];
 
-        // Необязательный документ — прикрепляем сразу при создании (автор может приложить
-        // даже когда задача назначена другому сотруднику).
-        if ($request->hasFile('file')) {
-            $file         = $request->file('file');
-            $originalName = $file->getClientOriginalName();
-            $safeName     = pathinfo($originalName, PATHINFO_FILENAME) . '_' . time() . '.' . $file->getClientOriginalExtension();
-            $path         = $file->storeAs('buh_adhoc_documents/' . $adhoc->id, $safeName, 'local');
-            $adhoc->documents()->create(['path' => $path, 'name' => $originalName]);
+        try {
+            return DB::transaction(function () use ($author, $validated, $batch, $file, $due, $name, $description, $checklist, &$stored) {
+                $tasks = collect();
+
+                foreach ($batch as [$assignee, $clients]) {
+                    foreach ($clients as $client) {
+                        $adhoc = BuhAdhocTask::create([
+                            'employee_id'     => $assignee->id,
+                            'created_by'      => $author->id, // поручение: попадёт во вкладку «Я поручил», ему же на проверку
+                            // Задачу себе сотрудник и так только что видел — уведомляем лишь того, кому поручили
+                            'assign_seen_at'  => $assignee->id === $author->id ? now() : null,
+                            'rework_seen_at'  => now(),
+                            'client_id'       => $client?->id,
+                            'service_id'      => $validated['service_id'] ?? null,
+                            'name'            => $name,
+                            'description'     => $description,
+                            'clarification'   => $validated['clarification'] ?? null,
+                            'checklist'       => $checklist,
+                            // Поручение сотрудник не закрывает сам: выполнил — сдал, принимает автор.
+                            // Тумблер «на проверку» остаётся только у задач, заведённых себе.
+                            'requires_review' => $assignee->id !== $author->id
+                                ? true
+                                : (bool) ($validated['requires_review'] ?? false),
+                            'cost'            => 0,
+                            'year'            => $due->year,
+                            'month'           => $due->month,
+                            'due_day'         => $due->day,
+                            'status'          => 'pending',
+                            'paused_seconds'  => 0,
+                        ]);
+
+                        // Необязательный документ — прикрепляем сразу при создании (автор может
+                        // приложить даже когда задача назначена другому сотруднику).
+                        if ($file) {
+                            $originalName = $file->getClientOriginalName();
+                            $safeName     = pathinfo($originalName, PATHINFO_FILENAME) . '_' . time() . '.' . $file->getClientOriginalExtension();
+                            $stored[]     = $path = $file->storeAs('buh_adhoc_documents/' . $adhoc->id, $safeName, 'local');
+                            $adhoc->documents()->create(['path' => $path, 'name' => $originalName]);
+                        }
+
+                        $tasks->push($adhoc);
+                    }
+                }
+
+                return $tasks;
+            });
+        } catch (\Throwable $e) {
+            // Задачи откатились вместе с транзакцией, а файлы на диске остались бы сиротами.
+            Storage::disk('local')->delete(array_filter($stored));
+
+            throw $e;
         }
-
-        return response()->json([
-            'success' => true,
-            // Добавлять в текущий список — только если назначено себе
-            'mine'    => $assignee->id === $author->id,
-            'assignee_name' => $assignee->full_name,
-            // Поручение другому сотруднику — строка для вкладки «Я поручил»: она появляется
-            // там сразу, иначе задача пропадала бы с экрана до перезагрузки страницы.
-            'assigned' => $assignee->id === $author->id
-                ? null
-                : $this->assignedRow($adhoc->load('client:id,name', 'employee:id,full_name'), CarbonImmutable::now()->toDateString()),
-            // Строка для списка на экране — общая с задачами, рождёнными по событию.
-            'task' => $this->adhocTaskRow($adhoc),
-        ]);
     }
 
     public function startAdhoc(BuhAdhocTask $task)

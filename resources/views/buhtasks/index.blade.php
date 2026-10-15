@@ -75,7 +75,7 @@
 {{-- Вопросы автоаудита к этому бухгалтеру. Отдельным блоком, а не аргументом buhTasks: у того
      их и так тринадцать, и порядок легко перепутать. --}}
 <script type="application/json" id="audit-questions-data">@json($auditQuestions ?? [])</script>
-<div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($completed) }}, {{ json_encode($employees) }}, {{ $employee->id }}, {{ json_encode($catalog) }}, {{ json_encode($teamTasks) }}, {{ json_encode($teamMembers) }}, {{ json_encode($assignedTasks) }}, {{ (int) $assignedAlertCount }}, {{ (int) $assignedDoneDays }})" x-cloak>
+<div x-data="buhTasks({{ json_encode($tasks) }}, {{ $year }}, {{ $month }}, {{ json_encode($allClients) }}, {{ json_encode($completed) }}, {{ json_encode($employees) }}, {{ $employee->id }}, {{ json_encode($catalog) }}, {{ json_encode($teamTasks) }}, {{ json_encode($teamMembers) }}, {{ json_encode($assignedTasks) }}, {{ (int) $assignedAlertCount }}, {{ (int) $assignedDoneDays }}, {{ json_encode($employeeClients) }}, {{ \App\Services\AdhocAssignments::MAX_TASKS }})" x-cloak>
 
     {{-- Подсказка «поставлена на паузу»: у сотрудника идёт только один таймер, запуск
          новой задачи останавливает прежнюю. Без подсказки таймер просто «пропадал» бы. --}}
@@ -1035,8 +1035,9 @@
          @click.self="showCreateModal = false"
          style="display:none">
         {{-- max-h + прокрутка: описание из каталога бывает длинным, без этого форма
-             вырастала за пределы экрана и кнопки сохранения уезжали из виду. --}}
-        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 max-h-[85vh] overflow-y-auto">
+             вырастала за пределы экрана и кнопки сохранения уезжали из виду.
+             Ширина под списки компаний: в узком окне названия обрезались. --}}
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 p-6 max-h-[90vh] overflow-y-auto">
             <div class="flex items-center justify-between mb-5">
                 <h3 class="text-lg font-semibold text-slate-800">Добавить задачу</h3>
                 <button @click="showCreateModal = false" class="text-slate-400 hover:text-slate-600 transition-colors">
@@ -1045,52 +1046,6 @@
             </div>
 
             <div class="space-y-4">
-                {{-- Компания --}}
-                <div>
-                    <label class="block text-sm font-medium text-slate-700 mb-1.5">
-                        Компания
-                        <span class="text-slate-400 font-normal">(необязательно)</span>
-                    </label>
-                    {{-- Поиск вместо селекта: компаний сотни, прокруткой нужную не найти.
-                         Список уже на странице, поэтому фильтруем на месте, без запросов. --}}
-                    <div class="relative" @click.outside="closePicker('client')">
-                        <input type="text"
-                               :value="picker.client.open ? picker.client.q : selectedClientName"
-                               @focus="openPicker('client')"
-                               @click="openPicker('client')"
-                               @input="picker.client.q = $event.target.value; picker.client.open = true; picker.client.hi = 0"
-                               @keydown.arrow-down.prevent="movePicker('client', 1)"
-                               @keydown.arrow-up.prevent="movePicker('client', -1)"
-                               @keydown.enter.prevent="chooseHighlighted('client')"
-                               @keydown.escape.stop="closePicker('client')"
-                               :placeholder="selectedClientName || 'Начните вводить название...'"
-                               class="block w-full px-3 py-2.5 pr-9 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 bg-white">
-
-                        <button type="button" x-show="newTask.client_id" @click="clearPick('client')"
-                                class="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600"
-                                title="Сбросить компанию" style="display:none">
-                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                        </button>
-
-                        <div x-show="picker.client.open" style="display:none"
-                             class="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
-                            <template x-if="clientPickerOptions.rows.length === 0">
-                                <div class="px-3 py-2.5 text-sm text-slate-400">Ничего не найдено</div>
-                            </template>
-                            <template x-for="(c, i) in clientPickerOptions.rows" :key="c.id">
-                                <button type="button" @click="pickClient(c)" @mouseenter="picker.client.hi = i"
-                                        :class="i === picker.client.hi ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-50'"
-                                        class="block w-full text-left px-3 py-2 text-sm" x-text="c.name"></button>
-                            </template>
-                            <template x-if="clientPickerOptions.total > clientPickerOptions.rows.length">
-                                <div class="px-3 py-2 text-xs text-slate-400 border-t border-slate-100">
-                                    Показаны первые <span x-text="clientPickerOptions.rows.length"></span> из <span x-text="clientPickerOptions.total"></span> — уточните запрос
-                                </div>
-                            </template>
-                        </div>
-                    </div>
-                </div>
-
                 {{-- Источник задачи: из каталога (берём только название) или своя --}}
                 <div>
                     <div class="inline-flex p-0.5 bg-slate-100 rounded-lg mb-3">
@@ -1215,11 +1170,225 @@
                     </div>
                 </template>
 
-                {{-- На проверку — тогл как в попапе БП. Только для задачи себе: поручение
+                <div class="grid sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-1.5">Дата</label>
+                        <input type="date"
+                               x-model="newTask.due_date"
+                               @input="dueDateTouched = true"
+                               class="block w-40 px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50">
+                    </div>
+                    {{-- Документ (необязательно) --}}
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-1.5">
+                            Документ <span class="text-slate-400 font-normal">(необязательно)</span>
+                        </label>
+                        <div class="flex items-center gap-2">
+                            <label class="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 text-slate-600 text-sm font-medium rounded-xl hover:bg-slate-200 cursor-pointer transition-colors">
+                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
+                                <span x-text="newTaskFileName ? 'Заменить файл' : 'Выбрать файл'"></span>
+                                <input type="file" class="hidden" @change="selectCreateDocument($event)">
+                            </label>
+                            <span x-show="newTaskFileName" class="text-sm text-slate-600 truncate max-w-[180px]" x-text="newTaskFileName"></span>
+                        </div>
+                    </div>
+                </div>
+                {{-- БП «по запросу»: дата подставлена по сроку из каталога. Показываем всем,
+                     кто заводит задачу, чтобы правка даты была осознанной. --}}
+                <template x-if="onRequestDays">
+                    <p class="text-xs text-indigo-600 flex items-start gap-1.5">
+                        <svg class="w-3.5 h-3.5 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        <span x-text="'Срок по каталогу: ' + onRequestDays + ' дн. Дата подставлена автоматически, её можно изменить.'"></span>
+                    </p>
+                </template>
+                {{-- Кому — двумя способами. «По сотрудникам»: выбрали людей, под каждым
+                     отметили его компании. «По компаниям»: отметили компании, каждая уходит
+                     своему ответственному (или другому связанному с ней сотруднику).
+                     Выбор в режимах хранится отдельно, создаётся по открытому. --}}
+                <div class="flex items-center justify-between gap-3">
+                    <span class="text-sm font-medium text-slate-700">Кому</span>
+                    <div class="inline-flex p-0.5 bg-slate-100 rounded-lg">
+                        <button type="button" @click="newTask.mode = 'employees'"
+                                :class="newTask.mode === 'employees' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'"
+                                class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors">По сотрудникам</button>
+                        <button type="button" @click="newTask.mode = 'companies'"
+                                :class="newTask.mode === 'companies' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500 hover:text-slate-700'"
+                                class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors">По компаниям</button>
+                    </div>
+                </div>
+
+                <div x-show="newTask.mode === 'employees'" class="space-y-4">
+                <div>
+                    <div x-show="newTask.employee_ids.length" class="flex flex-wrap gap-1.5 mb-2">
+                        <template x-for="id in newTask.employee_ids" :key="id">
+                            <span class="inline-flex items-center gap-1 pl-2.5 pr-1 py-1 rounded-lg bg-indigo-50 text-indigo-700 text-sm">
+                                <span x-text="employeeName(id)"></span>
+                                <button type="button" @click="removeAssignee(id)" class="p-0.5 rounded-md hover:bg-indigo-100" title="Убрать">
+                                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                                </button>
+                            </span>
+                        </template>
+                    </div>
+                    <div class="relative" @click.outside="closePicker('employee')">
+                        <input type="text"
+                               :value="picker.employee.q"
+                               @focus="openPicker('employee')"
+                               @click="openPicker('employee')"
+                               @input="picker.employee.q = $event.target.value; picker.employee.open = true; picker.employee.hi = 0"
+                               @keydown.arrow-down.prevent="movePicker('employee', 1)"
+                               @keydown.arrow-up.prevent="movePicker('employee', -1)"
+                               @keydown.enter.prevent="chooseHighlighted('employee')"
+                               @keydown.escape.stop="closePicker('employee')"
+                               placeholder="Добавить сотрудника..."
+                               class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 bg-white">
+                        <div x-show="picker.employee.open" style="display:none"
+                             class="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg max-h-56 overflow-y-auto">
+                            <template x-if="assigneePickerOptions.rows.length === 0">
+                                <div class="px-3 py-2.5 text-sm text-slate-400">Ничего не найдено</div>
+                            </template>
+                            <template x-for="(emp, i) in assigneePickerOptions.rows" :key="emp.id">
+                                <button type="button" @click="pickAssignee(emp)" @mouseenter="picker.employee.hi = i"
+                                        :class="i === picker.employee.hi ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-50'"
+                                        class="block w-full text-left px-3 py-2 text-sm" x-text="emp.name"></button>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+
+                {{-- Компании — только после выбора сотрудника и только его: где он
+                     ответственный, в команде или исполнитель БП. По чужой поручить нельзя. --}}
+                <template x-if="newTask.employee_ids.length">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 mb-1.5">
+                            По каким компаниям <span class="text-slate-400 font-normal">(необязательно)</span>
+                        </label>
+                        <div class="space-y-2">
+                            <template x-for="id in newTask.employee_ids" :key="id">
+                                <div class="border border-slate-200 rounded-xl">
+                                    <div class="flex items-center gap-2 px-3 py-2">
+                                        <button type="button" @click="toggleAssigneeOpen(id)" class="flex-1 min-w-0 flex items-center gap-1.5 text-left text-sm">
+                                            <svg class="w-3.5 h-3.5 text-slate-400 flex-shrink-0 transition-transform" :class="isAssigneeOpen(id) ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                                            <span class="font-medium text-slate-700 truncate" x-text="employeeName(id)"></span>
+                                            <span class="text-xs text-slate-400 flex-shrink-0" x-text="assigneeClientsLabel(id)"></span>
+                                        </button>
+                                        <template x-if="clientsOfAssignee(id).length">
+                                            <div class="flex gap-1 text-xs flex-shrink-0">
+                                                <button type="button" @click="setAssigneeClients(id, true)" class="px-2 py-1 rounded-md text-indigo-600 hover:bg-indigo-50">Все</button>
+                                                <button type="button" @click="setAssigneeClients(id, false)" class="px-2 py-1 rounded-md text-slate-500 hover:bg-slate-100">Никого</button>
+                                            </div>
+                                        </template>
+                                    </div>
+                                    <div x-show="isAssigneeOpen(id)" class="border-t border-slate-100 px-3 py-2">
+                                        <template x-if="!clientsOfAssignee(id).length">
+                                            <p class="text-xs text-slate-400">За сотрудником нет компаний. Будет одна задача без компании.</p>
+                                        </template>
+                                        <template x-if="clientsOfAssignee(id).length > 8">
+                                            <input type="text"
+                                                   :value="assigneeSearch[id] || ''"
+                                                   @input="setAssigneeSearch(id, $event.target.value)"
+                                                   placeholder="Поиск по компаниям сотрудника"
+                                                   class="block w-full px-3 py-1.5 mb-2 border border-slate-200 rounded-lg text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50">
+                                        </template>
+                                        <div class="max-h-64 overflow-y-auto space-y-0.5">
+                                            <template x-for="c in filteredClientsOfAssignee(id)" :key="c.id">
+                                                <label class="flex items-center gap-2 px-1 py-1.5 rounded-md hover:bg-slate-50 text-sm text-slate-700 cursor-pointer">
+                                                    <input type="checkbox" :checked="isClientChosen(id, c.id)" @change="toggleClientChosen(id, c.id)"
+                                                           class="rounded border-slate-300 text-indigo-600 flex-shrink-0">
+                                                    <span class="truncate" x-text="c.name"></span>
+                                                </label>
+                                            </template>
+                                            <template x-if="clientsOfAssignee(id).length && !filteredClientsOfAssignee(id).length">
+                                                <p class="text-xs text-slate-400 px-1">Ничего не найдено</p>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+
+                {{-- Одна компания отмечена у двоих — по ней будет две задачи. Иногда так и
+                     задумано («оба сверьте свою часть»), поэтому не запрещаем, а говорим. --}}
+                <template x-if="sharedChosenClients.length">
+                    <div class="flex items-start justify-between gap-3 px-3 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-800">
+                        <span x-text="sharedChosenText"></span>
+                        <button type="button" @click="keepSharedAtFirst()"
+                                class="flex-shrink-0 px-2 py-1 rounded-md text-amber-700 font-medium hover:bg-amber-100 hover:text-amber-900">Оставить у одного</button>
+                    </div>
+                </template>
+                </div>
+
+                {{-- По компаниям: каждая отмеченная компания — одна задача одному исполнителю.
+                     По умолчанию ответственному; выбрать можно только связанных с компанией. --}}
+                <div x-show="newTask.mode === 'companies'" style="display:none" class="space-y-3">
+                    <div class="flex flex-wrap items-center gap-3">
+                        <input type="text" x-model="companySearch"
+                               placeholder="Поиск по компаниям"
+                               class="flex-1 min-w-0 px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50">
+                        <label class="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+                            <input type="checkbox" x-model="companyOnlyChosen" class="rounded border-slate-300 text-indigo-600">
+                            только выбранные
+                        </label>
+                        <div class="flex gap-1 text-sm">
+                            <button type="button" @click="pickAllCompanies()" class="px-2 py-1 rounded-md text-indigo-600 hover:bg-indigo-50">Все</button>
+                            <button type="button" @click="clearCompanies()" class="px-2 py-1 rounded-md text-slate-500 hover:bg-slate-100">Никого</button>
+                        </div>
+                    </div>
+
+                    <template x-if="pickedCompanyCount">
+                        <div class="flex items-center gap-2 text-sm text-slate-600">
+                            <span>Поручить всем:</span>
+                            <select x-model="bulkPerformer" @change="applyBulkPerformer()"
+                                    class="w-56 px-2 py-1.5 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50">
+                                <option value="">ответственному</option>
+                                <template x-for="eid in bulkPerformerOptions" :key="eid">
+                                    <option :value="eid" x-text="employeeName(eid)"></option>
+                                </template>
+                            </select>
+                        </div>
+                    </template>
+
+                    <div class="border border-slate-200 rounded-xl max-h-80 overflow-y-auto divide-y divide-slate-100">
+                        <template x-for="c in companyRows.rows" :key="c.id">
+                            <div class="flex items-center gap-3 px-3 py-2 text-sm hover:bg-slate-50">
+                                <input type="checkbox" :checked="isCompanyPicked(c.id)" :disabled="!performersOf(c.id).length"
+                                       @change="toggleCompany(c)"
+                                       class="rounded border-slate-300 text-indigo-600 flex-shrink-0 disabled:opacity-50">
+                                <span class="flex-1 min-w-0 truncate cursor-pointer" @click="toggleCompany(c)"
+                                      :class="performersOf(c.id).length ? 'text-slate-700' : 'text-slate-400'" x-text="c.name"></span>
+                                <template x-if="!performersOf(c.id).length">
+                                    <span class="text-xs text-slate-400 flex-shrink-0">некому поручить</span>
+                                </template>
+                                <template x-if="isCompanyPicked(c.id)">
+                                    <select @change="setCompanyPerformer(c.id, $event.target.value)"
+                                            class="w-72 flex-shrink-0 px-2 py-1.5 border border-slate-200 rounded-lg text-sm text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50">
+                                        <template x-for="eid in performersOf(c.id)" :key="eid">
+                                            <option :value="eid" :selected="String(eid) === String(newTask.companyPicks[c.id])" x-text="performerLabel(c, eid)"></option>
+                                        </template>
+                                    </select>
+                                </template>
+                            </div>
+                        </template>
+                        <template x-if="!companyRows.rows.length">
+                            <div class="px-3 py-2.5 text-sm text-slate-400" x-text="companyOnlyChosen ? 'Пока ничего не выбрано' : 'Ничего не найдено'"></div>
+                        </template>
+                        <template x-if="companyRows.total > companyRows.rows.length">
+                            <div class="px-3 py-2 text-xs text-slate-400">
+                                Показаны первые <span x-text="companyRows.rows.length"></span> из <span x-text="companyRows.total"></span>, уточните поиск
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                {{-- На проверку — тогл как в попапе БП. Только для своей задачи: поручение
                      сотрудник сдаёт автору всегда, выбирать тут нечего. --}}
-                <template x-if="String(newTask.employee_id) === String(currentEmployeeId)">
+                <template x-if="assigneesIncludeMe">
                     <div class="flex items-center justify-between gap-3">
-                        <span class="text-sm text-slate-700">Отправлять на проверку после выполнения</span>
+                        <span class="text-sm text-slate-700">
+                            Отправлять на проверку после выполнения
+                            <span x-show="assigneesIncludeOthers" class="block text-xs text-slate-400">Только для вашей задачи</span>
+                        </span>
                         <button type="button" @click="newTask.requires_review = !newTask.requires_review"
                                 class="flex-shrink-0 w-11 h-6 rounded-full relative transition-colors duration-200"
                                 :class="newTask.requires_review ? 'bg-indigo-600' : 'bg-slate-200'">
@@ -1228,53 +1397,16 @@
                         </button>
                     </div>
                 </template>
-                <template x-if="String(newTask.employee_id) !== String(currentEmployeeId)">
+                <template x-if="assigneesIncludeOthers">
                     <div class="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-sm text-slate-500">
                         <svg class="w-4 h-4 mt-0.5 flex-shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                         <span>Выполнив задачу, сотрудник сдаёт её вам: она придёт на вкладку «Я поручил» со статусом «На проверке». Закроется, когда вы нажмёте «Принять».</span>
                     </div>
                 </template>
 
-                {{-- Документ (необязательно) --}}
-                <div>
-                    <label class="block text-sm font-medium text-slate-700 mb-1.5">
-                        Документ <span class="text-slate-400 font-normal">(необязательно)</span>
-                    </label>
-                    <div class="flex items-center gap-2">
-                        <label class="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 text-slate-600 text-sm font-medium rounded-xl hover:bg-slate-200 cursor-pointer transition-colors">
-                            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
-                            <span x-text="newTaskFileName ? 'Заменить файл' : 'Выбрать файл'"></span>
-                            <input type="file" class="hidden" @change="selectCreateDocument($event)">
-                        </label>
-                        <span x-show="newTaskFileName" class="text-sm text-slate-600 truncate max-w-[180px]" x-text="newTaskFileName"></span>
-                    </div>
-                </div>
-                <div class="flex gap-3">
-                    <div class="flex-1">
-                        <label class="block text-sm font-medium text-slate-700 mb-1.5">Сотрудник</label>
-                        <select x-model="newTask.employee_id"
-                                class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50 bg-white">
-                            <template x-for="emp in employees" :key="emp.id">
-                                <option :value="emp.id" x-text="emp.full_name"></option>
-                            </template>
-                        </select>
-                    </div>
-                    <div class="w-40">
-                        <label class="block text-sm font-medium text-slate-700 mb-1.5">Дата</label>
-                        <input type="date"
-                               x-model="newTask.due_date"
-                               @input="dueDateTouched = true"
-                               class="block w-full px-3 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50">
-                    </div>
-                </div>
-
-                {{-- БП «по запросу»: дата подставлена по сроку из каталога. Показываем всем,
-                     кто заводит задачу, чтобы правка даты была осознанной. --}}
-                <template x-if="onRequestDays">
-                    <p class="text-xs text-indigo-600 flex items-start gap-1.5">
-                        <svg class="w-3.5 h-3.5 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                        <span x-text="'Срок по каталогу: ' + onRequestDays + ' дн. Дата подставлена автоматически, её можно изменить.'"></span>
-                    </p>
+                {{-- Сколько задач получится и у кого: пачку видно до нажатия, а не после. --}}
+                <template x-if="batchTaskCount > 1">
+                    <p class="text-sm" :class="batchTaskCount > maxBatchTasks ? 'text-red-600' : 'text-slate-600'" x-text="batchSummary"></p>
                 </template>
                 <p class="text-xs text-slate-400 flex items-center gap-1">
                     <span class="inline-block w-2 h-2 rounded-full bg-violet-500"></span>
@@ -1290,10 +1422,10 @@
                     Отмена
                 </button>
                 <button @click="createTask()"
-                        :disabled="creating"
+                        :disabled="creating || batchTaskCount > maxBatchTasks"
                         class="flex-1 py-2.5 px-4 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 disabled:opacity-60 transition-colors flex items-center justify-center gap-2">
                     <svg x-show="creating" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                    <span x-text="creating ? 'Создание...' : 'Создать задачу'"></span>
+                    <span x-text="creating ? 'Создание...' : createButtonLabel"></span>
                 </button>
             </div>
         </div>
@@ -2369,12 +2501,29 @@ const TASK_STATUS_LABELS = {
     review:  'На проверке',
 };
 
-function buhTasks(initialTasks, year, month, allClients, completed, employees, currentEmployeeId, catalog, teamTasks, teamMembers, assignedTasks, assignedAlertCount, assignedDoneDays) {
+function buhTasks(initialTasks, year, month, allClients, completed, employees, currentEmployeeId, catalog, teamTasks, teamMembers, assignedTasks, assignedAlertCount, assignedDoneDays, employeeClients, maxBatchTasks) {
     // File-объекты держим вне реактивного state — Alpine оборачивает объекты в Proxy,
     // что ломает внутренние методы File/Blob при передаче в FormData
     const pendingFiles = new Map();
     // Сколько строк рисуем в полях с поиском (компания, услуга) до уточнения запроса.
     const PICKER_LIMIT = 50;
+    // Режим «По компаниям»: строк с галочкой и выбором исполнителя рисуем не больше этого.
+    const COMPANY_ROWS_LIMIT = 300;
+
+    // Кому можно поручить каждую компанию: {id компании: [id сотрудников]}, ответственный
+    // первым. Только работающие (список employees): уволенному поручать нельзя.
+    const assignable = new Set((employees || []).map(e => e.id));
+    const clientPerformers = {};
+    for (const [employeeId, clientIds] of Object.entries(employeeClients || {})) {
+        if (!assignable.has(Number(employeeId))) continue;
+        clientIds.forEach(c => (clientPerformers[c] = clientPerformers[c] || []).push(Number(employeeId)));
+    }
+    (allClients || []).forEach(c => {
+        const list = clientPerformers[c.id];
+        if (list && c.responsible_employee_id) {
+            list.sort((a, b) => (b === c.responsible_employee_id) - (a === c.responsible_employee_id));
+        }
+    });
     // Кэш окна видимости вне реактивного state (чтобы геттер не пересобирал Set на каждую строку)
     let visibleCache = { key: null, list: [] };
     // Кэш полного отфильтрованного списка (до среза прокрутки). Отдельно от visibleCache:
@@ -2420,6 +2569,10 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         month,
         allClients,
         employees: employees || [],
+        // Форма «Добавить задачу»: какие компании закреплены за каждым сотрудником
+        // ({id сотрудника: [id компаний]}) и сколько задач можно создать за раз.
+        employeeClients: employeeClients || {},
+        maxBatchTasks,
         currentEmployeeId,
         viewMode: 'list',
         checklistFilter: { group: '', period: '' }, // совместный фильтр столбцов чеклиста (группа + период)
@@ -2491,15 +2644,24 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         newTask: {
             source: 'custom',       // 'custom' | 'catalog'
             service_id: '',         // выбранная услуга из каталога (берём только имя)
-            client_id: '', name: '', description: '', clarification: '', requires_review: false,
-            employee_id: currentEmployeeId, due_date: '',
+            name: '', description: '', clarification: '', requires_review: false, due_date: '',
+            // Кому (несколько сотрудников) и отмеченные у каждого компании: {id: [id компаний]}.
+            // Каждая пара «сотрудник + компания» станет отдельной задачей.
+            employee_ids: [currentEmployeeId], chosenClients: {},
+            // Режим «По компаниям»: {id компании: id исполнителя}.
+            mode: 'employees', companyPicks: {},
         },
+        companySearch: '',        // поиск в режиме «По компаниям»
+        companyOnlyChosen: false, // показать только отмеченные компании
+        bulkPerformer: '',        // «Поручить всем»: '' — ответственному
+        assigneeOpen: {},   // свёрнут ли список компаний сотрудника (нет ключа — раскрыт)
+        assigneeSearch: {}, // поиск по компаниям внутри списка сотрудника
         // Поиск в попапе «Добавить задачу»: компаний и услуг в списках сотни, прокруткой
         // нужную не найти. Оба списка уже на странице — фильтруем на месте, без запросов.
         // hi — подсвеченная строка, по ней работают ↑/↓ и Enter.
         picker: {
-            client:  { open: false, q: '', hi: 0 },
-            catalog: { open: false, q: '', hi: 0 },
+            employee: { open: false, q: '', hi: 0 },
+            catalog:  { open: false, q: '', hi: 0 },
         },
 
         newTaskFileName: null,      // имя выбранного документа (сам File — в pendingFiles)
@@ -4327,24 +4489,30 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         /** Открытые списки и набранный поиск в форме новой задачи не должны переживать её. */
         resetPickers() {
             this.picker = {
-                client:  { open: false, q: '', hi: 0 },
-                catalog: { open: false, q: '', hi: 0 },
+                employee: { open: false, q: '', hi: 0 },
+                catalog:  { open: false, q: '', hi: 0 },
             };
         },
 
         resetNewTask() {
             this.newTask = {
                 source: 'custom', service_id: '',
-                client_id: '', name: '', description: '', clarification: '', requires_review: false,
-                employee_id: this.currentEmployeeId, due_date: '',
+                name: '', description: '', clarification: '', requires_review: false, due_date: '',
+                employee_ids: [this.currentEmployeeId], chosenClients: {},
+                mode: 'employees', companyPicks: {},
             };
+            this.companySearch     = '';
+            this.companyOnlyChosen = false;
+            this.bulkPerformer     = '';
+            this.assigneeOpen   = {};
+            this.assigneeSearch = {};
             this.dueDateTouched = false;
             pendingFiles.delete('create');
             this.newTaskFileName = null;
             this.resetPickers();
         },
 
-        // --- Поля с поиском в форме новой задачи (компания и услуга) ---
+        // --- Поля с поиском в форме новой задачи (сотрудник и услуга) ---
 
         /**
          * Отфильтрованный список: {rows, total}. Рисуем не больше PICKER_LIMIT строк —
@@ -4362,13 +4530,16 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
 
         // Имена намеренно длинные: списки в попапе «Добавить задачу» — не то же самое,
         // что значения воронки «Компания», и одноимённый геттер молча перетёр бы соседа.
-        get clientPickerOptions()  { return this.filterOptions(this.allClients, this.picker.client.q); },
-        get catalogPickerOptions() { return this.filterOptions(this.catalog, this.picker.catalog.q); },
+        // Уже выбранных в «Кому» в списке не показываем: второй раз добавлять некого.
+        get assigneePickerOptions() {
+            const chosen = new Set(this.newTask.employee_ids.map(String));
+            const rows   = this.employees
+                .filter(e => !chosen.has(String(e.id)))
+                .map(e => ({ id: e.id, name: e.full_name }));
 
-        get selectedClientName() {
-            const c = (this.allClients || []).find(x => String(x.id) === String(this.newTask.client_id));
-            return c ? c.name : '';
+            return this.filterOptions(rows, this.picker.employee.q);
         },
+        get catalogPickerOptions() { return this.filterOptions(this.catalog, this.picker.catalog.q); },
 
         get selectedServiceName() {
             return this.pickedService ? this.pickedService.name : '';
@@ -4385,7 +4556,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         closePicker(kind) { this.picker[kind].open = false; },
 
         pickerRows(kind) {
-            return kind === 'client' ? this.clientPickerOptions.rows : this.catalogPickerOptions.rows;
+            return kind === 'employee' ? this.assigneePickerOptions.rows : this.catalogPickerOptions.rows;
         },
 
         movePicker(kind, delta) {
@@ -4398,12 +4569,242 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         chooseHighlighted(kind) {
             const row = this.pickerRows(kind)[this.picker[kind].hi];
             if (!row) return;
-            kind === 'client' ? this.pickClient(row) : this.pickService(row);
+            kind === 'employee' ? this.pickAssignee(row) : this.pickService(row);
         },
 
-        pickClient(client) {
-            this.newTask.client_id = client.id;
-            this.closePicker('client');
+        // Поле не закрываем: следующего сотрудника можно набрать сразу.
+        pickAssignee(row) {
+            this.newTask.employee_ids.push(row.id);
+            this.picker.employee = { open: true, q: '', hi: 0 };
+        },
+
+        removeAssignee(id) {
+            this.newTask.employee_ids = this.newTask.employee_ids.filter(x => String(x) !== String(id));
+            const { [id]: _, ...rest } = this.newTask.chosenClients;
+            this.newTask.chosenClients = rest;
+        },
+
+        employeeName(id) {
+            const e = this.employees.find(x => String(x.id) === String(id));
+            return e ? e.full_name : 'Сотрудник #' + id;
+        },
+
+        // Компании сотрудника в том же порядке, что и общий список (по названию).
+        clientsOfAssignee(id) {
+            const own = new Set((this.employeeClients[id] || []).map(String));
+            return (this.allClients || []).filter(c => own.has(String(c.id)));
+        },
+
+        filteredClientsOfAssignee(id) {
+            const needle = (this.assigneeSearch[id] || '').trim().toLowerCase();
+            const list   = this.clientsOfAssignee(id);
+            return needle ? list.filter(c => (c.name || '').toLowerCase().includes(needle)) : list;
+        },
+
+        isClientChosen(id, clientId) {
+            return (this.newTask.chosenClients[id] || []).some(x => String(x) === String(clientId));
+        },
+
+        toggleClientChosen(id, clientId) {
+            const list = this.newTask.chosenClients[id] || [];
+            const next = this.isClientChosen(id, clientId)
+                ? list.filter(x => String(x) !== String(clientId))
+                : [...list, clientId];
+            this.newTask.chosenClients = { ...this.newTask.chosenClients, [id]: next };
+        },
+
+        // «Все» отмечает найденные поиском, если он набран, иначе все компании сотрудника.
+        setAssigneeClients(id, all) {
+            const ids = all ? this.filteredClientsOfAssignee(id).map(c => c.id) : [];
+            const merged = all ? [...new Set([...(this.newTask.chosenClients[id] || []), ...ids])] : [];
+            this.newTask.chosenClients = { ...this.newTask.chosenClients, [id]: merged };
+        },
+
+        assigneeClientsLabel(id) {
+            const total = this.clientsOfAssignee(id).length;
+            if (!total) return 'без компании';
+            const chosen = (this.newTask.chosenClients[id] || []).length;
+            return chosen ? 'выбрано ' + chosen + ' из ' + total : 'без компании, всего ' + total;
+        },
+
+        isAssigneeOpen(id) { return this.assigneeOpen[id] !== false; },
+
+        toggleAssigneeOpen(id) {
+            this.assigneeOpen = { ...this.assigneeOpen, [id]: !this.isAssigneeOpen(id) };
+        },
+
+        setAssigneeSearch(id, q) {
+            this.assigneeSearch = { ...this.assigneeSearch, [id]: q };
+        },
+
+        /**
+         * Что уйдёт на сервер: [{employee_id, client_ids}] — по открытому режиму.
+         * «По компаниям» сводится к тому же виду: отмеченные компании собраны по исполнителю.
+         */
+        get batchAssignments() {
+            if (this.newTask.mode === 'companies') {
+                const byEmployee = {};
+                for (const [clientId, employeeId] of Object.entries(this.newTask.companyPicks)) {
+                    (byEmployee[employeeId] = byEmployee[employeeId] || []).push(Number(clientId));
+                }
+                return Object.entries(byEmployee).map(([id, clientIds]) => ({ employee_id: Number(id), client_ids: clientIds }));
+            }
+
+            return this.newTask.employee_ids.map(id => ({ employee_id: id, client_ids: this.newTask.chosenClients[id] || [] }));
+        },
+
+        get assigneesIncludeMe() {
+            return this.batchAssignments.some(a => String(a.employee_id) === String(this.currentEmployeeId));
+        },
+
+        get assigneesIncludeOthers() {
+            return this.batchAssignments.some(a => String(a.employee_id) !== String(this.currentEmployeeId));
+        },
+
+        get batchTaskCount() {
+            // По одной на компанию, у сотрудника без компаний — одна.
+            return this.batchAssignments.reduce((sum, a) => sum + Math.max(1, a.client_ids.length), 0);
+        },
+
+        get batchSummary() {
+            const n = this.batchTaskCount;
+            if (n > this.maxBatchTasks) {
+                return 'Не больше ' + this.maxBatchTasks + ' задач за раз, сейчас выбрано ' + n;
+            }
+            const parts = this.batchAssignments.map(a => a.client_ids.length
+                ? this.employeeName(a.employee_id) + ': ' + a.client_ids.length
+                : this.employeeName(a.employee_id) + ': 1 без компании');
+
+            return 'Будет создано ' + n + ' ' + this.taskWord(n, 'задача') + '. ' + parts.join(', ');
+        },
+
+        // --- Общая компания у двоих в режиме «По сотрудникам» ---
+
+        /** Компании, отмеченные больше чем у одного сотрудника: по ним будет по две задачи. */
+        get sharedChosenClients() {
+            const seen = {};
+            this.newTask.employee_ids.forEach(id => (this.newTask.chosenClients[id] || [])
+                .forEach(c => { seen[c] = (seen[c] || 0) + 1; }));
+
+            return (this.allClients || []).filter(c => (seen[c.id] || 0) > 1);
+        },
+
+        get sharedChosenText() {
+            const list  = this.sharedChosenClients;
+            const names = list.slice(0, 3).map(c => c.name).join(', ') + (list.length > 3 ? ' и ещё ' + (list.length - 3) : '');
+
+            return (list.length === 1 ? names + ' отмечена у нескольких сотрудников, по ней будет несколько задач'
+                : names + ' отмечены у нескольких сотрудников, по ним будет по несколько задач');
+        },
+
+        /** Оставить каждую общую компанию только у первого из выбранных сотрудников. */
+        keepSharedAtFirst() {
+            const taken = new Set();
+            const next  = {};
+            this.newTask.employee_ids.forEach(id => {
+                next[id] = (this.newTask.chosenClients[id] || []).filter(c => {
+                    if (taken.has(String(c))) return false;
+                    taken.add(String(c));
+                    return true;
+                });
+            });
+            this.newTask.chosenClients = next;
+        },
+
+        // --- Режим «По компаниям» ---
+
+        /** Кому можно поручить компанию: связанные с ней работающие сотрудники, ответственный первым. */
+        performersOf(clientId) {
+            return clientPerformers[clientId] || [];
+        },
+
+        performerLabel(client, employeeId) {
+            return this.employeeName(employeeId)
+                + (String(client.responsible_employee_id) === String(employeeId) ? ' (ответственный)' : '');
+        },
+
+        /** Исполнитель по умолчанию: ответственный, а если он не работает — первый связанный. */
+        defaultPerformer(clientId) {
+            return this.performersOf(clientId)[0] ?? null;
+        },
+
+        isCompanyPicked(clientId) {
+            return this.newTask.companyPicks[clientId] !== undefined;
+        },
+
+        toggleCompany(client) {
+            if (this.isCompanyPicked(client.id)) {
+                const { [client.id]: _, ...rest } = this.newTask.companyPicks;
+                this.newTask.companyPicks = rest;
+                return;
+            }
+            const performer = this.bulkPerformerFor(client.id);
+            if (performer === null) return;
+            this.newTask.companyPicks = { ...this.newTask.companyPicks, [client.id]: performer };
+        },
+
+        setCompanyPerformer(clientId, employeeId) {
+            this.newTask.companyPicks = { ...this.newTask.companyPicks, [clientId]: Number(employeeId) };
+        },
+
+        /** Исполнитель для новой отметки: выбранный в «Поручить всем», если он связан с компанией. */
+        bulkPerformerFor(clientId) {
+            const chosen = this.bulkPerformer;
+            if (chosen && this.performersOf(clientId).some(e => String(e) === String(chosen))) return Number(chosen);
+            return this.defaultPerformer(clientId);
+        },
+
+        get pickedCompanyCount() {
+            return Object.keys(this.newTask.companyPicks).length;
+        },
+
+        // Кого предложить в «Поручить всем»: тех, кто связан хоть с одной отмеченной компанией.
+        get bulkPerformerOptions() {
+            const ids = new Set();
+            Object.keys(this.newTask.companyPicks).forEach(c => this.performersOf(c).forEach(e => ids.add(e)));
+
+            return this.employees.filter(e => ids.has(e.id)).map(e => e.id);
+        },
+
+        // Сотрудник — там, где он связан с компанией; у остальных — ответственный.
+        applyBulkPerformer() {
+            const next = {};
+            Object.keys(this.newTask.companyPicks).forEach(c => { next[c] = this.bulkPerformerFor(c); });
+            this.newTask.companyPicks = next;
+        },
+
+        get companyRows() {
+            const needle = this.companySearch.trim().toLowerCase();
+            const found  = (this.allClients || []).filter(c =>
+                (!needle || (c.name || '').toLowerCase().includes(needle))
+                && (!this.companyOnlyChosen || this.isCompanyPicked(c.id)));
+
+            return { rows: found.slice(0, COMPANY_ROWS_LIMIT), total: found.length };
+        },
+
+        // «Все» — найденные поиском, кому есть кому поручить; уже отмеченные не трогаем.
+        pickAllCompanies() {
+            const next = { ...this.newTask.companyPicks };
+            this.companyRows.rows.forEach(c => {
+                if (next[c.id] === undefined && this.performersOf(c.id).length) next[c.id] = this.bulkPerformerFor(c.id);
+            });
+            this.newTask.companyPicks = next;
+        },
+
+        clearCompanies() {
+            this.newTask.companyPicks = {};
+        },
+
+        get createButtonLabel() {
+            const n = this.batchTaskCount;
+            return n > 1 ? 'Создать ' + n + ' ' + this.taskWord(n) : 'Создать задачу';
+        },
+
+        taskWord(n, one = 'задачу') {
+            const m10 = n % 10, m100 = n % 100;
+            if (m10 === 1 && m100 !== 11) return one;
+            if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return 'задачи';
+            return 'задач';
         },
 
         pickService(service) {
@@ -4413,8 +4814,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         },
 
         clearPick(kind) {
-            if (kind === 'client') this.newTask.client_id = '';
-            else                   this.newTask.service_id = '';
+            this.newTask.service_id = '';
             this.picker[kind] = { open: false, q: '', hi: 0 };
         },
 
@@ -4466,7 +4866,11 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
 
             // Внеплановая задача сотруднику — в смету не пишем. Источник: своя или из каталога.
             if (!this.newTask.name.trim())  { this.createError = 'Введите название задачи'; return; }
-            if (!this.newTask.employee_id)  { this.createError = 'Выберите сотрудника'; return; }
+            if (!this.batchAssignments.length) {
+                this.createError = this.newTask.mode === 'companies' ? 'Отметьте компании' : 'Выберите сотрудника';
+                return;
+            }
+            if (this.batchTaskCount > this.maxBatchTasks) { this.createError = this.batchSummary; return; }
             if (!this.newTask.due_date)     { this.createError = 'Укажите дату'; return; }
 
             this.creating = true;
@@ -4474,8 +4878,10 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             try {
                 // FormData — чтобы приложить необязательный документ в одном запросе.
                 const fd = new FormData();
-                fd.append('employee_id', this.newTask.employee_id);
-                if (this.newTask.client_id) fd.append('client_id', this.newTask.client_id);
+                this.batchAssignments.forEach((a, i) => {
+                    fd.append('assignments[' + i + '][employee_id]', a.employee_id);
+                    a.client_ids.forEach(c => fd.append('assignments[' + i + '][client_ids][]', c));
+                });
                 if (this.newTask.source === 'catalog' && this.newTask.service_id) {
                     fd.append('service_id', this.newTask.service_id);
                 }
@@ -4488,20 +4894,18 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 if (file) fd.append('file', file);
 
                 const data = await this.postForm(
-                    '/buhtasks/adhoc', fd,
-                    'Обновите страницу и проверьте список — задача могла создаться.',
+                    '/buhtasks/adhoc/batch', fd,
+                    'Обновите страницу и проверьте список — задачи могли создаться.',
                 );
 
                 if (data.success) {
                     pendingFiles.delete('create');
-                    // Добавляем в текущий список только если задача для меня (иначе она у назначенного сотрудника).
+                    // В текущий список — только свои задачи (остальные у назначенных сотрудников).
                     // unshift (в начало), чтобы созданная задача сразу попадала в видимое окно пагинации.
-                    if (data.mine === undefined || data.mine) {
-                        this.tasks.unshift(data.task);
-                    }
-                    // Поручение другому — сразу во вкладку «Я поручил», чтобы оно не пропало из виду
-                    if (data.assigned) {
-                        this.assignedTasks.unshift(data.assigned);
+                    (data.tasks || []).forEach(t => this.tasks.unshift(t));
+                    // Поручения другим — сразу во вкладку «Я поручил», чтобы они не пропали из виду
+                    if ((data.assigned || []).length) {
+                        data.assigned.forEach(a => this.assignedTasks.unshift(a));
                         this.recalcAssignedAlert();
                     }
                     this.resetNewTask();
