@@ -534,7 +534,9 @@ class BuhTasksController extends Controller
                 'quantity'        => 1,
                 'allows_quantity' => false,
                 'actual_quantity' => null,
-                'requires_document' => false, // документ всегда опционален для внеплановых
+                'requires_document' => (bool) $adhoc->requires_document,
+                // Снять требование может только автор — у задачи себе это сам исполнитель.
+                'can_waive_document' => (int) $adhoc->created_by === (int) $employee->id,
                 'documents'       => $this->docs($adhoc),
                 'clarification'   => $adhoc->clarification,
                 // Задача родилась сама, после выполнения другой — иначе её появление
@@ -924,11 +926,13 @@ class BuhTasksController extends Controller
         // Ещё отдаём срок в днях у БП «по запросу» — по нему форма сама подставляет дату.
         $catalog = Service::roots()->active()->ordered()
             ->with('children:id,parent_id,name,sort_order')
-            ->get(['id', 'name', 'description', 'periodicity', 'deadline_days'])
+            ->get(['id', 'name', 'description', 'periodicity', 'deadline_days', 'requires_document'])
             ->map(fn ($s) => [
                 'id'            => $s->id,
                 'name'          => $s->name,
                 'description'   => $s->description,
+                // По нему форма выставляет тумблер «Документ обязателен для закрытия».
+                'requires_document' => (bool) $s->requires_document,
                 'on_request'    => $s->isOnRequest(),
                 'deadline_days' => $s->deadline_days,
                 'items'         => $s->children->sortBy('sort_order')->pluck('name')->values()->all(),
@@ -1551,6 +1555,9 @@ class BuhTasksController extends Controller
             'description'     => 'nullable|string|max:2000',
             'clarification'   => 'nullable|string|max:2000', // что автор дописал к описанию из каталога
             'requires_review' => 'boolean',
+            // Без поля — как в каталоге (у своей задачи — нет): так задача из каталога не
+            // теряет правило БП, даже если её прислали в обход формы.
+            'requires_document' => 'boolean',
             'due_date'        => 'required|date',
             'file'            => $this->documentFileRules(required: false), // необязательный документ
         ];
@@ -1584,6 +1591,7 @@ class BuhTasksController extends Controller
         $name        = $validated['name'];
         $description = $validated['description'] ?? null;
         $checklist   = null;
+        $needsDoc    = (bool) ($validated['requires_document'] ?? false);
 
         if (!empty($validated['service_id'])) {
             $service = Service::with('children:id,parent_id,name,sort_order')->find($validated['service_id']);
@@ -1591,6 +1599,8 @@ class BuhTasksController extends Controller
             if ($service) {
                 $name        = $service->name;
                 $description = $service->description;
+                // Тумблер в форме выставлен по каталогу, но автор вправе его переключить.
+                $needsDoc    = (bool) ($validated['requires_document'] ?? $service->requires_document);
                 $items       = $service->children
                     ->sortBy('sort_order')
                     ->map(fn ($child) => ['name' => $child->name, 'done' => false])
@@ -1603,7 +1613,7 @@ class BuhTasksController extends Controller
         $stored = [];
 
         try {
-            return DB::transaction(function () use ($author, $validated, $batch, $file, $due, $name, $description, $checklist, &$stored) {
+            return DB::transaction(function () use ($author, $validated, $batch, $file, $due, $name, $description, $checklist, $needsDoc, &$stored) {
                 $tasks = collect();
 
                 foreach ($batch as [$assignee, $clients]) {
@@ -1625,6 +1635,7 @@ class BuhTasksController extends Controller
                             'requires_review' => $assignee->id !== $author->id
                                 ? true
                                 : (bool) ($validated['requires_review'] ?? false),
+                            'requires_document' => $needsDoc,
                             'cost'            => 0,
                             'year'            => $due->year,
                             'month'           => $due->month,
@@ -1639,7 +1650,8 @@ class BuhTasksController extends Controller
                             $originalName = $file->getClientOriginalName();
                             $safeName     = pathinfo($originalName, PATHINFO_FILENAME) . '_' . time() . '.' . $file->getClientOriginalExtension();
                             $stored[]     = $path = $file->storeAs('buh_adhoc_documents/' . $adhoc->id, $safeName, 'local');
-                            $adhoc->documents()->create(['path' => $path, 'name' => $originalName]);
+                            // Файл автора — материал к задаче, а не её результат.
+                            $adhoc->documents()->create(['path' => $path, 'name' => $originalName, 'from_author' => true]);
                         }
 
                         $tasks->push($adhoc);
@@ -1694,6 +1706,16 @@ class BuhTasksController extends Controller
                 'success'            => false,
                 'requires_checklist' => true,
                 'message'            => 'Отметьте все подпункты, прежде чем завершить задачу',
+            ], 422);
+        }
+
+        // Как у БП «С документом». Обхода у исполнителя нет: снять требование может
+        // только автор (waiveDocumentAdhoc).
+        if ($task->missesRequiredDocument()) {
+            return response()->json([
+                'success'           => false,
+                'requires_document' => true,
+                'message'           => 'Для завершения задачи нужно прикрепить документ',
             ], 422);
         }
 
@@ -1972,6 +1994,29 @@ class BuhTasksController extends Controller
         return response()->json(['success' => true, 'log' => $this->formatAdhoc($task)]);
     }
 
+    /**
+     * «Документ не нужен»: автор снимает требование документа со своей задачи. Иначе
+     * начатое поручение, по которому файла не будет, нельзя ни закрыть, ни отозвать.
+     * Только автор и только у незакрытой: у закрытой требование уже ничего не решает.
+     */
+    public function waiveDocumentAdhoc(BuhAdhocTask $task)
+    {
+        $me = auth('employee')->user();
+
+        abort_unless((int) $task->created_by === (int) $me->id, 403);
+
+        if (in_array($task->status, ['completed', 'review'], true)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Задача уже сдана, требование документа снимать поздно',
+            ], 422);
+        }
+
+        $task->update(['requires_document' => false]);
+
+        return response()->json(['success' => true]);
+    }
+
     public function resetAdhoc(BuhAdhocTask $task)
     {
         $this->authorizeAdhoc($task);
@@ -2172,7 +2217,7 @@ class BuhTasksController extends Controller
     private function docs($model): array
     {
         return $model->documents
-            ->map(fn ($d) => ['id' => $d->id, 'name' => $d->name, 'url' => $d->url])
+            ->map(fn ($d) => ['id' => $d->id, 'name' => $d->name, 'url' => $d->url, 'from_author' => (bool) $d->from_author])
             ->values()
             ->all();
     }
@@ -2263,7 +2308,9 @@ class BuhTasksController extends Controller
             'quantity'         => 1,
             'allows_quantity'  => false,
             'actual_quantity'  => null,
-            'requires_document' => false, // документ всегда опционален для внеплановых
+            'requires_document' => (bool) $adhoc->requires_document,
+            // Снять требование может только автор — у задачи себе это сам исполнитель.
+            'can_waive_document' => (int) $adhoc->created_by === (int) auth('employee')->id(),
             'documents'        => $this->docs($adhoc),
             'from_event'       => $adhoc->isTriggered(),
             'from_event_name'  => $adhoc->trigger_source_name,
@@ -2303,6 +2350,7 @@ class BuhTasksController extends Controller
             'due_date'         => $dueDate,
             'status'           => $a->status,
             'requires_review'  => (bool) $a->requires_review,
+            'requires_document' => (bool) $a->requires_document,
             'employee_comment' => $a->employee_comment,
             'review_comment'   => $a->review_comment,
             'completed_at'     => $a->completed_at?->toDateString(),

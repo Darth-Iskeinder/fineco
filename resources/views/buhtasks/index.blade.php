@@ -965,6 +965,7 @@
                             <p class="text-sm font-medium text-slate-700" x-text="t.name"></p>
                             <p class="text-xs text-slate-400 truncate">
                                 <span x-text="t.client_name || 'Без компании'"></span>
+                                <span x-show="t.requires_document && t.status !== 'completed'"> · нужен документ</span>
                                 <span x-show="t.employee_comment" x-text="' · ' + t.employee_comment"></span>
                             </p>
                         </div>
@@ -996,6 +997,14 @@
 
                         {{-- Действия --}}
                         <span class="inline-flex items-center gap-1.5">
+                            {{-- Файла не будет, а задачу уже начали — её не закрыть и не отозвать.
+                                 Требование ставил автор, он же его и снимает. --}}
+                            <template x-if="t.requires_document && !['completed', 'review'].includes(t.status)">
+                                <button @click.prevent="waiveAssignedDocument(t)" :disabled="t.loading"
+                                        class="px-3 py-1.5 text-xs font-medium text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50 transition-colors">
+                                    Документ не нужен
+                                </button>
+                            </template>
                             {{-- Проверка: принять / вернуть. Только у задач с галочкой «с проверкой» --}}
                             <template x-if="t.status === 'review'">
                                 <span class="inline-flex items-center gap-1.5">
@@ -1381,6 +1390,22 @@
                     </div>
                 </div>
 
+                {{-- Документ для закрытия — как у БП «С документом». У задачи из каталога
+                     тумблер выставлен по каталогу, но его можно переключить. Файл, приложенный
+                     в этой форме, не в счёт: это материал к задаче, а не её результат. --}}
+                <div class="flex items-center justify-between gap-3">
+                    <span class="text-sm text-slate-700">
+                        Документ обязателен для закрытия
+                        <span class="block text-xs text-slate-400">Без файла от исполнителя задачу не завершить. Снять требование сможете вы</span>
+                    </span>
+                    <button type="button" @click="newTask.requires_document = !newTask.requires_document"
+                            class="flex-shrink-0 w-11 h-6 rounded-full relative transition-colors duration-200"
+                            :class="newTask.requires_document ? 'bg-indigo-600' : 'bg-slate-200'">
+                        <span class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200"
+                              :style="newTask.requires_document ? 'transform: translateX(20px)' : ''"></span>
+                    </button>
+                </div>
+
                 {{-- На проверку — тогл как в попапе БП. Только для своей задачи: поручение
                      сотрудник сдаёт автору всегда, выбирать тут нечего. --}}
                 <template x-if="assigneesIncludeMe">
@@ -1569,7 +1594,10 @@
                 </div>
                 <div class="flex-1 min-w-0">
                     <h3 class="text-base font-semibold text-slate-800">Нужно прикрепить документ</h3>
-                    <p class="mt-1 text-sm text-slate-500">Для этого БП правило закрытия — «с документом». Откройте задачу и прикрепите файл, после этого можно будет завершить.</p>
+                    <p class="mt-1 text-sm text-slate-500"
+                       x-text="docRequiredModal.taskIdx !== null && tasks[docRequiredModal.taskIdx]?.type === 'adhoc'
+                           ? 'Автор задачи попросил приложить документ. Откройте задачу и прикрепите файл, после этого можно будет завершить. Файл, приложенный автором при создании, не в счёт.'
+                           : 'Для этого БП правило закрытия — «с документом». Откройте задачу и прикрепите файл, после этого можно будет завершить.'"></p>
                 </div>
             </div>
             <div class="flex gap-3 mt-6">
@@ -2034,8 +2062,15 @@
 
                 <template x-if="tasks[taskModalIdx].requires_document || tasks[taskModalIdx].type === 'adhoc'">
                     <div class="mt-4 pt-4 border-t border-slate-100">
-                        <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5"
-                           x-text="tasks[taskModalIdx].requires_document ? 'Документы для закрытия' : 'Документы (необязательно)'"></p>
+                        <div class="flex items-center justify-between gap-3 mb-1.5">
+                            <p class="text-xs font-semibold text-slate-400 uppercase tracking-wider"
+                               x-text="tasks[taskModalIdx].requires_document ? 'Документы для закрытия' : 'Документы (необязательно)'"></p>
+                            {{-- Снять требование может только автор: исполнитель поручения обойти его не может. --}}
+                            <button type="button"
+                                    x-show="tasks[taskModalIdx].type === 'adhoc' && tasks[taskModalIdx].requires_document && tasks[taskModalIdx].can_waive_document && !['completed', 'review'].includes(tasks[taskModalIdx].status)"
+                                    @click="waiveDocument(taskModalIdx)"
+                                    class="text-xs text-slate-500 hover:text-indigo-600 underline">Документ не нужен</button>
+                        </div>
                         <div class="space-y-1">
                             {{-- PDF и Excel открываются тут же в окне (это нужно проверяющему,
                                  чтобы не скачивать файл ради приёмки), рядом иконка скачивания.
@@ -2058,6 +2093,7 @@
                                             <span x-text="doc.name"></span>
                                         </a>
                                     </template>
+                                    <span x-show="doc.from_author" class="flex-shrink-0 text-xs text-slate-400" title="Приложен автором при создании задачи, в зачёт закрытия не идёт">от автора</span>
                                     <a x-show="canPreviewDoc(doc)" :href="docTabUrl(doc)" target="_blank" title="Открыть во вкладке"
                                        class="flex-shrink-0 text-slate-300 hover:text-slate-500 transition-colors">
                                         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
@@ -2644,7 +2680,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         newTask: {
             source: 'custom',       // 'custom' | 'catalog'
             service_id: '',         // выбранная услуга из каталога (берём только имя)
-            name: '', description: '', clarification: '', requires_review: false, due_date: '',
+            name: '', description: '', clarification: '', requires_review: false, requires_document: false, due_date: '',
             // Кому (несколько сотрудников) и отмеченные у каждого компании: {id: [id компаний]}.
             // Каждая пара «сотрудник + компания» станет отдельной задачей.
             employee_ids: [currentEmployeeId], chosenClients: {},
@@ -4199,6 +4235,29 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             this._taskVer++; // состав задач изменился → кэши списка/чеклиста пересчитаются
         },
 
+        // ===== «Документ не нужен»: автор снимает требование документа =====
+        async waiveDocument(idx) {
+            const task = this.tasks[idx];
+            if (!confirm('Снять требование документа? Задачу можно будет завершить без файла.')) return;
+            const data = await this.post(`/buhtasks/adhoc/${task.adhoc_id}/waive-document`);
+            if (data.success) this.patch(idx, { requires_document: false });
+            else if (data.message) alert(data.message);
+        },
+
+        async waiveAssignedDocument(t) {
+            if (t.loading) return;
+            if (!confirm('Снять требование документа? Исполнитель сможет завершить задачу без файла.')) return;
+            t.loading = true;
+            let data;
+            try {
+                data = await this.post(`/buhtasks/adhoc/${t.adhoc_id}/waive-document`);
+            } finally {
+                t.loading = false;
+            }
+            if (data.success) t.requires_document = false;
+            else if (data.message) alert(data.message);
+        },
+
         // ===== Вкладка «Я поручил» =====
         // Поручение с галочкой «с проверкой» приходит на проверку сюда же, поэтому «Принять»
         // и «Вернуть» доступны прямо на вкладке. Та же задача видна и в основном списке
@@ -4497,7 +4556,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
         resetNewTask() {
             this.newTask = {
                 source: 'custom', service_id: '',
-                name: '', description: '', clarification: '', requires_review: false, due_date: '',
+                name: '', description: '', clarification: '', requires_review: false, requires_document: false, due_date: '',
                 employee_ids: [this.currentEmployeeId], chosenClients: {},
                 mode: 'employees', companyPicks: {},
             };
@@ -4825,6 +4884,8 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
             const svc = this.catalog.find(s => String(s.id) === String(this.newTask.service_id));
             if (!svc) return;
             this.newTask.name = svc.name;
+            // Правило БП переносим как значение по умолчанию: автор вправе переключить.
+            this.newTask.requires_document = !!svc.requires_document;
             if (svc.on_request && svc.deadline_days && !this.dueDateTouched) {
                 this.newTask.due_date = this.dateFromToday(svc.deadline_days);
             }
@@ -4889,6 +4950,7 @@ function buhTasks(initialTasks, year, month, allClients, completed, employees, c
                 if (this.newTask.description.trim()) fd.append('description', this.newTask.description.trim());
                 if (this.newTask.clarification.trim()) fd.append('clarification', this.newTask.clarification.trim());
                 fd.append('requires_review', this.newTask.requires_review ? '1' : '0');
+                fd.append('requires_document', this.newTask.requires_document ? '1' : '0');
                 fd.append('due_date', this.newTask.due_date);
                 const file = pendingFiles.get('create');
                 if (file) fd.append('file', file);

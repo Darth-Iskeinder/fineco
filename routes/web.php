@@ -243,6 +243,8 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/adhoc/{task}/pause', [BuhTasksController::class, 'pauseAdhoc'])->name('adhoc.pause');
         Route::post('/adhoc/{task}/complete', [BuhTasksController::class, 'completeAdhoc'])->name('adhoc.complete');
         Route::post('/adhoc/{task}/reset', [BuhTasksController::class, 'resetAdhoc'])->name('adhoc.reset');
+        // «Документ не нужен»: автор снимает требование документа со своей задачи
+        Route::post('/adhoc/{task}/waive-document', [BuhTasksController::class, 'waiveDocumentAdhoc'])->name('adhoc.waive-document');
         Route::post('/adhoc/{task}/comment', [BuhTasksController::class, 'updateCommentAdhoc'])->name('adhoc.comment');
         Route::post('/adhoc/{task}/checklist', [BuhTasksController::class, 'toggleChecklistAdhoc'])->name('adhoc.checklist');
         Route::post('/adhoc/{task}/document', [BuhTasksController::class, 'uploadDocumentAdhoc'])->name('adhoc.document');

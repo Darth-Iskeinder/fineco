@@ -10,7 +10,12 @@ class BuhTaskDocument extends Model
 {
     use BelongsToTenant;
 
-    protected $fillable = ['path', 'name'];
+    protected $fillable = ['path', 'name', 'from_author'];
+
+    protected $casts = [
+        // Приложен автором при создании внеплановой задачи: материал, а не результат.
+        'from_author' => 'boolean',
+    ];
 
     /** Фронту нужна только ссылка; внутренний путь на диске наружу не отдаём. */
     protected $appends = ['url'];

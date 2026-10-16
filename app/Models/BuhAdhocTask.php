@@ -16,7 +16,7 @@ class BuhAdhocTask extends Model
 
     protected $fillable = [
         'employee_id', 'created_by', 'client_id', 'service_id', 'name', 'description', 'clarification', 'checklist', 'cost',
-        'year', 'month', 'due_day', 'status', 'requires_review',
+        'year', 'month', 'due_day', 'status', 'requires_review', 'requires_document',
         'started_at', 'resumed_at', 'paused_seconds', 'completed_at',
         'review_comment', 'rework_count', 'employee_comment', 'review_started_at', 'reviewed_at', 'reviewed_by',
         'assign_seen_at', 'rework_seen_at',
@@ -29,6 +29,7 @@ class BuhAdhocTask extends Model
         'checklist'         => 'array',
         'due_day'           => 'integer',
         'requires_review'   => 'boolean',
+        'requires_document' => 'boolean',
         'started_at'        => 'datetime',
         'resumed_at'        => 'datetime',
         'completed_at'      => 'datetime',
@@ -89,6 +90,16 @@ class BuhAdhocTask extends Model
     public function hasUncheckedItems(): bool
     {
         return collect($this->checklist ?? [])->contains(fn (array $item) => empty($item['done']));
+    }
+
+    /**
+     * Документ обязателен, а результата нет. Файл, приложенный автором при создании, не в
+     * счёт: это материал к задаче, иначе требование выполнялось бы ещё до начала работы.
+     */
+    public function missesRequiredDocument(): bool
+    {
+        return $this->requires_document
+            && !$this->documents()->where('from_author', false)->exists();
     }
 
     /** Поручение: задачу завёл один сотрудник, а делает другой. */
