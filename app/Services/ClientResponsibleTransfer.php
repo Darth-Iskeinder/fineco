@@ -95,10 +95,11 @@ class ClientResponsibleTransfer
             'adhoc'         => 0,
             'review'        => 0,
             'stays'         => [],
-            // Исполнителей в смете назначает только главбух клиента или админ
-            // (EstimateController::canAssign). Если новый ответственный не главбух,
+            // Исполнителей в смете назначает только главбух клиента или админ, а
+            // руководитель на своих клиентах наравне с главбухом
+            // (EstimateController::canAssign). Если новый ответственный не из них,
             // он не сможет раздавать БП дальше — про это честнее предупредить сразу.
-            'to_can_assign' => $new ? ($new->isHeadAccountant() || $new->isAdmin()) : false,
+            'to_can_assign' => $new ? ($new->isHeadAccountant() || $new->isManager() || $new->isAdmin()) : false,
         ];
 
         if (!$preview['changed'] || $newId === null) {

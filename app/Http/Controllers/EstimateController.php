@@ -28,7 +28,8 @@ class EstimateController extends Controller
 
     /**
      * Может ли текущий пользователь переназначать исполнителей БП в смете клиента.
-     * Только главбух этого клиента (он же ответственный) или админ.
+     * Только главбух этого клиента (он же ответственный) или админ. Руководитель,
+     * которого поставили ответственным, ведёт своих клиентов так же, как главбух.
      */
     private function canAssign(Client $client): bool
     {
@@ -38,7 +39,8 @@ class EstimateController extends Controller
         }
 
         return $user->isAdmin()
-            || ($user->id === $client->responsible_employee_id && $user->isHeadAccountant());
+            || ($user->id === $client->responsible_employee_id
+                && ($user->isHeadAccountant() || $user->isManager()));
     }
 
     public function edit(Request $request, Client $client)

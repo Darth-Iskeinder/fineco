@@ -329,6 +329,42 @@ class ClientResponsibleTransferTest extends TestCase
         $this->assertFalse($data['to_can_assign']);
     }
 
+    /** Руководитель на своих клиентах работает как главбух — предупреждать не о чем. */
+    public function test_preview_does_not_warn_about_the_manager(): void
+    {
+        $manager = $this->manager();
+
+        $data = $this->actingAs($this->admin, 'employee')
+            ->getJson('/clients/' . $this->client->id . '/responsible-preview?employee_id=' . $manager->id)
+            ->assertOk()
+            ->json();
+
+        $this->assertTrue($data['to_can_assign']);
+    }
+
+    /** Руководитель раздаёт БП в смете только там, где он ответственный; у чужих смотрит. */
+    public function test_manager_assigns_only_on_own_clients(): void
+    {
+        $manager = $this->manager();
+        $canAssign = fn () => $this->actingAs($manager, 'employee')
+            ->get(route('clients.estimate.edit', $this->client))
+            ->assertOk()
+            ->viewData('canAssign');
+
+        $this->assertFalse($canAssign(), 'Клиент главбуха: руководитель только смотрит');
+
+        $this->client->update(['responsible_employee_id' => $manager->id]);
+
+        $this->assertTrue($canAssign(), 'Свой клиент: раздаёт как главбух');
+    }
+
+    private function manager(): Employee
+    {
+        $role = Role::firstOrCreate(['name' => Role::MANAGER], ['display_name' => 'Руководитель']);
+
+        return $this->employee('Руководитель', $role->id);
+    }
+
     /** Тот же сотрудник — окну нечего показывать. */
     public function test_preview_reports_no_change(): void
     {
