@@ -330,11 +330,11 @@ class EstimateController extends Controller
             ])->values()->toArray();
 
         // Переназначение исполнителей: доступно только главбуху клиента (+ админу).
-        // Кандидаты — активные бухгалтеры + сам главбух (ответственный).
+        // Кандидаты — активные бухгалтеры и юрисконсульты + сам главбух (ответственный).
         $canAssign = $this->canAssign($client);
         $assigneeOptions = [];
         if ($canAssign) {
-            // Кандидаты: работающие бухгалтеры + ответственный. Плюс уже назначенные
+            // Кандидаты: работающие бухгалтеры и юрисконсульты + ответственный. Плюс уже назначенные
             // исполнители сохранённых позиций (даже уволенные) — иначе селект не сможет
             // показать, на ком реально стоит задача. Таких помечаем `fired`: их видно
             // только в строке, где они стоят, выбрать заново нельзя.
@@ -345,7 +345,7 @@ class EstimateController extends Controller
                     $q->where(function ($q2) use ($client) {
                         $q2->assignable()
                            ->where(function ($q3) use ($client) {
-                               $q3->whereHas('role', fn ($r) => $r->where('name', Role::ACCOUNTANT))
+                               $q3->whereHas('role', fn ($r) => $r->whereIn('name', [Role::ACCOUNTANT, Role::LEGAL_COUNSEL]))
                                   ->orWhere('id', $client->responsible_employee_id);
                            });
                     })->orWhereIn('id', $savedAssigneeIds);

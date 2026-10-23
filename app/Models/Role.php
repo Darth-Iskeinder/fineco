@@ -13,6 +13,8 @@ class Role extends Model
     const HEAD_ACCOUNTANT = 'head_accountant';
     const ACCOUNTANT = 'accountant';
     const MANAGER = 'manager';
+    // Ведёт юридические БП клиента (договоры и т.п.): в смете его можно поставить исполнителем.
+    const LEGAL_COUNSEL = 'legal_counsel';
 
     protected $fillable = [
         'name',

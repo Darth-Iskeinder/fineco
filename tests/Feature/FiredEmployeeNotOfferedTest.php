@@ -130,6 +130,37 @@ class FiredEmployeeNotOfferedTest extends TestCase
         $this->assertFalse($options[$this->working->id]['fired'], 'Работающий помечен уволенным');
     }
 
+    /** Юрисконсульт ведёт юридические БП клиента (договоры), поэтому тоже в кандидатах. */
+    public function test_estimate_offers_legal_counsel_and_saves_the_assignment(): void
+    {
+        $role   = Role::firstOrCreate(['name' => Role::LEGAL_COUNSEL], ['display_name' => 'Юрисконсульт']);
+        $lawyer = Employee::create([
+            'full_name' => 'Тест Юрист', 'position' => 'Юрисконсульт',
+            'email' => 'lawyer_' . uniqid() . '@test.kg', 'password' => bcrypt('x'),
+            'role_id' => $role->id, 'status' => Employee::STATUS_ACTIVE,
+        ]);
+
+        $this->assertContains($lawyer->id, array_column($this->assigneeOptions(), 'id'), 'Юрисконсульта нет в кандидатах');
+
+        $service = Service::create([
+            'name' => 'Заключить договор ' . uniqid(), 'periodicity' => 'Ежемесячно',
+            'start_day' => [5], 'is_active' => true,
+        ]);
+
+        $this->actingAs($this->head, 'employee')
+            ->postJson(route('clients.estimate.save', $this->client), [
+                'tariff_bps' => [],
+                'extras'     => [[
+                    'service_id' => $service->id, 'type' => 'recurring', 'name' => $service->name,
+                    'cost' => 0, 'quantity' => 1, 'assignee_id' => $lawyer->id,
+                ]],
+            ])
+            ->assertOk();
+
+        $item = Estimate::where('client_id', $this->client->id)->first()->rootItems->first();
+        $this->assertSame($lawyer->id, (int) $item->assignee_id);
+    }
+
     public function test_buhtasks_does_not_offer_a_fired_employee(): void
     {
         $employees = $this->actingAs($this->head, 'employee')
