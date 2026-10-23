@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Employee;
+use App\Models\ErrorReport;
 use App\Models\Role;
 use App\Models\Tenant;
 use App\Models\VendorUser;
@@ -255,6 +256,50 @@ class VendorPanelTest extends TestCase
             ->assertSessionHasErrors('tenant');
 
         $this->assertGuest('employee');
+    }
+
+    public function test_list_shows_firm_id_and_its_auto_audit_flags(): void
+    {
+        $this->tenant->setAutoAuditEnabled(true);
+        $this->tenant->setAutoAuditFrom('2026-09');
+
+        $this->actingAs($this->vendor, 'vendor')
+            ->get('/vendor')
+            ->assertOk()
+            ->assertSee('#' . $this->tenant->id)
+            ->assertSee('страница')
+            ->assertSee('с 2026-09');
+    }
+
+    /** Счётчик сбоев фирмы ведёт в журнал, где оставлены только её сбои. */
+    public function test_firm_errors_link_opens_the_journal_filtered_by_firm(): void
+    {
+        $other = Tenant::create(['name' => 'Соседняя ' . uniqid(), 'slug' => 'n-' . uniqid(), 'status' => Tenant::STATUS_ACTIVE]);
+        $this->errorIn($this->tenant, 'Сбой нашей фирмы');
+        $this->errorIn($other, 'Сбой соседней фирмы');
+
+        $this->actingAs($this->vendor, 'vendor')
+            ->get('/vendor')
+            ->assertSee(route('vendor.errors.index', ['tenant' => $this->tenant->id]), false);
+
+        $this->actingAs($this->vendor, 'vendor')
+            ->get(route('vendor.errors.index', ['tenant' => $this->tenant->id]))
+            ->assertOk()
+            ->assertSee('Сбой нашей фирмы')
+            ->assertDontSee('Сбой соседней фирмы');
+    }
+
+    private function errorIn(Tenant $tenant, string $message): ErrorReport
+    {
+        return ErrorReport::create([
+            'tenant_id'     => $tenant->id,
+            'kind'          => ErrorReport::KIND_SERVER,
+            'fingerprint'   => sha1($message . uniqid()),
+            'message'       => $message,
+            'count'         => 1,
+            'first_seen_at' => now(),
+            'last_seen_at'  => now(),
+        ]);
     }
 
     private function employeeIn(Tenant $tenant, string $role, string $status = Employee::STATUS_ACTIVE): Employee

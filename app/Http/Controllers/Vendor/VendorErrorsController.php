@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Vendor;
 
 use App\Http\Controllers\Controller;
 use App\Models\ErrorReport;
+use App\Models\Tenant;
 use Illuminate\Http\Request;
 
 /**
@@ -21,8 +22,12 @@ class VendorErrorsController extends Controller
     {
         $showResolved = $request->boolean('resolved');
 
+        // Фильтр по фирме: из панели «Аккаунты» сюда ведёт ссылка со счётчиком сбоев фирмы.
+        $tenant = $request->filled('tenant') ? Tenant::find($request->integer('tenant')) : null;
+
         $reports = ErrorReport::with(['tenant:id,name', 'employee:id,full_name'])
             ->when(!$showResolved, fn ($q) => $q->unresolved())
+            ->when($tenant, fn ($q) => $q->where('tenant_id', $tenant->id))
             ->orderByDesc('last_seen_at')
             ->paginate(self::PER_PAGE)
             ->withQueryString();
@@ -30,6 +35,7 @@ class VendorErrorsController extends Controller
         return view('vendor-panel.errors', [
             'reports'         => $reports,
             'showResolved'    => $showResolved,
+            'tenant'          => $tenant,
             'unresolvedCount' => ErrorReport::unresolved()->count(),
         ]);
     }

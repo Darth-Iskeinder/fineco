@@ -3,7 +3,7 @@
 @section('title', 'Сбои')
 
 @section('content')
-<main class="max-w-5xl mx-auto px-6 py-10" x-data="{ open: null }">
+<main class="max-w-6xl mx-auto px-6 py-10" x-data="{ open: null }">
     <div class="flex items-start justify-between gap-6">
         <div>
             <h1 class="text-2xl font-bold text-white">Журнал сбоев</h1>
@@ -13,11 +13,21 @@
             </p>
         </div>
 
-        <a href="{{ route('vendor.errors.index', $showResolved ? [] : ['resolved' => 1]) }}"
+        <a href="{{ route('vendor.errors.index', array_filter(['tenant' => $tenant?->id, 'resolved' => $showResolved ? null : 1])) }}"
            class="shrink-0 px-4 py-2 rounded-lg text-xs font-semibold border border-slate-700 text-slate-300 hover:text-white hover:border-slate-500 transition-colors">
             {{ $showResolved ? 'Только неразобранные' : 'Показать разобранные' }}
         </a>
     </div>
+
+    @if ($tenant)
+        <div class="mt-6 flex items-center gap-3 text-sm">
+            <span class="px-3 py-1 rounded-full bg-slate-800 text-slate-200 border border-slate-700">
+                Фирма: {{ $tenant->name }} <span class="text-slate-500">#{{ $tenant->id }}</span>
+            </span>
+            <a href="{{ route('vendor.errors.index', array_filter(['resolved' => $showResolved ? 1 : null])) }}"
+               class="text-xs text-slate-400 hover:text-white underline hover:no-underline">Все фирмы</a>
+        </div>
+    @endif
 
     @if (session('status'))
         <div class="mt-6 rounded-xl bg-amber-500/10 border border-amber-500/30 px-4 py-3 text-sm text-amber-200">

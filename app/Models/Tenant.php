@@ -68,6 +68,12 @@ class Tenant extends Model
         return $this->hasMany(Client::class);
     }
 
+    /** Сбои фирмы из журнала. Без фильтра по фирме: журнал общий, его читает вендор. */
+    public function errorReports(): HasMany
+    {
+        return $this->hasMany(ErrorReport::class);
+    }
+
     public function isActive(): bool
     {
         return $this->status === self::STATUS_ACTIVE;

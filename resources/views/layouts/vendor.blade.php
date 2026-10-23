@@ -13,7 +13,7 @@
      рабочая система фирмы, а служебный экран владельца. --}}
 <body class="bg-slate-950 min-h-screen text-slate-200 antialiased">
     <header class="border-b border-slate-800 bg-slate-900/60 backdrop-blur">
-        <div class="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
+        <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
             <div class="flex items-baseline space-x-3">
                 <span class="text-white font-semibold">Панель владельца</span>
                 <span class="text-slate-500 text-sm">{{ auth('vendor')->user()->name }}</span>

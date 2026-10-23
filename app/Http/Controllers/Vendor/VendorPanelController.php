@@ -41,6 +41,7 @@ class VendorPanelController extends Controller
             ->withCount([
                 'clients'   => fn ($q) => $q->acrossTenants(),
                 'employees' => fn ($q) => $q->acrossTenants(),
+                'errorReports as unresolved_errors_count' => fn ($q) => $q->unresolved(),
             ])
             ->orderBy('name')
             ->get();
