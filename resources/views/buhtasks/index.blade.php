@@ -1768,6 +1768,8 @@
                                     </span>
                                 </template>
                                 <span x-show="!src.url && !src.replaced" class="text-slate-500">файл не приложен</span>
+                                {{-- Файл лежит в задаче пропущенного месяца, но ведомостью за него не прочитался. --}}
+                                <span x-show="src.gap && src.reason" class="text-rose-600" x-text="src.reason"></span>
                                 <span x-show="src.value !== null" class="text-slate-500" x-text="auditMoney(src.value)"></span>
                             </div>
                         </template>

@@ -21,8 +21,9 @@ use Illuminate\Support\Collection;
  *   - «Нет документа»: тому, кто закрыл задачу без файла;
  *   - остальное: исполнителям задач, из которых взяты файлы строки. При «Не совпало» это
  *     оба, и кто делал ведомость, и кто делал отчёт;
- *   - исполнитель уволен или задачи нет вовсе (в квартале нет ведомости за месяц):
- *     ответственному за клиента.
+ *   - исполнитель уволен: тому, кто ведёт этот БП у клиента по смете сейчас, а если
+ *     там никого, ответственному за клиента. Он же может заменить файл в такой задаче;
+ *   - задачи нет вовсе: ответственному за клиента.
  *
  * Бухгалтер видит только вопросы, которые ждут его ответа. Ответил, и вопрос уходит из
  * списка, пока руководитель не нажмёт «Не принято» или прогон не покажет, что после
@@ -64,7 +65,12 @@ class AutoAuditQuestions
         $logIds = $results->flatMap(fn (AutoAuditResult $r) => self::logIds($r))->unique()->values();
 
         $logs = BuhTaskLog::whereIn('id', $logIds)
-            ->with(['employee' => fn ($q) => $q->withTrashed()->select('id', 'full_name', 'status', 'deleted_at')])
+            ->with([
+                'employee' => fn ($q) => $q->withTrashed()->select('id', 'full_name', 'status', 'employment_status', 'deleted_at'),
+                // Целиком: по service_id замена из вопроса проверяет формат файла.
+                'estimateItem',
+                'estimateItem.assignee:id,status,employment_status',
+            ])
             ->get()
             ->keyBy('id');
 
@@ -107,9 +113,8 @@ class AutoAuditQuestions
     public function executors(array $question): array
     {
         $ids = $question['logs']
-            ->map(fn (BuhTaskLog $log) => $log->employee)
-            ->filter(fn (?Employee $e) => $e && !$e->trashed() && $e->status === Employee::STATUS_ACTIVE)
-            ->map(fn (Employee $e) => (int) $e->id)
+            ->map(fn (BuhTaskLog $log) => $this->answers($log, $question['client']))
+            ->filter()
             ->unique()
             ->values()
             ->all();
@@ -118,25 +123,51 @@ class AutoAuditQuestions
             return $ids;
         }
 
-        // Спросить не с кого: исполнитель ушёл, или задачи нет. Спрашиваем с ответственного.
+        // Задачи нет вовсе. Спрашиваем с ответственного.
         $responsible = $question['client']?->responsible_employee_id;
 
         return $responsible ? [(int) $responsible] : [];
     }
 
     /**
-     * Задачи строки, файл которых сотрудник может заменить или приложить сам: только свои.
-     * Файлы чужой задачи, даже уволенного, не трогаем: вопрос к ответственному, но
-     * исправление за другого человека это уже решение руководителя.
+     * Задачи строки, файл которых сотрудник может заменить или приложить сам: свои, и
+     * задачи ушедшего исполнителя, если этот БП у клиента теперь ведёт он (Искендер,
+     * 28.10.2026). Иначе файл уволенного не мог заменить никто.
      */
     public function fixable(array $question, Employee $employee): Collection
     {
-        return $question['logs']->filter(fn (BuhTaskLog $log) => (int) $log->employee_id === (int) $employee->id)->values();
+        return $question['logs']->filter(fn (BuhTaskLog $log) => $this->answers($log, $question['client']) === (int) $employee->id)->values();
     }
 
     /**
-     * Задачи, из-за которых вопрос. У «нет документа» это задачи без файла; остальное
-     * берём по файлам строки.
+     * Кто отвечает за задачу: её исполнитель. Ушёл, значит тот, кто ведёт этот БП у
+     * клиента по смете сейчас, а если там никого, ответственный за клиента.
+     */
+    private function answers(BuhTaskLog $log, ?Client $client): ?int
+    {
+        foreach ([$log->employee, $log->estimateItem?->assignee] as $employee) {
+            if (self::works($employee)) {
+                return (int) $employee->id;
+            }
+        }
+
+        $responsible = $client?->responsible_employee_id;
+
+        return $responsible ? (int) $responsible : null;
+    }
+
+    /** Работает: не удалён, учётка открыта и не уволен. У уволенного учётка бывает открыта. */
+    private static function works(?Employee $employee): bool
+    {
+        return $employee
+            && !$employee->trashed()
+            && $employee->status === Employee::STATUS_ACTIVE
+            && !$employee->isFired();
+    }
+
+    /**
+     * Задачи, из-за которых вопрос. У «нет документа» это задачи без файла и задачи
+     * пропущенного месяца с чужим файлом (gap); остальное берём по файлам строки.
      *
      * @return int[]
      */
@@ -145,10 +176,16 @@ class AutoAuditQuestions
         $sources = collect($result->sources ?? []);
 
         if ($result->outcome === AutoAuditResult::MISSING_DOCUMENT) {
-            $sources = $sources->where('status', AutoAuditRunner::SOURCE_MISSING);
+            $sources = $sources->filter(fn (array $s) => self::blocks($s));
         }
 
         return $sources->pluck('log_id')->filter()->map(fn ($id) => (int) $id)->unique()->values()->all();
+    }
+
+    /** Источник «нет документа», из-за которого вопрос: задача без файла или с чужим файлом. */
+    private static function blocks(array $source): bool
+    {
+        return ($source['status'] ?? null) === AutoAuditRunner::SOURCE_MISSING || !empty($source['gap']);
     }
 
     /**
@@ -213,14 +250,18 @@ class AutoAuditQuestions
                 'current'  => $links->current($s),
                 'value'    => $s['value'] ?? null,
                 'reason'   => $s['reason'] ?? null,
+                'gap'      => !empty($s['gap']),
             ])->values()->all(),
             'fix'           => ($question['fixable'] ?? collect())->map(function (BuhTaskLog $log) use ($sources) {
                 $source = $sources->firstWhere('log_id', $log->id);
                 $files  = $sources->where('log_id', $log->id)->pluck('name')->filter()->values()->all();
 
+                // Задача ушедшего: пусть будет видно, что файл меняют за него.
+                $owner = self::works($log->employee) ? '' : ', исполнитель ' . (($source['employee'] ?? null) ? $source['employee'] . ' ' : '') . 'не работает';
+
                 return [
                     'log_id' => $log->id,
-                    'label'  => ($source['label'] ?? 'Задача') . ' за ' . sprintf('%02d.%d', $log->month, $log->year),
+                    'label'  => ($source['label'] ?? 'Задача') . ' за ' . sprintf('%02d.%d', $log->month, $log->year) . $owner,
                     'action' => $files ? 'replace' : 'attach',
                     'files'  => $files,
                 ];
@@ -249,7 +290,7 @@ class AutoAuditQuestions
         return match (true) {
             $result->outcome === AutoAuditResult::MISMATCH => $result->ruleName(),
             // Задачи без файла нет только в квартале без ведомости за месяц.
-            $result->outcome === AutoAuditResult::MISSING_DOCUMENT => $sources->where('status', AutoAuditRunner::SOURCE_MISSING)->pluck('label')->unique()->join(', ') ?: 'ОСВ',
+            $result->outcome === AutoAuditResult::MISSING_DOCUMENT => $sources->filter(fn (array $s) => self::blocks($s))->pluck('label')->unique()->join(', ') ?: 'ОСВ',
             default => $sources->pluck('label')->unique()->join(', '),
         };
     }

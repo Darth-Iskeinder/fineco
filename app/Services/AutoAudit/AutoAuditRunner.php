@@ -466,6 +466,36 @@ class AutoAuditRunner
     }
 
     /**
+     * Файлы закрытых задач на ведомость за этот месяц, которые ведомостью за него не
+     * прочитались: в задаче за июль лежит форма 161 или ведомость за август. Без них вопрос
+     * «нет ведомости» не знал, какую задачу чинить, и заменить файл было негде (Fineco, 28.10.2026).
+     *
+     * gap отличает такой файл от просто показанных рядом: по нему вопрос ищет задачу.
+     *
+     * @param array<int, array{0: BuhTaskLog, 1: \App\Models\BuhTaskDocument}> $sheets
+     */
+    private function sheetsInPlaceOf(Client $client, iterable $sheets, DocumentPeriod $month): array
+    {
+        $result = [];
+
+        foreach ($sheets as [$log, $document]) {
+            if (AutoAuditSources::periodOfTask($log)->label() !== $month->label()) {
+                continue;
+            }
+
+            $value = $this->sources->read($client, 'osv', AutoAuditSources::SIDES['osv']['probe'], $document);
+
+            $result[] = array_merge($this->sources->source('osv', $log, $document, $value), [
+                'value'  => null,
+                'gap'    => true,
+                'reason' => $value->period ? 'это ведомость за ' . $value->period->title() : ($value->reason ?? 'не прочитана как ведомость'),
+            ]);
+        }
+
+        return $result;
+    }
+
+    /**
      * Нет документа: одна строка на период, в ней проверки, которые это ломает.
      *
      * Два случая:
@@ -545,6 +575,7 @@ class AutoAuditRunner
 
                 $present = [];
                 $missing = [];
+                $gaps    = [];
 
                 foreach ($report['period']->months() as [$year, $month]) {
                     $monthPeriod = DocumentPeriod::of($year, $month);
@@ -553,6 +584,7 @@ class AutoAuditRunner
                         array_push($present, ...$recognized['osv'][$monthPeriod->label()]['sources']);
                     } else {
                         $missing[] = $monthPeriod->title();
+                        array_push($gaps, ...$this->sheetsInPlaceOf($client, $documents['osv'] ?? [], $monthPeriod));
                     }
                 }
 
@@ -562,8 +594,10 @@ class AutoAuditRunner
 
                 $rows[$label] ??= ['period' => $report['period'], 'numbers' => [], 'notes' => [], 'extra' => []];
                 array_push($rows[$label]['numbers'], ...$affects[$side]);
-                array_push($rows[$label]['extra'], ...$present);
-                $rows[$label]['notes'][] = 'Нет ведомости за ' . implode(', ', $missing);
+                // Задача пропущенного месяца первой: по ней видно, с кого спросить и что заменить.
+                array_push($rows[$label]['extra'], ...$gaps, ...$present);
+                $rows[$label]['notes'][] = 'Нет ведомости за ' . implode(', ', $missing)
+                    . implode('', array_map(fn (array $s) => ". В задаче за {$s['task_month']} вместо неё «{$s['name']}»", $gaps));
             }
         }
 

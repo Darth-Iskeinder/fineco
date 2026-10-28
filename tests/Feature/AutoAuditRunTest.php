@@ -3105,30 +3105,126 @@ class AutoAuditRunTest extends TestCase
         $this->assertCount(0, app(AutoAuditQuestions::class)->forEmployee($this->admin));
     }
 
-    /** Исполнитель уволен: вопрос уходит ответственному за клиента, но чужой файл он не трогает. */
+    /**
+     * Исполнитель удалён, по смете БП никто не ведёт: вопрос уходит ответственному за
+     * клиента, и он может заменить файл ушедшего. Чужой файл работающего он не трогает.
+     */
     public function test_question_of_a_fired_executor_goes_to_the_responsible(): void
     {
         $this->tenant->setAutoAuditFindingsEnabled(true);
-        $fired  = $this->accountant();
-        $client = $this->client();
+        $fired   = $this->accountant();
+        $working = $this->accountant();
+        $client  = $this->client();
         $this->attachSheet($client, 'осв.xls', ['3210' => 150.00, '3410' => 4.00]);
         $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
         $this->ownedBy('осв.xls', $fired);
-        $this->ownedBy('отчёт.pdf', $fired);
+        $this->ownedBy('отчёт.pdf', $working);
         $this->runAudit();
         $fired->delete();
 
         $question = app(AutoAuditQuestions::class)->forEmployee($this->admin)->sole();
-        $this->assertCount(0, $question['fixable']);
+        $this->assertSame([$this->logOf('осв.xls')->id], $question['fixable']->pluck('id')->all());
+        $this->assertSame(
+            'ОСВ за 08.2026, исполнитель ' . \App\Services\AutoAudit\AutoAuditSources::shortName($fired->full_name) . ' не работает',
+            app(AutoAuditQuestions::class)->toFront($question)['fix'][0]['label'],
+        );
 
         $this->actingAs($this->admin, 'employee')
             ->postJson(route('buhtasks.audit-questions.fix', $question['finding']), [
                 'result_id' => $question['result']->id,
-                'log_id'    => $this->logOf('осв.xls')->id,
-                'file'      => UploadedFile::fake()->create('осв-новая.xls', 5),
+                'log_id'    => $this->logOf('отчёт.pdf')->id,
+                'file'      => UploadedFile::fake()->create('отчёт-новый.pdf', 5),
             ])
             ->assertForbidden();
         $this->assertSame(0, AutoAuditFindingMessage::count());
+    }
+
+    /**
+     * Уволенный с открытой учёткой тоже ушёл: вопрос получает тот, кто ведёт БП у клиента
+     * по смете, а не уволенный и не ответственный.
+     */
+    public function test_question_of_a_dismissed_executor_goes_to_the_current_assignee(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $fired     = $this->accountant();
+        $successor = $this->accountant();
+        $client    = $this->client();
+        $this->attachSheet($client, 'осв.xls', ['3210' => 150.00, '3410' => 4.00]);
+        $this->attachReport($client, 'отчёт.pdf', base: 100.00, tax: 4.00);
+        $this->ownedBy('осв.xls', $fired);
+        $this->ownedBy('отчёт.pdf', $successor);
+        $this->logOf('осв.xls')->estimateItem->update(['assignee_id' => $successor->id]);
+        $this->runAudit();
+        $fired->update(['employment_status' => Employee::EMPLOYMENT_FIRED]);
+
+        $questions = app(AutoAuditQuestions::class);
+        $this->assertCount(0, $questions->forEmployee($fired));
+        $this->assertCount(0, $questions->forEmployee($this->admin));
+        $this->assertEqualsCanonicalizing(
+            [$this->logOf('осв.xls')->id, $this->logOf('отчёт.pdf')->id],
+            $questions->forEmployee($successor)->sole()['fixable']->pluck('id')->all(),
+        );
+    }
+
+    /**
+     * В квартале нет ведомости за май, потому что в задаче за май лежит форма 161 (случай
+     * Fineco, 28.10.2026). Задача видна в вопросе, его получает тот, кто ведёт БП вместо
+     * уволенного, и он заменяет файл прямо из вопроса.
+     */
+    public function test_wrong_file_in_the_missing_month_task_can_be_replaced_by_the_successor(): void
+    {
+        $this->tenant->setAutoAuditFindingsEnabled(true);
+        $fired     = $this->accountant();
+        $successor = $this->accountant();
+        $client    = $this->client(['accounting_method' => Client::ACCOUNTING_ACCRUAL]);
+        $this->attachSheet($client, 'осв-апрель.xls', ['3210' => 1.00, '3410' => 4.00], month: 4, taskMonth: 5);
+        $this->attachSheet($client, 'осв-июнь.xls', ['3210' => 1.00, '3410' => 12.00], month: 6, taskMonth: 7);
+        $item = $this->item($client, $this->osvService);
+        $this->attachLog($client, $item, '161.pdf', month: 6);
+        $this->attachQuarterReport($client, 'отчёт-2кв.pdf', base: 3.00, tax: 24.00);
+        $this->ownedBy('161.pdf', $fired);
+        $item->update(['assignee_id' => $successor->id]);
+        $fired->update(['employment_status' => Employee::EMPLOYMENT_FIRED]);
+
+        // Сам файл ещё и «не тот документ» за май: это второй вопрос про ту же задачу.
+        $rows = $this->runAudit();
+        $this->assertEqualsCanonicalizing([AutoAuditResult::MISSING_DOCUMENT, AutoAuditResult::WRONG_DOCUMENT], $rows->pluck('outcome')->all());
+        $row = $rows->firstWhere('outcome', AutoAuditResult::MISSING_DOCUMENT);
+        $this->assertSame('Нет ведомости за май 2026. В задаче за 06.2026 вместо неё «161.pdf»', $row->reason);
+        $this->assertCount(4, $row->sources);
+
+        $log       = $this->logOf('161.pdf');
+        $questions = app(AutoAuditQuestions::class)->forEmployee($successor);
+        $this->assertCount(2, $questions);
+        $this->assertSame([[$log->id], [$log->id]], $questions->map(fn (array $q) => $q['fixable']->pluck('id')->all())->all());
+
+        $question = $questions->first(fn (array $q) => $q['result']->id === $row->id);
+        $front    = app(AutoAuditQuestions::class)->toFront($question);
+
+        $this->assertSame('replace', $front['fix'][0]['action']);
+        $this->assertSame(['161.pdf'], $front['fix'][0]['files']);
+        $gap = collect($front['sources'])->firstWhere('gap', true);
+        $this->assertSame('Это не оборотно-сальдовая ведомость', $gap['reason']);
+        $this->assertCount(0, app(AutoAuditQuestions::class)->forEmployee($this->admin));
+
+        $this->actingAs($successor, 'employee')
+            ->post(route('buhtasks.audit-questions.fix', $question['finding']), [
+                'result_id' => $row->id,
+                'log_id'    => $log->id,
+                'file'      => UploadedFile::fake()->create('осв-май.xls', 5),
+            ], ['Accept' => 'application/json'])
+            ->assertOk()
+            ->assertJsonCount(1, 'also_fixed');
+
+        $this->assertSame(['осв-май.xls'], $log->documents()->pluck('name')->all());
+        $this->assertSame('completed', $log->fresh()->status);
+        $this->assertSame('Заменил «161.pdf» на «осв-май.xls»', AutoAuditFindingMessage::orderBy('id')->first()->body);
+        $this->assertCount(0, app(AutoAuditQuestions::class)->forEmployee($successor));
+
+        // Следующая проверка читает май, и квартал сходится.
+        // Файл лёг под именем с меткой времени, подменённая читалка узнаёт его по нему.
+        $this->sheets[basename($log->documents()->sole()->path)] = ['month' => [2026, 5], 'accounts' => ['3210' => 1.00, '3410' => 8.00]];
+        $this->assertSame([AutoAuditResult::MATCHED], $this->runAudit()->pluck('outcome')->unique()->values()->all());
     }
 
     /** Объяснение уходит руководителю, вопрос пропадает у бухгалтера. «Не принято» его возвращает. */
