@@ -468,11 +468,17 @@ class BalanceSheetReader
      * Возвращаем все совпадения, а не первое: решать, что делать с несколькими строками
      * одного счёта, должен вызывающий, а не этот поиск втихую.
      *
+     * Колонки «Показатели» в ведомости может не быть вовсе: тогда «БУ» напечатано один раз
+     * в шапке («Выводимые данные: БУ»), а строки счетов идут без пометки. Требовать её там
+     * значит не найти ни одного счёта и считать ведомость пустой (ИП Айткеева, 28.10.2026).
+     * Валютных строк «Вал.» без этой колонки нет, подстроки отсекает номер счёта.
+     *
      * @return int[] номера строк
      */
     private function findAccountRows(array $rows, string $account): array
     {
-        $found = [];
+        $found      = [];
+        $indicators = $this->hasIndicatorColumn($rows);
 
         foreach ($rows as $r => $row) {
             $first = trim((string) ($row[0] ?? ''));
@@ -481,7 +487,7 @@ class BalanceSheetReader
                 continue;
             }
 
-            if (mb_strtolower(trim((string) ($row[1] ?? ''))) !== 'бу') {
+            if ($indicators && !$this->isAccountingRow($row)) {
                 continue;
             }
 
@@ -489,6 +495,23 @@ class BalanceSheetReader
         }
 
         return $found;
+    }
+
+    /** Есть ли колонка «Показатели»: хоть одна строка с «БУ» во второй колонке. */
+    private function hasIndicatorColumn(array $rows): bool
+    {
+        foreach ($rows as $row) {
+            if ($this->isAccountingRow($row)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function isAccountingRow(array $row): bool
+    {
+        return mb_strtolower(trim((string) ($row[1] ?? ''))) === 'бу';
     }
 
     /**
