@@ -180,7 +180,37 @@ class HiddenSettingsSectionsTest extends TestCase
     {
         $names = TaxpayerCategory::orderBy('id')->pluck('name')->all();
 
-        $this->assertSame(['Малый', 'Средний', 'Крупный'], $names);
+        // Названия длинные с 02.11.2026, см. merge_duplicate_taxpayer_categories.
+        $this->assertSame(['Малый субъект (до 8 млн)', 'Средний субъект (8-50 млн)', 'Крупный субъект (от 50 млн)'], $names);
+    }
+
+    /**
+     * Дубли как на бою: короткая запись рядом с длинной. Клиент переезжает на длинную,
+     * короткая удаляется, перенос записан для отката, повторный запуск ничего не меняет.
+     */
+    public function test_duplicate_taxpayer_categories_are_merged(): void
+    {
+        $long     = TaxpayerCategory::where('name', 'Крупный субъект (от 50 млн)')->firstOrFail();
+        $shortId  = DB::table('taxpayer_categories')->insertGetId(['name' => 'Крупный', 'created_at' => now(), 'updated_at' => now()]);
+        $clientId = DB::table('clients')->value('id');
+        $other    = DB::table('clients')->where('id', '!=', $clientId)->first(['id', 'taxpayer_category_id']);
+
+        DB::table('clients')->where('id', $clientId)->update(['taxpayer_category_id' => $shortId]);
+
+        $migration = require database_path('migrations/2026_11_02_000001_merge_duplicate_taxpayer_categories.php');
+        $migration->up();
+
+        $this->assertSame($long->id, (int) DB::table('clients')->where('id', $clientId)->value('taxpayer_category_id'));
+        $this->assertFalse(DB::table('taxpayer_categories')->where('id', $shortId)->exists());
+        $this->assertTrue(DB::table('taxpayer_category_merges')
+            ->where(['client_id' => $clientId, 'from_name' => 'Крупный', 'to_category_id' => $long->id])->exists());
+        // Соседний клиент со своей категорией не тронут.
+        $this->assertSame($other->taxpayer_category_id, DB::table('clients')->where('id', $other->id)->value('taxpayer_category_id'));
+
+        $before = DB::table('taxpayer_category_merges')->count();
+        $migration->up();
+        $this->assertSame($before, DB::table('taxpayer_category_merges')->count());
+        $this->assertSame(3, TaxpayerCategory::count());
     }
 
     /** Клиенты со старым текстовым значением переехали на справочник. */
