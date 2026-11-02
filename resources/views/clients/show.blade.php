@@ -107,8 +107,8 @@
                                 <label class="block text-sm font-medium text-slate-700 mb-1">Форма организации</label>
                                 <select x-model="form.basic.organization_form_id" class="block w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500">
                                     <option value="">Не указана</option>
-                                    <template x-for="of in organizationForms" :key="of.id">
-                                        <option :value="String(of.id)" :selected="String(of.id) === form.basic.organization_form_id" x-text="of.name"></option>
+                                    <template x-for="orgForm in organizationForms" :key="orgForm.id">
+                                        <option :value="String(orgForm.id)" :selected="String(orgForm.id) === form.basic.organization_form_id" x-text="orgForm.name"></option>
                                     </template>
                                 </select>
                             </div>
