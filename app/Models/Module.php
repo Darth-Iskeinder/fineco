@@ -9,6 +9,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Module extends Model
 {
+    /** «Расчёты с клиентами»: виден только там, где фирме открыли раздел, см. SettlementsAccess. */
+    public const SETTLEMENTS = 'settlements';
+
     protected $fillable = [
         'name',
         'display_name',
@@ -35,6 +38,17 @@ class Module extends Model
     public function scopeActive($query)
     {
         return $query->where('is_active', true);
+    }
+
+    /**
+     * Модули, которые есть в этой фирме. Расчёты с клиентами прячем, пока фирме их
+     * не открыли: иначе галочка в карточке сотрудника вела бы в никуда.
+     */
+    public function scopeAvailableHere($query)
+    {
+        return \App\Services\Settlements\SettlementsAccess::openHere()
+            ? $query
+            : $query->where('modules.name', '!=', self::SETTLEMENTS);
     }
 
     public function scopeOrdered($query)

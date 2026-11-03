@@ -46,6 +46,9 @@ class Tenant extends Model
     /** Ключ в settings: выключенные в фирме проверки автоаудита, см. autoAuditOff(). */
     public const SETTING_AUTO_AUDIT_OFF = 'auto_audit_off';
 
+    /** Ключ в settings: раздел «Расчёты с клиентами» открыт руководителю фирмы. */
+    public const SETTING_SETTLEMENTS = 'settlements';
+
     protected $fillable = [
         'name', 'slug', 'status', 'plan', 'settings', 'is_template',
         // Профиль фирмы: правится в настройках, уходит в акты и сметы.
@@ -164,6 +167,21 @@ class Tenant extends Model
     public function setAutoAuditClientsEnabled(bool $enabled): void
     {
         $this->settings = array_merge($this->settings ?? [], [self::SETTING_AUTO_AUDIT_CLIENTS => $enabled]);
+        $this->save();
+    }
+
+    /**
+     * Видит ли руководитель фирмы раздел «Расчёты с клиентами» (settlements:access).
+     * Вендору, зашедшему в фирму, раздел виден всегда.
+     */
+    public function settlementsEnabled(): bool
+    {
+        return (bool) ($this->settings[self::SETTING_SETTLEMENTS] ?? false);
+    }
+
+    public function setSettlementsEnabled(bool $enabled): void
+    {
+        $this->settings = array_merge($this->settings ?? [], [self::SETTING_SETTLEMENTS => $enabled]);
         $this->save();
     }
 

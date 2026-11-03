@@ -42,7 +42,7 @@ class EmployeeController extends Controller
 
     public function index(Request $request)
     {
-        $employees = Employee::with(['role', 'modules'])
+        $employees = Employee::with(['role', 'modules' => fn ($q) => $q->availableHere()])
             ->search($request->search)
             ->orderBy('created_at', 'desc')
             ->paginate(15)
@@ -53,13 +53,13 @@ class EmployeeController extends Controller
             'search' => $request->search,
             // Роль «Руководитель» назначается только напрямую в базе — в списках админки её не показываем
             'roles' => Role::where('name', '!=', Role::MANAGER)->get(),
-            'modules' => Module::active()->ordered()->get(),
+            'modules' => Module::active()->availableHere()->ordered()->get(),
         ]);
     }
 
     public function show(Employee $employee)
     {
-        $employee->load(['role', 'modules', 'clients']);
+        $employee->load(['role', 'modules' => fn ($q) => $q->availableHere(), 'clients']);
 
         return view('employees.show', [
             'employee' => $employee,
@@ -73,8 +73,23 @@ class EmployeeController extends Controller
             'roles' => Role::where('name', '!=', Role::MANAGER)
                 ->orWhere('id', $employee->role_id)
                 ->get(),
-            'modules' => Module::active()->ordered()->get(),
+            'modules' => Module::active()->availableHere()->ordered()->get(),
         ]);
+    }
+
+    /**
+     * Сохранить галочки модулей. Модули, которых в этой фирме сейчас не видно (расчёты
+     * до открытия флагом), форма не присылает: их не трогаем, иначе любое сохранение
+     * карточки молча снимало бы выданный доступ. Выдать скрытый модуль тоже нельзя.
+     */
+    private function syncModules(Employee $employee, array $ids): void
+    {
+        $available = Module::active()->availableHere()->pluck('id');
+        $hidden    = $employee->modules()->whereNotIn('modules.id', $available)->pluck('modules.id');
+
+        $employee->modules()->sync(
+            collect($ids)->map(fn ($id) => (int) $id)->intersect($available)->merge($hidden)->unique()->values()->all()
+        );
     }
 
     /**
@@ -173,7 +188,7 @@ class EmployeeController extends Controller
 
         // Привязываем модули (если не админ)
         if (!$employee->isAdmin() && !empty($validated['modules'])) {
-            $employee->modules()->sync($validated['modules']);
+            $this->syncModules($employee, $validated['modules']);
         }
 
         return redirect()
@@ -207,7 +222,7 @@ class EmployeeController extends Controller
         if ($employee->isAdmin()) {
             $employee->modules()->detach();
         } else {
-            $employee->modules()->sync($validated['modules'] ?? []);
+            $this->syncModules($employee, $validated['modules'] ?? []);
         }
 
         return redirect()
@@ -277,7 +292,7 @@ class EmployeeController extends Controller
                 if ($employee->isAdmin()) {
                     $employee->modules()->detach();
                 } else {
-                    $employee->modules()->sync($validated['modules'] ?? []);
+                    $this->syncModules($employee, $validated['modules'] ?? []);
                 }
                 break;
 
@@ -285,7 +300,7 @@ class EmployeeController extends Controller
                 return response()->json(['success' => false, 'message' => 'Неизвестный раздел'], 422);
         }
 
-        $employee->load(['role', 'modules', 'clients']);
+        $employee->load(['role', 'modules' => fn ($q) => $q->availableHere(), 'clients']);
 
         return response()->json([
             'success' => true,
@@ -314,7 +329,7 @@ class EmployeeController extends Controller
 
         $result = DB::transaction(fn () => (new EmployeeWorkTransfer())->apply($employee, $recipient));
 
-        $employee->load(['role', 'modules']);
+        $employee->load(['role', 'modules' => fn ($q) => $q->availableHere()]);
 
         return response()->json([
             'success'  => true,

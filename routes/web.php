@@ -5,6 +5,7 @@ use App\Http\Controllers\AuthController;
 use App\Http\Controllers\AutoAuditClientsController;
 use App\Http\Controllers\AutoAuditController;
 use App\Http\Controllers\AutoAuditSettingsController;
+use App\Http\Controllers\ClientSettlementsController;
 use App\Http\Controllers\BuhSmetaController;
 use App\Http\Controllers\BuhTasksController;
 use App\Http\Controllers\ClientController;
@@ -147,6 +148,15 @@ Route::middleware('auth:employee')->group(function () {
     // Решение руководителя по находке. Права и флаг проверяет контроллер.
     Route::post('/auto-audit/findings/{finding}/accept', [AutoAuditController::class, 'accept'])->name('auto-audit.findings.accept');
     Route::post('/auto-audit/findings/{finding}/reject', [AutoAuditController::class, 'reject'])->name('auto-audit.findings.reject');
+
+    // Расчёты с клиентами: пока только вендору, зашедшему в фирму, и руководителю по флагу
+    // фирмы (settlements:access). Остальным 404, проверка внутри контроллера.
+    Route::prefix('settlements')->name('settlements.')->group(function () {
+        Route::get('/', [ClientSettlementsController::class, 'index'])->name('index');
+        Route::get('/{client}', [ClientSettlementsController::class, 'show'])->whereNumber('client')->name('show');
+        Route::post('/{client}', [ClientSettlementsController::class, 'save'])->whereNumber('client')->name('save');
+        Route::post('/{client}/unissue', [ClientSettlementsController::class, 'unissue'])->whereNumber('client')->name('unissue');
+    });
 
     // Страница руководителя (только роль manager, вне системы модулей)
     Route::prefix('dashboard')->name('dashboard.')->middleware('manager')->group(function () {
