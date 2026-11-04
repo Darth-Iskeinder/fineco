@@ -10,13 +10,34 @@
 
 <div class="space-y-4">
 
-    <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 px-6 py-4">
-        <div class="flex flex-wrap items-baseline justify-between gap-2">
+    @php
+        $notIssued = $rows->count() - $issuedCount;
+        $cards = [
+            ['label' => 'Выставлено', 'value' => Invoice::money($issuedSum),
+             'note' => Board::count($issuedCount, ['счёт', 'счёта', 'счетов']) . ' из ' . $rows->count(), 'tone' => 'text-slate-900'],
+            ['label' => 'Пришло денег', 'value' => Invoice::money($received),
+             'note' => $receivedPct === null ? 'по дате оплаты' : $receivedPct . '% от выставленного', 'tone' => 'text-emerald-700'],
+            ['label' => 'Дебиторка', 'value' => Invoice::money($debt),
+             'note' => 'долг клиентов за все месяцы', 'tone' => 'text-slate-900'],
+            ['label' => 'Просрочено больше 30 дней', 'value' => Invoice::money($overdue),
+             'note' => $overdueCount ? Board::count($overdueCount, ['клиент', 'клиента', 'клиентов']) : 'нет', 'tone' => $overdue > 0 ? 'text-red-700' : 'text-slate-900'],
+            ['label' => 'Не выставлено', 'value' => (string) $notIssued,
+             'note' => $notIssued ? 'клиентам ещё нет счёта' : 'всем выставлено', 'tone' => $notIssued ? 'text-amber-700' : 'text-slate-900'],
+        ];
+    @endphp
+
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50">
+        <div class="px-6 py-4">
             <h2 class="text-[15px] font-semibold text-slate-800">Счета за {{ $month }} {{ $period->year }}</h2>
-            <span class="text-sm text-slate-500">
-                Выставлено {{ $issuedCount }} из {{ Board::count($rows->count(), ['клиента', 'клиентов', 'клиентов']) }}
-                на <b class="font-semibold text-slate-900 tabular-nums whitespace-nowrap">{{ Invoice::money($issuedSum) }} сом</b>
-            </span>
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-px bg-slate-100 border-t border-slate-100 rounded-b-2xl overflow-hidden">
+            @foreach ($cards as $card)
+                <div class="bg-white px-4 py-3" data-card="{{ $card['label'] }}">
+                    <div class="text-[13px] text-slate-500">{{ $card['label'] }}</div>
+                    <div class="mt-1 text-2xl leading-none font-semibold tabular-nums {{ $card['tone'] }}">{{ $card['value'] }}</div>
+                    <div class="mt-1 text-xs text-slate-400">{{ $card['note'] }}</div>
+                </div>
+            @endforeach
         </div>
     </div>
 
@@ -28,6 +49,7 @@
                         <th class="px-6 py-3">Клиент</th>
                         <th class="px-3 py-3">Ответственный</th>
                         <th class="px-3 py-3 text-right">Сумма, сом</th>
+                        <th class="px-3 py-3 text-right">Долг</th>
                         <th class="px-3 py-3">Счёт за {{ $month }}</th>
                         <th class="px-3 py-3">Статус</th>
                         <th class="px-6 py-3"></th>
@@ -40,7 +62,8 @@
                             $invoice = $row['invoice'];
                             $issued  = $invoice?->isIssued();
                             $sum     = $invoice ? $invoice->total : $row['suggested'];
-                            $status  = Invoice::STATUSES[$issued ? Invoice::STATUS_ISSUED : Invoice::STATUS_DRAFT];
+                            $balance = $balances[$client->id];
+                            $status  = Invoice::STATUSES[$balance->statusFor($invoice)];
                             $url     = route('settlements.show', $client);
                         @endphp
                         <tr class="hover:bg-slate-50" data-client="{{ $client->id }}">
@@ -55,6 +78,13 @@
                                     <span class="text-slate-500">{{ Invoice::money($sum) }}</span>
                                 @else
                                     <span class="font-medium text-amber-700">впишите</span>
+                                @endif
+                            </td>
+                            <td @class(['px-3 py-3 text-right tabular-nums whitespace-nowrap', 'font-semibold text-red-700' => $balance->debt() > 0, 'text-slate-400' => $balance->debt() <= 0])>
+                                @if ($balance->advance() > 0)
+                                    <span class="font-normal text-emerald-700" title="Аванс">+{{ Invoice::money($balance->advance()) }}</span>
+                                @else
+                                    {{ Invoice::money($balance->debt()) }}
                                 @endif
                             </td>
                             <td class="px-3 py-3 text-[13px]">
@@ -77,7 +107,7 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="6" class="px-6 py-10 text-center text-slate-500">Действующих клиентов нет</td>
+                            <td colspan="7" class="px-6 py-10 text-center text-slate-500">Действующих клиентов нет</td>
                         </tr>
                     @endforelse
                 </tbody>

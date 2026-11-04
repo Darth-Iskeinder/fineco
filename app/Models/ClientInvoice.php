@@ -18,13 +18,20 @@ class ClientInvoice extends Model
     /** Срок оплаты после выставления, дней. Пока у всех одинаковый. */
     public const DUE_DAYS = 10;
 
-    public const STATUS_DRAFT  = 'draft';
-    public const STATUS_ISSUED = 'issued';
+    public const STATUS_DRAFT   = 'draft';
+    public const STATUS_ISSUED  = 'issued';
+    public const STATUS_PARTIAL = 'partial';
+    public const STATUS_PAID    = 'paid';
 
-    /** Подпись и цвет статуса: значок в списке, на счёте и в истории. */
+    /**
+     * Подпись и цвет статуса: значок в списке, на счёте и в истории.
+     * Частично и Оплачен зависят от оплат, их даёт ClientBalance::statusFor().
+     */
     public const STATUSES = [
-        self::STATUS_DRAFT  => ['label' => 'Не выставлен', 'class' => 'border border-dashed border-amber-300 text-amber-700'],
-        self::STATUS_ISSUED => ['label' => 'Выставлен',    'class' => 'bg-violet-50 text-violet-700'],
+        self::STATUS_DRAFT   => ['label' => 'Не выставлен', 'class' => 'border border-dashed border-amber-300 text-amber-700'],
+        self::STATUS_ISSUED  => ['label' => 'Выставлен',    'class' => 'bg-violet-50 text-violet-700'],
+        self::STATUS_PARTIAL => ['label' => 'Частично',     'class' => 'bg-amber-50 text-amber-700'],
+        self::STATUS_PAID    => ['label' => 'Оплачен',      'class' => 'bg-emerald-50 text-emerald-700'],
     ];
 
     protected $fillable = ['client_id', 'period', 'number', 'issued_on', 'due_on', 'amount', 'total', 'issued_by'];
@@ -50,11 +57,6 @@ class ClientInvoice extends Model
     public function isIssued(): bool
     {
         return $this->number !== null;
-    }
-
-    public function status(): string
-    {
-        return $this->isIssued() ? self::STATUS_ISSUED : self::STATUS_DRAFT;
     }
 
     /** «№ 412 от 02.11.2026» или пусто у черновика. */

@@ -4,10 +4,13 @@ namespace Tests\Feature;
 
 use App\Models\Client;
 use App\Models\ClientInvoice;
+use App\Models\ClientOpeningBalance;
+use App\Models\ClientPayment;
 use App\Models\Employee;
 use App\Models\Module;
 use App\Models\Role;
 use App\Models\Tenant;
+use App\Services\Settlements\ClientLedger;
 use App\Support\TenantContext;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
@@ -123,7 +126,7 @@ class ClientSettlementsTest extends TestCase
 
         $this->actingAs($chief->fresh(), 'employee')->get(route('settlements.index'))
             ->assertOk()->assertSee('Свой клиент')->assertDontSee('Чужой клиент')
-            ->assertSee('Выставлено 0 из 1 клиента');
+            ->assertSee('0 счетов из 1');
 
         $this->actingAs($chief->fresh(), 'employee')
             ->post(route('settlements.save', $own), ['amount' => '9000', 'action' => 'issue'])
@@ -238,7 +241,7 @@ class ClientSettlementsTest extends TestCase
 
         $this->asVendor()->get(route('settlements.index'))
             ->assertSee('№ 1 от 03.11.2026')
-            ->assertSee('Выставлено 2 из 2 клиентов');
+            ->assertSee('2 счёта из 2');
     }
 
     public function test_cannot_issue_without_amount_or_with_half_filled_extra(): void
@@ -294,6 +297,243 @@ class ClientSettlementsTest extends TestCase
         $this->asVendor()->post(route('settlements.save', [$client, 'month' => '2027-01']), ['amount' => '1000', 'action' => 'issue']);
 
         $this->assertSame('2026-11-01', ClientInvoice::where('client_id', $client->id)->first()->period->toDateString());
+    }
+
+    // ── Оплаты ────────────────────────────────────────────────────────────
+
+    /** Пример Искендера: 48 000 в месяц, заплатил 30 000, потом 50 000. */
+    public function test_payments_close_oldest_invoices_first(): void
+    {
+        $client = $this->client(['name' => 'Тянь-Шань Трейд']);
+        $this->issue($client, '48 000', '2026-10');
+        $this->pay($client, '30 000', '2026-10-15')->assertSessionHas('success', 'Оплата принята: 30 000 сом');
+
+        $balance = app(ClientLedger::class)->forClient($client);
+        $october = $this->invoiceFor($client, '2026-10');
+        $this->assertSame(18000.0, $balance->debt());
+        $this->assertSame(ClientInvoice::STATUS_PARTIAL, $balance->statusFor($october));
+
+        $this->issue($client, '48 000');
+        $this->pay($client, '50 000', '2026-11-03');
+
+        $balance  = app(ClientLedger::class)->forClient($client);
+        $november = $this->invoiceFor($client, '2026-11');
+        $this->assertSame(16000.0, $balance->debt());
+        $this->assertSame(0.0, $balance->advance());
+        $this->assertSame(48000.0, $balance->paidFor($october->fresh()));
+        $this->assertSame(32000.0, $balance->paidFor($november));
+        $this->assertSame(ClientInvoice::STATUS_PAID, $balance->statusFor($october->fresh()));
+        $this->assertSame(ClientInvoice::STATUS_PARTIAL, $balance->statusFor($november));
+
+        $this->asVendor()->get(route('settlements.show', $client))
+            ->assertOk()
+            ->assertSee('Клиент должен всего')
+            ->assertSee('16 000')
+            ->assertSee('Частично')
+            ->assertSee('Оплачен');
+    }
+
+    public function test_overpayment_becomes_advance_and_covers_next_invoice(): void
+    {
+        $client = $this->client();
+        $this->issue($client, '10 000', '2026-10');
+        $this->pay($client, '14 000', '2026-10-20');
+
+        $balance = app(ClientLedger::class)->forClient($client);
+        $this->assertSame(0.0, $balance->debt());
+        $this->assertSame(4000.0, $balance->advance());
+
+        $this->issue($client, '10 000');
+        $balance = app(ClientLedger::class)->forClient($client);
+        $this->assertSame(4000.0, $balance->paidFor($this->invoiceFor($client, '2026-11')));
+        $this->assertSame(6000.0, $balance->debt());
+    }
+
+    public function test_invoice_with_money_cannot_be_unissued_but_can_be_edited(): void
+    {
+        $client = $this->client();
+        $this->issue($client, '10 000');
+        $this->pay($client, '3 000', '2026-11-02');
+
+        $this->asVendor()->get(route('settlements.show', $client))->assertDontSee('Отменить выставление');
+        $this->asVendor()->post(route('settlements.unissue', $client))->assertSessionHasErrors('invoice');
+        $this->assertNotNull($this->invoiceFor($client, '2026-11')->number);
+
+        // Уменьшили сумму ниже оплаченного: лишнее стало авансом.
+        $this->asVendor()->post(route('settlements.save', $client), ['amount' => '2 000', 'action' => 'save']);
+        $this->assertSame(1000.0, app(ClientLedger::class)->forClient($client)->advance());
+    }
+
+    public function test_deleting_payment_respreads_the_rest(): void
+    {
+        $client = $this->client();
+        $this->issue($client, '10 000');
+        $this->pay($client, '10 000', '2026-11-02');
+        $payment = ClientPayment::where('client_id', $client->id)->first();
+
+        $this->asVendor()->delete(route('settlements.payments.destroy', [$client, $payment]))
+            ->assertSessionHas('success', 'Оплата удалена');
+
+        $this->assertSame(10000.0, app(ClientLedger::class)->forClient($client)->debt());
+    }
+
+    public function test_payment_of_another_client_cannot_be_deleted_through_this_one(): void
+    {
+        $one = $this->client();
+        $two = $this->client();
+        $this->pay($two, '500', '2026-11-02');
+        $payment = ClientPayment::where('client_id', $two->id)->first();
+
+        $this->asVendor()->delete(route('settlements.payments.destroy', [$one, $payment]))->assertNotFound();
+        $this->assertNotNull($payment->fresh());
+    }
+
+    public function test_payment_validation(): void
+    {
+        $client = $this->client();
+
+        $this->pay($client, '', '2026-11-02')->assertSessionHasErrors('payment_amount');
+        $this->pay($client, '0', '2026-11-02')->assertSessionHasErrors('payment_amount');
+        $this->pay($client, '100', '2026-11-04')->assertSessionHasErrors('paid_on');
+        $this->asVendor()->post(route('settlements.payments.store', $client), [
+            'payment_amount' => '100', 'paid_on' => '2026-11-02', 'method' => 'card',
+        ])->assertSessionHasErrors('method');
+
+        $this->assertSame(0, ClientPayment::where('client_id', $client->id)->count());
+    }
+
+    public function test_head_accountant_cannot_take_payment_for_foreign_client(): void
+    {
+        $this->tenant->setSettlementsEnabled(true);
+        $chief = $this->employee(Role::HEAD_ACCOUNTANT);
+        $chief->modules()->sync([$this->moduleId()]);
+        $foreign = $this->client(['responsible_employee_id' => $this->admin->id]);
+
+        $this->actingAs($chief->fresh(), 'employee')->post(route('settlements.payments.store', $foreign), [
+            'payment_amount' => '100', 'paid_on' => '2026-11-02', 'method' => ClientPayment::BANK,
+        ])->assertNotFound();
+    }
+
+    public function test_cards_count_money_by_payment_date_debt_and_overdue(): void
+    {
+        $active = $this->client(['name' => 'Действующий']);
+        $gone   = $this->client(['name' => 'Ушедший']);
+
+        // Ушедший оставил долг за сентябрь: срок оплаты 11.09, к 03.11 просрочка больше 30 дней.
+        Carbon::setTestNow('2026-09-01 10:00:00');
+        $this->issue($gone, '7 000', '2026-09');
+        Carbon::setTestNow('2026-11-03 10:00:00');
+        $gone->update(['is_active' => false]);
+
+        $this->issue($active, '20 000');
+        $this->pay($active, '5 000', '2026-10-30');   // октябрьские деньги в ноябрь не идут
+        $this->pay($active, '10 000', '2026-11-02');
+
+        $this->asVendor()->get(route('settlements.index'))
+            ->assertOk()
+            ->assertDontSee('Ушедший')
+            ->assertSeeInOrder(['Выставлено', '20 000', '1 счёт из 1'])
+            ->assertSeeInOrder(['Пришло денег', '10 000', '50% от выставленного'])
+            ->assertSeeInOrder(['Дебиторка', '12 000'])
+            ->assertSeeInOrder(['Просрочено больше 30 дней', '7 000', '1 клиент'])
+            ->assertSeeInOrder(['Не выставлено', '0']);
+    }
+
+    // ── Долг на начало ────────────────────────────────────────────────────
+
+    public function test_opening_debt_is_paid_first_and_counts_in_debt(): void
+    {
+        $client = $this->client(['name' => 'С долгом до Kubik']);
+        $this->opening($client, 'debt', '25 000', '2026-11-01')->assertSessionHas('success', 'Долг на начало сохранён');
+        $this->issue($client, '48 000');
+
+        $balance = app(ClientLedger::class)->forClient($client);
+        $this->assertSame(73000.0, $balance->debt());
+
+        // 30 000: 25 000 закрывают долг на начало, 5 000 уходят в ноябрь.
+        $this->pay($client, '30 000', '2026-11-02');
+        $balance = app(ClientLedger::class)->forClient($client);
+        $this->assertSame(0.0, $balance->openingDebt());
+        $this->assertSame(5000.0, $balance->paidFor($this->invoiceFor($client, '2026-11')));
+        $this->assertSame(43000.0, $balance->debt());
+
+        $this->asVendor()->get(route('settlements.show', $client))
+            ->assertOk()
+            ->assertSee('Долг на начало')
+            ->assertSee('на 01.11.2026');
+        $this->asVendor()->get(route('settlements.index'))->assertSeeInOrder(['Дебиторка', '43 000']);
+    }
+
+    public function test_opening_debt_alone_counts_without_invoices(): void
+    {
+        $client = $this->client();
+        $this->opening($client, 'debt', '12 000', '2026-09-01');
+
+        $balance = app(ClientLedger::class)->forClient($client);
+        $this->assertSame(12000.0, $balance->debt());
+        // С 01.09 прошло больше 30 дней.
+        $this->assertSame(12000.0, $balance->overdue());
+
+        $this->asVendor()->get(route('settlements.show', $client))->assertSee('Не оплачен');
+    }
+
+    public function test_opening_advance_goes_into_first_invoice(): void
+    {
+        $client = $this->client();
+        $this->opening($client, 'advance', '3 000', '2026-11-01')->assertSessionHas('success', 'Аванс на начало сохранён');
+        $this->assertSame(3000.0, app(ClientLedger::class)->forClient($client)->advance());
+
+        $this->issue($client, '10 000');
+        $balance = app(ClientLedger::class)->forClient($client);
+        $this->assertSame(3000.0, $balance->paidFor($this->invoiceFor($client, '2026-11')));
+        $this->assertSame(7000.0, $balance->debt());
+    }
+
+    public function test_opening_can_be_changed_and_removed(): void
+    {
+        $client = $this->client();
+        $this->opening($client, 'debt', '5 000', '2026-11-01');
+        $this->opening($client, 'debt', '6 000', '2026-10-01');
+        $this->assertSame(1, ClientOpeningBalance::where('client_id', $client->id)->count());
+        $this->assertSame(6000.0, app(ClientLedger::class)->forClient($client)->debt());
+
+        $this->opening($client, 'debt', '', '2026-10-01')->assertSessionHas('success', 'Долг на начало убран');
+        $this->assertSame(0, ClientOpeningBalance::where('client_id', $client->id)->count());
+    }
+
+    public function test_opening_validation(): void
+    {
+        $client = $this->client();
+
+        $this->opening($client, 'debt', '1 000', '2026-11-04')->assertSessionHasErrors('opening_as_of');
+        $this->opening($client, 'loan', '1 000', '2026-11-01')->assertSessionHasErrors('opening_kind');
+        $this->opening($client, 'debt', 'много', '2026-11-01')->assertSessionHasErrors('opening_amount');
+        $this->assertSame(0, ClientOpeningBalance::where('client_id', $client->id)->count());
+    }
+
+    private function opening(Client $client, string $kind, string $amount, string $date)
+    {
+        return $this->asVendor()->post(route('settlements.opening', $client), [
+            'opening_kind' => $kind, 'opening_amount' => $amount, 'opening_as_of' => $date,
+        ]);
+    }
+
+    private function issue(Client $client, string $amount, string $month = '2026-11'): void
+    {
+        $this->asVendor()->post(route('settlements.save', [$client, 'month' => $month]), ['amount' => $amount, 'action' => 'issue'])
+            ->assertSessionHasNoErrors();
+    }
+
+    private function pay(Client $client, string $amount, string $date)
+    {
+        return $this->asVendor()->post(route('settlements.payments.store', $client), [
+            'payment_amount' => $amount, 'paid_on' => $date, 'method' => ClientPayment::BANK,
+        ]);
+    }
+
+    private function invoiceFor(Client $client, string $month): ClientInvoice
+    {
+        return ClientInvoice::where('client_id', $client->id)->where('period', $month . '-01')->firstOrFail();
     }
 
     // ── Помощники ─────────────────────────────────────────────────────────

@@ -156,6 +156,10 @@ Route::middleware('auth:employee')->group(function () {
         Route::get('/{client}', [ClientSettlementsController::class, 'show'])->whereNumber('client')->name('show');
         Route::post('/{client}', [ClientSettlementsController::class, 'save'])->whereNumber('client')->name('save');
         Route::post('/{client}/unissue', [ClientSettlementsController::class, 'unissue'])->whereNumber('client')->name('unissue');
+        Route::post('/{client}/payments', [ClientSettlementsController::class, 'storePayment'])->whereNumber('client')->name('payments.store');
+        Route::post('/{client}/opening', [ClientSettlementsController::class, 'saveOpening'])->whereNumber('client')->name('opening');
+        Route::delete('/{client}/payments/{payment}', [ClientSettlementsController::class, 'destroyPayment'])
+            ->whereNumber('client')->whereNumber('payment')->name('payments.destroy');
     });
 
     // Страница руководителя (только роль manager, вне системы модулей)

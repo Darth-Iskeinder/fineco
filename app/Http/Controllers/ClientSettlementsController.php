@@ -3,7 +3,11 @@
 namespace App\Http\Controllers;
 
 use App\Models\Client;
+use App\Models\ClientInvoice;
+use App\Models\ClientOpeningBalance;
+use App\Models\ClientPayment;
 use App\Services\Settlements\ClientInvoices;
+use App\Services\Settlements\ClientLedger;
 use App\Services\Settlements\SettlementsAccess;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
@@ -12,7 +16,10 @@ use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 /**
- * Раздел «Расчёты с клиентами», этап 1: счёт клиенту за месяц.
+ * Раздел «Расчёты с клиентами»: счета клиентам за месяц и оплаты.
+ *
+ * Оплата вносится на клиента и раскладывается по счетам от старого к новому,
+ * лишнее остаётся авансом (ClientLedger).
  *
  * Кто видит раздел и каких клиентов, см. SettlementsAccess. Остальным пункта в меню нет,
  * а страницы отвечают 404. Чужой клиент тоже 404.
@@ -21,8 +28,10 @@ use Illuminate\View\View;
  */
 class ClientSettlementsController extends Controller
 {
-    public function __construct(private readonly ClientInvoices $invoices)
-    {
+    public function __construct(
+        private readonly ClientInvoices $invoices,
+        private readonly ClientLedger $ledger,
+    ) {
     }
 
     /** Виден ли раздел текущему сотруднику, см. SettlementsAccess. */
@@ -35,16 +44,31 @@ class ClientSettlementsController extends Controller
     {
         $this->allowedOnly();
 
+        $viewer = auth('employee')->user();
         $period = ClientInvoices::currentPeriod();
-        $rows   = $this->invoices->rows($period, auth('employee')->user());
+        $rows   = $this->invoices->rows($period, $viewer);
         $issued = $rows->filter(fn (array $r) => $r['invoice']?->isIssued());
 
+        // Дебиторка по всем, у кого были деньги, а не только по строкам списка:
+        // долг ушедшего клиента тоже долг.
+        $withMoney = $this->ledger->clientsWithMoney($viewer);
+        $balances  = $this->ledger->forClients($withMoney->merge($rows->map(fn (array $r) => $r['client']->id)));
+        $debtors   = $withMoney->map(fn (int $id) => $balances[$id]);
+        $issuedSum = $issued->sum(fn (array $r) => (float) $r['invoice']->total);
+        $received  = $this->ledger->receivedIn($period, $withMoney);
+
         return view('settlements.index', [
-            'period'      => $period,
-            'month'       => ClientInvoices::monthName($period),
-            'rows'        => $rows,
-            'issuedCount' => $issued->count(),
-            'issuedSum'   => $issued->sum(fn (array $r) => (float) $r['invoice']->total),
+            'period'       => $period,
+            'month'        => ClientInvoices::monthName($period),
+            'rows'         => $rows,
+            'balances'     => $balances,
+            'issuedCount'  => $issued->count(),
+            'issuedSum'    => $issuedSum,
+            'received'     => $received,
+            'receivedPct'  => $issuedSum > 0 ? (int) round($received / $issuedSum * 100) : null,
+            'debt'         => $debtors->sum(fn ($b) => $b->debt()),
+            'overdue'      => $debtors->sum(fn ($b) => $b->overdue()),
+            'overdueCount' => $debtors->filter(fn ($b) => $b->overdue() > 0)->count(),
         ]);
     }
 
@@ -55,13 +79,16 @@ class ClientSettlementsController extends Controller
         $period = $this->period($request);
 
         return view('settlements.show', [
-            'client'  => $client->load('responsibleEmployee:id,full_name'),
-            'period'  => $period,
-            'month'   => ClientInvoices::monthName($period),
-            'invoice' => $this->invoices->forMonth($client, $period),
-            'hint'    => $this->invoices->hintFor($client, $period),
-            'history' => $this->invoices->history($client),
-            'current' => $period->equalTo(ClientInvoices::currentPeriod()),
+            'client'   => $client->load('responsibleEmployee:id,full_name'),
+            'period'   => $period,
+            'month'    => ClientInvoices::monthName($period),
+            'invoice'  => $this->invoices->forMonth($client, $period),
+            'hint'     => $this->invoices->hintFor($client, $period),
+            'history'  => $this->invoices->history($client),
+            'balance'  => $this->ledger->forClient($client),
+            'payments' => ClientPayment::query()->with('author:id,full_name')
+                ->where('client_id', $client->id)->orderByDesc('paid_on')->orderByDesc('id')->get(),
+            'today'    => ClientInvoices::today(),
         ]);
     }
 
@@ -92,13 +119,103 @@ class ClientSettlementsController extends Controller
 
         $period  = $this->period($request);
         $invoice = $this->invoices->forMonth($client, $period);
+        $back    = redirect()->route('settlements.show', [$client, 'month' => $period->format('Y-m')]);
 
-        if ($invoice->exists && $invoice->isIssued()) {
-            $this->invoices->unissue($invoice);
+        if (!$invoice->exists || !$invoice->isIssued()) {
+            return $back;
         }
 
-        return redirect()->route('settlements.show', [$client, 'month' => $period->format('Y-m')])
-            ->with('success', 'Счёт снова не выставлен');
+        // На счёт уже легли деньги: отмена переложила бы их молча в другой счёт.
+        if ($this->ledger->forClient($client)->paidFor($invoice) > 0) {
+            return $back->withErrors(['invoice' => 'На этот счёт уже легла оплата, отменить его нельзя. Поправьте сумму: лишнее станет авансом.']);
+        }
+
+        $this->invoices->unissue($invoice);
+
+        return $back->with('success', 'Счёт снова не выставлен');
+    }
+
+    /** Принять оплату от клиента. По счетам она раскладывается сама, от старого к новому. */
+    public function storePayment(Request $request, Client $client): RedirectResponse
+    {
+        $this->allowedOnly($client);
+
+        $data = $request->validate([
+            'paid_on' => ['required', 'date_format:Y-m-d', 'after_or_equal:2020-01-01', 'before_or_equal:' . ClientInvoices::today()->toDateString()],
+            'method'  => ['required', 'in:' . implode(',', array_keys(ClientPayment::METHODS))],
+        ], [
+            'paid_on.required'        => 'Укажите дату оплаты',
+            'paid_on.before_or_equal' => 'Дата оплаты не может быть в будущем',
+            'paid_on.*'               => 'Дата оплаты записана непонятно',
+            'method.*'                => 'Выберите: банк или касса',
+        ]);
+
+        // Своё имя поля: у счёта на той же странице есть «amount», и после ошибки
+        // в оплате old('amount') подставился бы в сумму счёта.
+        $amount = $this->parseMoney($request->input('payment_amount'), 'payment_amount');
+
+        if (!($amount > 0)) {
+            throw ValidationException::withMessages(['payment_amount' => 'Впишите сумму оплаты']);
+        }
+
+        ClientPayment::create([
+            'client_id'  => $client->id,
+            'paid_on'    => $data['paid_on'],
+            'amount'     => $amount,
+            'method'     => $data['method'],
+            'created_by' => auth('employee')->id(),
+        ]);
+
+        return redirect()->route('settlements.show', [$client, 'month' => $this->period($request)->format('Y-m')])
+            ->with('success', 'Оплата принята: ' . ClientInvoice::money($amount) . ' сом');
+    }
+
+    /**
+     * Долг или аванс клиента на начало работы в Kubik, одной суммой с датой.
+     * Пустая сумма убирает его. Оплаты по нему перераскладываются сами.
+     */
+    public function saveOpening(Request $request, Client $client): RedirectResponse
+    {
+        $this->allowedOnly($client);
+
+        $data = $request->validate([
+            'opening_kind'  => ['required', 'in:debt,advance'],
+            'opening_as_of' => ['required', 'date_format:Y-m-d', 'after_or_equal:2020-01-01', 'before_or_equal:' . ClientInvoices::today()->toDateString()],
+        ], [
+            'opening_kind.*'                => 'Выберите: долг или аванс',
+            'opening_as_of.required'        => 'Укажите, на какую дату',
+            'opening_as_of.before_or_equal' => 'Дата не может быть в будущем',
+            'opening_as_of.*'               => 'Дата записана непонятно',
+        ]);
+
+        $amount = $this->parseMoney($request->input('opening_amount'), 'opening_amount');
+        $back   = redirect()->route('settlements.show', [$client, 'month' => $this->period($request)->format('Y-m')]);
+
+        if (!($amount > 0)) {
+            ClientOpeningBalance::query()->where('client_id', $client->id)->delete();
+
+            return $back->with('success', 'Долг на начало убран');
+        }
+
+        ClientOpeningBalance::query()->updateOrCreate(['client_id' => $client->id], [
+            'amount'     => $data['opening_kind'] === 'advance' ? -$amount : $amount,
+            'as_of'      => $data['opening_as_of'],
+            'created_by' => auth('employee')->id(),
+        ]);
+
+        return $back->with('success', ($data['opening_kind'] === 'advance' ? 'Аванс' : 'Долг') . ' на начало сохранён');
+    }
+
+    /** Удалить ошибочную оплату. Остальные сами перераскладываются по счетам. */
+    public function destroyPayment(Request $request, Client $client, ClientPayment $payment): RedirectResponse
+    {
+        $this->allowedOnly($client);
+        abort_unless($payment->client_id === $client->id, 404);
+
+        $payment->delete();
+
+        return redirect()->route('settlements.show', [$client, 'month' => $this->period($request)->format('Y-m')])
+            ->with('success', 'Оплата удалена');
     }
 
     /** Нет доступа к разделу или клиент не свой: 404, как будто страницы нет. */
@@ -129,7 +246,7 @@ class ClientSettlementsController extends Controller
     }
 
     /** «20 000», «20000,50», «20 000.5» → число. Пусто → null. */
-    private function parseMoney(mixed $value): ?float
+    private function parseMoney(mixed $value, string $field = 'amount'): ?float
     {
         $clean = str_replace([' ', "\u{00A0}", "\u{202F}", ','], ['', '', '', '.'], trim((string) $value));
 
@@ -138,7 +255,7 @@ class ClientSettlementsController extends Controller
         }
 
         if (!is_numeric($clean) || (float) $clean < 0 || (float) $clean >= 1e10) {
-            throw ValidationException::withMessages(['amount' => 'Сумма записана непонятно: ' . $value]);
+            throw ValidationException::withMessages([$field => 'Сумма записана непонятно: ' . $value]);
         }
 
         return round((float) $clean, 2);
