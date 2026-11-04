@@ -3,11 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\Client;
-use App\Models\Tenant;
 use App\Services\Settlements\ClientInvoices;
 use App\Services\Settlements\SettlementsAccess;
-use App\Support\Impersonation;
-use App\Support\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -48,8 +45,6 @@ class ClientSettlementsController extends Controller
             'rows'        => $rows,
             'issuedCount' => $issued->count(),
             'issuedSum'   => $issued->sum(fn (array $r) => (float) $r['invoice']->total),
-            'vendor'      => Impersonation::isActive(),
-            'openToManager' => (bool) Tenant::find(TenantContext::id())?->settlementsEnabled(),
         ]);
     }
 

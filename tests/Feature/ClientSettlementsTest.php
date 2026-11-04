@@ -76,7 +76,13 @@ class ClientSettlementsTest extends TestCase
         $this->asVendor()->get(route('settlements.index'))
             ->assertOk()
             ->assertSee('Счета за ноябрь 2026')
-            ->assertSee('Фирме раздел пока не открыт, его видите только вы.');
+            ->assertDontSee('Фирме раздел');
+
+        // На показе у счёта две кнопки: «К списку» и «Выставить счёт», без черновика.
+        $this->asVendor()->get(route('settlements.show', $this->client()))
+            ->assertOk()
+            ->assertSee('Выставить счёт')
+            ->assertDontSee('Сохранить черновик');
     }
 
     public function test_nobody_but_vendor_sees_it_until_the_firm_flag(): void

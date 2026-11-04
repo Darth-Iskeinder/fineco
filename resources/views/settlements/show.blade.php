@@ -103,7 +103,6 @@
             @if ($issued)
                 <button type="submit" name="action" value="save" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Сохранить изменения</button>
             @else
-                <button type="submit" name="action" value="save" class="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Сохранить черновик</button>
                 <button type="submit" name="action" value="issue" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Выставить счёт</button>
             @endif
         </div>

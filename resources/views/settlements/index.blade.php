@@ -10,7 +10,7 @@
 
 <div class="space-y-4">
 
-    <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 px-6 py-4 space-y-1">
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 px-6 py-4">
         <div class="flex flex-wrap items-baseline justify-between gap-2">
             <h2 class="text-[15px] font-semibold text-slate-800">Счета за {{ $month }} {{ $period->year }}</h2>
             <span class="text-sm text-slate-500">
@@ -18,10 +18,6 @@
                 на <b class="font-semibold text-slate-900 tabular-nums whitespace-nowrap">{{ Invoice::money($issuedSum) }} сом</b>
             </span>
         </div>
-        <p class="text-sm text-slate-500">Сумма нового счёта берётся из прошлого. Новому клиенту её вписывают один раз.</p>
-        @if ($vendor)
-            <p class="text-xs text-slate-400">{{ $openToManager ? 'Фирме раздел открыт: его видят руководство и сотрудники с доступом к модулю.' : 'Фирме раздел пока не открыт, его видите только вы.' }}</p>
-        @endif
     </div>
 
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
