@@ -649,6 +649,21 @@ class ClientSettlementsTest extends TestCase
             ->assertSee('показать, кому');
     }
 
+    public function test_list_has_column_filters_and_sorting(): void
+    {
+        $this->client(['name' => 'Альфа', 'responsible_employee_id' => $this->admin->id]);
+
+        $this->asVendor()->get(route('settlements.index'))
+            ->assertOk()
+            ->assertSee("toggleFilterMenu('responsible'", false)
+            ->assertSee("toggleFilterMenu('debtKind'", false)
+            ->assertSee("toggleFilterMenu('status'", false)
+            ->assertSee("toggleSort('sum')", false)
+            ->assertSee("toggleSort('debt')", false)
+            ->assertSee('settlements.listFilters.' . $this->tenant->id . '.' . $this->admin->id)
+            ->assertSee('data-index="0"', false);
+    }
+
     public function test_history_shows_missed_month(): void
     {
         $client = $this->client();

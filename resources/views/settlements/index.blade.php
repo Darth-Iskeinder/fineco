@@ -11,15 +11,31 @@
 @php
     $lateCount   = $rows->filter(fn ($r) => $balances[$r['client']->id]->overdue() > 0)->count();
     $bulkReopen  = $errors->has('bulk') && $bulkLines !== [];
-    // Для фильтра и поиска на экране: состояние, просрочка и имя каждой строки.
-    $rowMeta = $rows->map(fn ($r) => [
-        'state' => $r['invoice']?->isIssued() ? 'yes' : 'no',
-        'late'  => $balances[$r['client']->id]->overdue() > 0,
-        'name'  => mb_strtolower($r['client']->name),
-    ])->values();
+    // Для фильтров, поиска и сортировки на экране: всё, по чему отбирают строку.
+    // index совпадает с порядком строк в таблице, по нему их и переставляем.
+    $rowMeta = $rows->values()->map(function ($r, $index) use ($balances) {
+        $balance = $balances[$r['client']->id];
+        $invoice = $r['invoice'];
+
+        return [
+            'index'       => $index,
+            'state'       => $invoice?->isIssued() ? 'yes' : 'no',
+            'late'        => $balance->overdue() > 0,
+            'name'        => mb_strtolower($r['client']->name),
+            'responsible' => $r['client']->responsibleEmployee?->full_name ?? '',
+            'status'      => $balance->statusFor($invoice),
+            'debtKind'    => $balance->debt() > 0 ? 'debt' : ($balance->advance() > 0 ? 'advance' : 'none'),
+            'sum'         => (float) ($invoice ? $invoice->total : $r['suggested']),
+            'debt'        => $balance->debt() - $balance->advance(),
+        ];
+    });
+    $statusLabels = collect(Invoice::STATUSES)->map(fn ($s) => $s['label']);
+    // Память фильтров своя у каждого сотрудника в каждой фирме: компьютер бывает общий,
+    // а вендор ходит по разным фирмам.
+    $filtersKey = 'settlements.listFilters.' . \App\Support\TenantContext::id() . '.' . auth('employee')->id();
 @endphp
 
-<div class="space-y-4" x-data="settlementsBoard(@js($bulkLines), @js($bulkReopen), @js($rowMeta))">
+<div class="space-y-4" x-data="settlementsBoard(@js($bulkLines), @js($bulkReopen), @js($rowMeta), @js($statusLabels), @js($filtersKey))">
 
     @php
         $notIssued = $rows->count() - $issuedCount;
@@ -54,7 +70,7 @@
                 @if (!empty($card['filter']))
                     {{-- Карточка включает фильтр списка под ней --}}
                     <button type="button" class="bg-white px-4 py-3 text-left hover:bg-slate-50" data-card="{{ $card['label'] }}"
-                            @click="filter = @js($card['filter']); $refs.table.scrollIntoView({ behavior: 'smooth', block: 'start' })">
+                            @click="quickFilter = @js($card['filter']); $refs.table.scrollIntoView({ behavior: 'smooth', block: 'start' })">
                 @else
                     <div class="bg-white px-4 py-3" data-card="{{ $card['label'] }}">
                 @endif
@@ -82,29 +98,39 @@
     <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden" x-ref="table">
         <div class="px-6 py-3 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100">
             <div class="flex flex-wrap gap-2" role="group" aria-label="Фильтр">
-                @foreach ($filters as $key => [$label, $count])
-                    <button type="button" @click="filter = @js($key)" data-filter="{{ $key }}"
+                {{-- Не $key: это имя читает partials.column-filter ниже, а подключённый шаблон
+                     видит переменные страницы, и воронка досталась бы чужой колонке. --}}
+                @foreach ($filters as $quickKey => [$label, $count])
+                    <button type="button" @click="quickFilter = @js($quickKey)" data-filter="{{ $quickKey }}"
                             class="inline-block whitespace-nowrap rounded-full border px-3 py-1 text-[13px] font-medium"
-                            :class="filter === @js($key) ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 text-slate-600'">{{ $label }} {{ $count }}</button>
+                            :class="quickFilter === @js($quickKey) ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 text-slate-600'">{{ $label }} {{ $count }}</button>
                 @endforeach
             </div>
-            <input type="search" x-model="search" placeholder="Найти клиента" aria-label="Найти клиента"
-                   class="w-full sm:w-72 rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:border-indigo-500 focus:ring-indigo-500">
+            <div class="flex flex-wrap items-center gap-3">
+                <button type="button" x-show="hasListFilters()" style="display: none;" @click="resetListFilters()" data-filters-reset
+                        class="text-[13px] text-slate-500 hover:text-indigo-600 underline decoration-dotted underline-offset-2">Сбросить фильтры</button>
+                <input type="search" x-model="search" placeholder="Найти клиента" aria-label="Найти клиента"
+                       class="w-full sm:w-72 rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:border-indigo-500 focus:ring-indigo-500">
+            </div>
         </div>
-        <div class="overflow-x-auto">
+        @include('partials.column-filter-chips', ['class' => 'px-6 py-2 border-b border-slate-100 flex flex-wrap items-center gap-1.5'])
+        {{-- Таблица прокручивается внутри своего блока, а шапка в нём липкая: карточки
+             с цифрами и фильтры остаются на виду, пока листают клиентов. Высоту блока
+             считаем от его верха до низа окна (fitTable), классом её не задать. --}}
+        <div class="overflow-auto" x-ref="scroller" :style="tableMaxHeight ? 'max-height:' + tableMaxHeight + 'px' : ''">
             <table class="w-full text-sm">
                 <thead>
-                    <tr class="border-b border-slate-100 text-left text-xs font-medium text-slate-500 whitespace-nowrap">
-                        <th class="px-6 py-3">Клиент</th>
-                        <th class="px-3 py-3">Ответственный</th>
-                        <th class="px-3 py-3 text-right">Сумма, сом</th>
-                        <th class="px-3 py-3 text-right">Долг</th>
-                        <th class="px-3 py-3">Счёт за {{ $month }}</th>
-                        <th class="px-3 py-3">Статус</th>
-                        <th class="px-6 py-3"></th>
+                    <tr class="text-left text-xs font-medium text-slate-500 whitespace-nowrap">
+                        <th class="sticky top-0 z-10 bg-white border-b border-slate-100 px-6 py-3">Клиент</th>
+                        @include('partials.column-filter', ['key' => 'responsible', 'title' => 'Ответственный', 'plain' => true, 'pad' => 'px-3 py-3', 'thClass' => 'sticky top-0 z-10 bg-white border-b border-slate-100'])
+                        @include('partials.column-filter', ['key' => null, 'sort' => 'sum', 'title' => 'Сумма, сом', 'plain' => true, 'pad' => 'px-3 py-3', 'align' => 'right', 'thClass' => 'sticky top-0 z-10 bg-white border-b border-slate-100'])
+                        @include('partials.column-filter', ['key' => 'debtKind', 'sort' => 'debt', 'title' => 'Долг', 'plain' => true, 'pad' => 'px-3 py-3', 'align' => 'right', 'thClass' => 'sticky top-0 z-10 bg-white border-b border-slate-100'])
+                        <th class="sticky top-0 z-10 bg-white border-b border-slate-100 px-3 py-3">Счёт за {{ $month }}</th>
+                        @include('partials.column-filter', ['key' => 'status', 'title' => 'Статус', 'plain' => true, 'pad' => 'px-3 py-3', 'thClass' => 'sticky top-0 z-10 bg-white border-b border-slate-100'])
+                        <th class="sticky top-0 z-10 bg-white border-b border-slate-100 px-6 py-3"></th>
                     </tr>
                 </thead>
-                <tbody class="divide-y divide-slate-100">
+                <tbody class="divide-y divide-slate-100" x-ref="tbody">
                     @forelse ($rows as $row)
                         @php
                             $client  = $row['client'];
@@ -115,7 +141,7 @@
                             $status  = Invoice::STATUSES[$balance->statusFor($invoice)];
                             $url     = route('settlements.show', $client);
                         @endphp
-                        <tr class="hover:bg-slate-50" data-client="{{ $client->id }}"
+                        <tr class="hover:bg-slate-50" data-client="{{ $client->id }}" data-index="{{ $loop->index }}"
                             x-show="rowShown(rowMeta[{{ $loop->index }}])">
                             <td class="px-6 py-3">
                                 <a href="{{ $url }}" class="font-medium text-slate-900 hover:text-indigo-700">{{ $client->name }}</a>
@@ -161,7 +187,7 @@
                         </tr>
                     @endforelse
                     @if ($rows->isNotEmpty())
-                        <tr x-show="!anyRowShown()" style="display: none;">
+                        <tr x-show="!anyRowShown()" style="display: none;" data-empty-row>
                             <td colspan="7" class="px-6 py-10 text-center text-slate-500">В этом списке никого нет</td>
                         </tr>
                     @endif
@@ -169,6 +195,8 @@
             </table>
         </div>
     </div>
+
+    @include('partials.column-filter-menu')
 
     @if ($bulkLines !== [])
         {{-- Окно «Выставить всем». Ничего не выставляется, пока не нажали кнопку внизу. --}}
@@ -249,36 +277,203 @@
 @endsection
 
 @push('scripts')
+@include('partials.column-filter-engine')
 <script>
     /**
-     * Список «Расчёты с клиентами»: фильтр, поиск и окно «Выставить всем».
-     * Фильтр и поиск только прячут строки на экране, данные не перезапрашивают.
+     * Воронки в колонках таблицы расчётов. Движок общий с БухЗадачником
+     * (partials/column-filter-engine), значения и подписи свои.
      */
-    function settlementsBoard(lines, reopen, rowMeta) {
+    const SETTLEMENT_FACETS = [
+        { key: 'responsible', title: 'Ответственный' },
+        { key: 'debtKind',    title: 'Долг',   order: ['debt', 'advance', 'none'] },
+        { key: 'status',      title: 'Статус', order: ['draft', 'issued', 'partial', 'paid'] },
+    ];
+
+    const SETTLEMENT_DEBT_LABELS = { debt: 'Есть долг', advance: 'Аванс', none: 'Без долга' };
+
+    /**
+     * Список «Расчёты с клиентами»: быстрые кнопки, поиск, воронки, сортировка
+     * и окно «Выставить всем». Всё на экране, данные не перезапрашиваем.
+     */
+    function settlementsBoard(lines, reopen, rowMeta, statusLabels, filtersKey) {
         const parseMoney = (value) => {
             const n = parseFloat(String(value ?? '').replace(/[\s\u00A0\u202F]/g, '').replace(',', '.'));
             return isNaN(n) ? 0 : n;
         };
 
-        return {
-            filter: 'all',
+        return withColumnFilters(SETTLEMENT_FACETS, {
+            quickFilter: 'all',
             search: '',
+            sortBy: null,
+            sortDir: null,
+            tableMaxHeight: null,
             bulkOpen: reopen,
             sending: false,
             lines: lines.map(l => ({ ...l, blank: !l.on && !(parseMoney(l.amount) > 0) })),
             rowMeta: rowMeta,
 
-            rowShown(row) {
+            init() {
+                this.restoreListFilters();
+                this.$nextTick(() => {
+                    this.applySort();
+                    this.fitTable();
+                });
+                window.addEventListener('resize', () => this.fitTable());
+
+                // Кнопки и поиск меняют счётчики в воронках; кнопки ещё и запоминаем.
+                // Поиск не запоминаем: забытая строка поиска выглядит как «клиенты пропали».
+                this.$watch('quickFilter', () => { this.refreshMenuOptions(); this.saveListFilters(); });
+                this.$watch('search', () => this.refreshMenuOptions());
+                this.$watch('filterSearch', () => this.refreshMenuOptions());
+            },
+
+            // --- Воронки: откуда значения и что до них отбирает ---
+
+            get facetSource() {
+                return this.rowMeta;
+            },
+
+            facetEntries(row, key) {
+                if (key === 'status') return [{ value: row.status, label: statusLabels[row.status] }];
+                if (key === 'debtKind') return [{ value: row.debtKind, label: SETTLEMENT_DEBT_LABELS[row.debtKind] }];
+
+                const name = row.responsible.trim();
+                return [{ value: name.toLowerCase(), label: name === '' ? 'Не назначен' : name }];
+            },
+
+            /** Отбор до воронок: быстрые кнопки и поиск. По нему же считаются числа в меню. */
+            matchesBase(row) {
                 const query = this.search.trim().toLowerCase();
                 if (query && !row.name.includes(query)) return false;
-                if (this.filter === 'no' || this.filter === 'yes') return row.state === this.filter;
-                if (this.filter === 'late') return row.late;
+                if (this.quickFilter === 'no' || this.quickFilter === 'yes') return row.state === this.quickFilter;
+                if (this.quickFilter === 'late') return row.late;
                 return true;
+            },
+
+            afterFilterChange() {
+                this.refreshMenuOptions();
+                this.saveListFilters();
+                // Строка выбранных значений над таблицей появляется и пропадает,
+                // верх таблицы сдвигается, и высоту надо пересчитать.
+                this.$nextTick(() => this.fitTable());
+            },
+
+            rowShown(row) {
+                return this.matchesBase(row) && this.matchesFacets(row);
             },
 
             anyRowShown() {
                 return this.rowMeta.some(row => this.rowShown(row));
             },
+
+            hasListFilters() {
+                return this.quickFilter !== 'all' || this.activeFilterCount > 0 || this.sortBy !== null;
+            },
+
+            resetListFilters() {
+                this.clearAllFacets();
+                this.quickFilter = 'all';
+                this.sortBy = null;
+                this.sortDir = null;
+                this.applySort();
+                this.afterFilterChange();
+            },
+
+            // --- Сортировка: больше сверху, меньше сверху, как было ---
+
+            toggleSort(field) {
+                if (this.sortBy !== field) {
+                    this.sortBy = field;
+                    this.sortDir = 'desc';
+                } else {
+                    this.sortDir = this.sortDir === 'desc' ? 'asc' : (this.sortDir === 'asc' ? null : 'desc');
+                    if (!this.sortDir) this.sortBy = null;
+                }
+                this.applySort();
+                this.saveListFilters();
+            },
+
+            /**
+             * Строки нарисованы сервером, поэтому сортируем перестановкой самих строк.
+             * Alpine держится за элементы, а не за их место, x-show на них продолжает
+             * работать. Без сортировки возвращаем порядок сервера.
+             */
+            applySort() {
+                const body = this.$refs.tbody;
+                if (!body) return;
+
+                const order = [...this.rowMeta];
+                if (this.sortBy) {
+                    const sign = this.sortDir === 'asc' ? 1 : -1;
+                    order.sort((a, b) => (a[this.sortBy] - b[this.sortBy]) * sign || a.index - b.index);
+                }
+
+                const rows = new Map([...body.querySelectorAll('tr[data-index]')].map(tr => [Number(tr.dataset.index), tr]));
+                order.forEach(meta => { const tr = rows.get(meta.index); if (tr) body.appendChild(tr); });
+
+                const empty = body.querySelector('tr[data-empty-row]');
+                if (empty) body.appendChild(empty);
+            },
+
+            /**
+             * Высота блока таблицы: от его верха до низа окна, на низком экране не меньше 320.
+             * Под блоком ещё рамка карточки, её нижний отступ и нижний отступ страницы: берём
+             * их из стилей, числом не угадываем, иначе у страницы вылезает своя прокрутка.
+             */
+            fitTable() {
+                const box = this.$refs.scroller;
+                const card = this.$refs.table;
+                if (!box || !card) return;
+
+                const main = card.closest('main');
+                const below = (card.getBoundingClientRect().bottom - box.getBoundingClientRect().bottom)
+                    + parseFloat(getComputedStyle(card).marginBottom || 0)
+                    + parseFloat(main ? getComputedStyle(main).paddingBottom : 0);
+                const top = box.getBoundingClientRect().top + window.scrollY;
+
+                this.tableMaxHeight = Math.max(320, Math.floor(window.innerHeight - top - below));
+            },
+
+            // --- Память фильтров в этом браузере ---
+
+            saveListFilters() {
+                try {
+                    localStorage.setItem(filtersKey, JSON.stringify({
+                        quickFilter: this.quickFilter,
+                        filters: this.filters,
+                        sortBy: this.sortBy,
+                        sortDir: this.sortDir,
+                    }));
+                } catch (e) { /* приватный режим: просто не запоминаем */ }
+            },
+
+            restoreListFilters() {
+                let saved;
+                try {
+                    saved = JSON.parse(localStorage.getItem(filtersKey) || 'null');
+                } catch (e) { return; }
+                if (!saved) return;
+
+                if (['all', 'no', 'yes', 'late'].includes(saved.quickFilter)) {
+                    this.quickFilter = saved.quickFilter;
+                }
+
+                // Только значения, которые сегодня есть в списке: ответственного могли
+                // уволить, и запомненный отбор встретил бы пустой таблицей.
+                if (saved.filters) {
+                    this.facets.forEach(f => {
+                        const alive = new Set(this.rowMeta.flatMap(row => this.facetValues(row, f.key)));
+                        this.filters[f.key] = (saved.filters[f.key] || []).filter(v => alive.has(v));
+                    });
+                }
+
+                if (['sum', 'debt'].includes(saved.sortBy) && ['asc', 'desc'].includes(saved.sortDir)) {
+                    this.sortBy = saved.sortBy;
+                    this.sortDir = saved.sortDir;
+                }
+            },
+
+            // --- Окно «Выставить всем» ---
 
             // Новому клиенту галочка не стоит, пока нет суммы. Вписали сумму, ставим сами,
             // иначе её легко вписать и забыть отметить.
@@ -333,7 +528,7 @@
             checkAll(on) {
                 this.lines.forEach(l => { l.on = on; });
             },
-        };
+        });
     }
 </script>
 @endpush

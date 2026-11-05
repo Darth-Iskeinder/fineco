@@ -20,22 +20,30 @@
      $thClass — дополнительные классы ячейки заголовка (необязательно);
      $show    — выражение Alpine для x-show (необязательно): колонка появляется только
                 когда она осмысленна. Именно x-show, а не x-if: заголовок собирается
-                на сервере один раз, а прятать надо на лету, вместе со своими ячейками. --}}
+                на сервере один раз, а прятать надо на лету, вместе со своими ячейками;
+     $plain   — подпись обычными буквами, без заглавных (необязательно). Для таблиц,
+                где шапка так и написана, например «Расчёты с клиентами»;
+     $pad     — отступы ячейки вместо px-4 py-3 (необязательно): своими классами, а не
+                поверх, иначе два px-* в одной ячейке спорят и побеждает случайный.
+     $key можно не передавать при $sort: тогда у колонки только сортировка, без воронки. --}}
 @php
+    $key     = $key     ?? null;
     $sort    = $sort    ?? null;
     $align   = $align   ?? 'left';
     $wrap    = $wrap    ?? false;
     $thClass = $thClass ?? '';
     $show    = $show    ?? null;
+    $case    = ($plain ?? false) ? '' : 'uppercase tracking-wider';
+    $pad     = $pad     ?? 'px-4 py-3';
 @endphp
 {{-- Класс пишем целиком, а не склейкой «text-» с переменной: сканер Tailwind
      читает исходники текстом и склеенного имени в сборке бы не оказалось. --}}
 <th @if ($show) x-show="{{ $show }}" @endif
-    class="px-4 py-3 {{ $align === 'right' ? 'text-right' : 'text-left' }} text-xs font-medium text-slate-500 uppercase tracking-wider {{ $wrap ? '' : 'whitespace-nowrap' }} {{ $thClass }}">
+    class="{{ $pad }} {{ $align === 'right' ? 'text-right' : 'text-left' }} text-xs font-medium text-slate-500 {{ $case }} {{ $wrap ? '' : 'whitespace-nowrap' }} {{ $thClass }}">
     <div class="inline-flex items-center">
         @if ($sort)
             <button type="button" @click="toggleSort('{{ $sort }}')"
-                    class="group inline-flex items-center gap-1 px-1 py-1 -my-1 rounded uppercase tracking-wider hover:text-slate-700 hover:bg-slate-100 transition-colors"
+                    class="group inline-flex items-center gap-1 px-1 py-1 -my-1 rounded {{ $case }} hover:text-slate-700 hover:bg-slate-100 transition-colors"
                     title="Сортировать">
                 <span>{{ $title }}</span>
                 <span class="inline-flex flex-col leading-[0]">
@@ -44,14 +52,18 @@
                 </span>
             </button>
 
-            {{-- Черта между двумя действиями: видно, что это разные кнопки, а не одна. --}}
-            <span class="mx-1.5 h-3.5 w-px bg-slate-200" aria-hidden="true"></span>
+            @if ($key)
+                {{-- Черта между двумя действиями: видно, что это разные кнопки, а не одна. --}}
+                <span class="mx-1.5 h-3.5 w-px bg-slate-200" aria-hidden="true"></span>
+            @endif
         @endif
+
+        @if ($key)
 
         {{-- Площадь нажатия крупнее самого значка: 28 на 28 против 14 на 14 у иконки.
              Мелкая мишень рядом с сортировкой — это промахи на каждом втором клике. --}}
         <button type="button" @click.stop="toggleFilterMenu('{{ $key }}', $event)"
-                class="inline-flex items-center gap-1 px-1.5 py-1.5 -my-1.5 rounded uppercase tracking-wider hover:text-indigo-600 hover:bg-slate-100 transition-colors"
+                class="inline-flex items-center gap-1 px-1.5 py-1.5 -my-1.5 rounded {{ $case }} hover:text-indigo-600 hover:bg-slate-100 transition-colors"
                 :class="(filters['{{ $key }}'].length || openFilter === '{{ $key }}') ? 'text-indigo-600' : ''"
                 title="Фильтр по колонке">
             @unless ($sort)
@@ -64,5 +76,6 @@
                   class="inline-flex items-center justify-center min-w-[1rem] px-1 rounded-full bg-indigo-600 text-white text-[10px] leading-4"
                   x-text="filters['{{ $key }}'].length"></span>
         </button>
+        @endif
     </div>
 </th>
