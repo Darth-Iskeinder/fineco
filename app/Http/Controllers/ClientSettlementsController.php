@@ -6,12 +6,14 @@ use App\Models\Client;
 use App\Models\ClientInvoice;
 use App\Models\ClientOpeningBalance;
 use App\Models\ClientPayment;
+use App\Services\AutoAudit\AutoAuditClientBoard;
 use App\Services\Settlements\ClientInvoices;
 use App\Services\Settlements\ClientLedger;
 use App\Services\Settlements\SettlementsAccess;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
@@ -69,6 +71,7 @@ class ClientSettlementsController extends Controller
             'debt'         => $debtors->sum(fn ($b) => $b->debt()),
             'overdue'      => $debtors->sum(fn ($b) => $b->overdue()),
             'overdueCount' => $debtors->filter(fn ($b) => $b->overdue() > 0)->count(),
+            'bulkLines'    => $this->bulkLines($rows),
         ]);
     }
 
@@ -84,7 +87,8 @@ class ClientSettlementsController extends Controller
             'month'    => ClientInvoices::monthName($period),
             'invoice'  => $this->invoices->forMonth($client, $period),
             'hint'     => $this->invoices->hintFor($client, $period),
-            'history'  => $this->invoices->history($client),
+            'history'  => $history = $this->invoices->history($client),
+            'missed'   => $this->invoices->missedMonths($history),
             'balance'  => $this->ledger->forClient($client),
             'payments' => ClientPayment::query()->with('author:id,full_name')
                 ->where('client_id', $client->id)->orderByDesc('paid_on')->orderByDesc('id')->get(),
@@ -111,6 +115,122 @@ class ClientSettlementsController extends Controller
         $message = $issue && !$wasIssued ? 'Счёт № ' . $invoice->number . ' выставлен' : 'Сохранено';
 
         return redirect()->route('settlements.show', [$client, 'month' => $period->format('Y-m')])->with('success', $message);
+    }
+
+    /**
+     * «Выставить всем» за текущий месяц. Из окна приходят отмеченные клиенты и их суммы.
+     *
+     * Сервер перепроверяет всё сам: клиент должен быть в списке этого сотрудника и ещё
+     * без счёта. Чужие и лишние id молча отбрасываем. Хоть одна непонятная сумма у
+     * отмеченного клиента, и не выставляем ничего: лучше переспросить, чем выставить
+     * половину пачки.
+     */
+    public function bulk(Request $request): RedirectResponse
+    {
+        $this->allowedOnly();
+
+        $period = ClientInvoices::currentPeriod();
+        $back   = redirect()->route('settlements.index');
+
+        // Кого можно выставить: строки списка этого сотрудника. Идём по ним, а не по
+        // форме: чужие и лишние id так отбрасываются сами, а номера идут по алфавиту (список отсортирован базой).
+        $rows  = $this->invoices->rows($period, auth('employee')->user());
+        $input = (array) $request->input('bulk', []);
+
+        $amounts = [];
+        $already = 0;
+
+        foreach ($rows as $row) {
+            $client = $row['client'];
+            $line   = $input[$client->id] ?? null;
+
+            if (!is_array($line) || empty($line['on'])) {
+                continue;
+            }
+
+            if ($row['invoice']?->isIssued()) {
+                $already++;
+                continue;
+            }
+
+            try {
+                $amount = $this->parseMoney($line['amount'] ?? null, 'bulk');
+            } catch (ValidationException) {
+                throw ValidationException::withMessages(['bulk' => $client->name . ': сумма записана непонятно. Ничего не выставлено.']);
+            }
+
+            if ($amount > 0) {
+                $amounts[$client->id] = $amount;
+            }
+        }
+
+        if ($amounts === []) {
+            return $back->withErrors(['bulk' => $already
+                ? 'Этим клиентам счёт уже выставили, пока окно было открыто'
+                : 'Не отмечено ни одного клиента с суммой']);
+        }
+
+        $result  = $this->invoices->issueMany($period, $amounts, auth('employee')->user());
+        $issued  = $result['issued'];
+        $already += $result['already'];
+
+        $message = 'Выставлено ' . ($issued->count() ? $this->issuedSummary($issued) : 'счетов: 0');
+        if ($already) {
+            $message .= '. Пропущено: ' . $already . ', им счёт уже выставили, пока окно было открыто';
+        }
+
+        return $back->with('success', $message);
+    }
+
+    /**
+     * Строки окна «Выставить всем»: клиенты без выставленного счёта. Сумма из черновика,
+     * иначе из прошлого счёта; галочка у всех, у кого сумма есть. После ошибки окно
+     * открывается снова с тем, что человек уже вписал и отметил.
+     *
+     * @return array<int, array{id: int, name: string, hint: string, was: ?float, amount: string, extra: float, on: bool}>
+     */
+    private function bulkLines(Collection $rows): array
+    {
+        $old = old('bulk');
+
+        return $rows->reject(fn (array $r) => $r['invoice']?->isIssued())->map(function (array $r) use ($old) {
+            $draft  = $r['invoice'];
+            $amount = $draft?->amount ?? $r['suggested'];
+            $extra  = $draft ? round((float) $draft->total - (float) $draft->amount, 2) : 0.0;
+            $id     = $r['client']->id;
+
+            $line = [
+                'id'     => $id,
+                'name'   => $r['client']->name,
+                'hint'   => $draft?->amount !== null ? 'из черновика' : ($r['suggested'] === null ? 'новый клиент' : $r['hint']),
+                'was'    => $r['suggested'] !== null ? (float) $r['suggested'] : null,
+                'amount' => $amount !== null ? ClientInvoice::money($amount) : '',
+                'extra'  => $extra,
+                'on'     => (float) $amount > 0,
+            ];
+
+            if (is_array($old)) {
+                $line['amount'] = (string) ($old[$id]['amount'] ?? $line['amount']);
+                $line['on']     = !empty($old[$id]['on']);
+            }
+
+            return $line;
+        })->values()->all();
+    }
+
+    /** «35 счетов, № 101–135». Если номера не подряд (выставляли параллельно), только число. */
+    private function issuedSummary(Collection $issued): string
+    {
+        $count = $issued->count();
+        $words = AutoAuditClientBoard::count($count, ['счёт', 'счёта', 'счетов']);
+        $min   = $issued->min('number');
+        $max   = $issued->max('number');
+
+        if ($count === 1) {
+            return $words . ', № ' . $min;
+        }
+
+        return $max - $min + 1 === $count ? $words . ', № ' . $min . '–' . $max : $words;
     }
 
     public function unissue(Request $request, Client $client): RedirectResponse

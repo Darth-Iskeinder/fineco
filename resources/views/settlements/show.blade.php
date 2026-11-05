@@ -150,7 +150,28 @@
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-slate-100">
-                                @foreach ($history as $row)
+                                @php
+                                    // Счета и пропущенные месяцы вперемешку, новые сверху.
+                                    $timeline = $history->concat($missed)
+                                        ->sortByDesc(fn ($item) => ($item instanceof Invoice ? $item->period : $item)->format('Y-m'));
+                                @endphp
+                                @foreach ($timeline as $row)
+                                    @if (!$row instanceof Invoice)
+                                        <tr class="hover:bg-slate-50" data-history="{{ $row->format('Y-m') }}" data-missed>
+                                            <td class="px-6 py-2.5 whitespace-nowrap">
+                                                <a href="{{ route('settlements.show', [$client, 'month' => $row->format('Y-m')]) }}" class="text-slate-900 hover:text-indigo-700">
+                                                    {{ mb_convert_case(ClientInvoices::monthName($row), MB_CASE_TITLE) }} {{ $row->year }}
+                                                </a>
+                                            </td>
+                                            <td class="px-3 py-2.5 text-amber-700" colspan="4">
+                                                <a href="{{ route('settlements.show', [$client, 'month' => $row->format('Y-m')]) }}" class="hover:underline">Счёт за этот месяц не выставлен</a>
+                                            </td>
+                                            <td class="px-6 py-2.5">
+                                                <span class="inline-block whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold {{ Invoice::STATUSES[Invoice::STATUS_DRAFT]['class'] }}">{{ Invoice::STATUSES[Invoice::STATUS_DRAFT]['label'] }}</span>
+                                            </td>
+                                        </tr>
+                                        @continue
+                                    @endif
                                     @php
                                         $rowStatus = Invoice::STATUSES[$balance->statusFor($row)];
                                         $rowDebt   = $balance->debtFor($row);

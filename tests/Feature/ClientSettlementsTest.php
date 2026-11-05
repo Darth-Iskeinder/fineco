@@ -511,6 +511,158 @@ class ClientSettlementsTest extends TestCase
         $this->assertSame(0, ClientOpeningBalance::where('client_id', $client->id)->count());
     }
 
+    // ── Выставить всем (этап 2) ───────────────────────────────────────────
+
+    public function test_bulk_issues_checked_clients_in_alphabetical_order(): void
+    {
+        $b = $this->client(['name' => 'Бета']);
+        $a = $this->client(['name' => 'Альфа']);
+        $c = $this->client(['name' => 'Вега']);
+        $d = $this->client(['name' => 'Гамма']);
+
+        $this->asVendor()->post(route('settlements.bulk'), ['bulk' => [
+            $b->id => ['on' => '1', 'amount' => '20 000'],
+            $a->id => ['on' => '1', 'amount' => '15000,50'],
+            $c->id => ['amount' => '9000'],            // галочку сняли
+            $d->id => ['on' => '1', 'amount' => ''],   // суммы нет
+        ]])->assertRedirect(route('settlements.index'))
+            ->assertSessionHas('success', 'Выставлено 2 счёта, № 1–2');
+
+        $this->assertSame(1, $this->invoiceFor($a, '2026-11')->number);
+        $this->assertSame('15000.50', $this->invoiceFor($a, '2026-11')->total);
+        $this->assertSame(2, $this->invoiceFor($b, '2026-11')->number);
+        $this->assertSame('2026-11-13', $this->invoiceFor($b, '2026-11')->due_on->toDateString());
+        $this->assertSame(0, ClientInvoice::whereIn('client_id', [$c->id, $d->id])->count());
+    }
+
+    public function test_bulk_keeps_extras_of_a_draft(): void
+    {
+        $client = $this->client();
+        $this->asVendor()->post(route('settlements.save', $client), [
+            'amount' => '10000', 'extras' => [['name' => 'Кадровые документы', 'amount' => '1500']], 'action' => 'save',
+        ])->assertSessionHasNoErrors();
+
+        $this->asVendor()->get(route('settlements.index'))->assertViewHas('bulkLines', fn ($lines) => $lines[0]['extra'] === 1500.0
+            && $lines[0]['amount'] === '10 000' && $lines[0]['hint'] === 'из черновика' && $lines[0]['on'] === true);
+
+        $this->asVendor()->post(route('settlements.bulk'), ['bulk' => [$client->id => ['on' => '1', 'amount' => '12000']]])
+            ->assertSessionHasNoErrors();
+
+        $invoice = $this->invoiceFor($client, '2026-11');
+        $this->assertSame('12000.00', $invoice->amount);
+        $this->assertSame('13500.00', $invoice->total);
+        $this->assertCount(1, $invoice->extras);
+    }
+
+    public function test_bulk_lines_come_from_last_invoice_and_new_client_is_unchecked(): void
+    {
+        $old = $this->client(['name' => 'Альфа']);
+        $new = $this->client(['name' => 'Бета']);
+        $this->issue($old, '48000', '2026-10');
+
+        $this->asVendor()->get(route('settlements.index'))
+            ->assertSee('Выставить за ноябрь: 2')
+            ->assertViewHas('bulkLines', fn ($lines) => count($lines) === 2
+                && $lines[0]['id'] === $old->id && $lines[0]['amount'] === '48 000' && $lines[0]['was'] === 48000.0 && $lines[0]['on'] === true
+                && $lines[1]['id'] === $new->id && $lines[1]['amount'] === '' && $lines[1]['was'] === null && $lines[1]['on'] === false);
+
+        $this->issue($old, '48000');
+        $this->issue($new, '5000');
+
+        $this->asVendor()->get(route('settlements.index'))
+            ->assertDontSee('Выставить за ноябрь:')
+            ->assertViewHas('bulkLines', []);
+    }
+
+    public function test_bulk_does_not_issue_twice(): void
+    {
+        $first  = $this->client(['name' => 'Альфа']);
+        $second = $this->client(['name' => 'Бета']);
+        $this->issue($first, '10000');
+
+        // Окно открыли до того, как Альфе выставили счёт, и нажали ещё раз.
+        $this->asVendor()->post(route('settlements.bulk'), ['bulk' => [
+            $first->id  => ['on' => '1', 'amount' => '99999'],
+            $second->id => ['on' => '1', 'amount' => '8000'],
+        ]])->assertSessionHas('success', 'Выставлено 1 счёт, № 2. Пропущено: 1, им счёт уже выставили, пока окно было открыто');
+
+        $this->assertSame(1, $this->invoiceFor($first, '2026-11')->number);
+        $this->assertSame('10000.00', $this->invoiceFor($first, '2026-11')->amount);
+
+        $this->asVendor()->post(route('settlements.bulk'), ['bulk' => [$second->id => ['on' => '1', 'amount' => '8000']]])
+            ->assertSessionHasErrors(['bulk' => 'Этим клиентам счёт уже выставили, пока окно было открыто']);
+        $this->assertSame(2, (int) ClientInvoice::max('number'));
+    }
+
+    public function test_bulk_with_bad_amount_issues_nothing(): void
+    {
+        $good = $this->client(['name' => 'Альфа']);
+        $bad  = $this->client(['name' => 'Бета']);
+
+        $this->asVendor()->post(route('settlements.bulk'), ['bulk' => [
+            $good->id => ['on' => '1', 'amount' => '10000'],
+            $bad->id  => ['on' => '1', 'amount' => 'двадцать'],
+        ]])->assertSessionHasErrors(['bulk' => 'Бета: сумма записана непонятно. Ничего не выставлено.']);
+
+        $this->assertSame(0, ClientInvoice::whereIn('client_id', [$good->id, $bad->id])->count());
+
+        $this->asVendor()->post(route('settlements.bulk'), ['bulk' => [$good->id => ['amount' => '10000']]])
+            ->assertSessionHasErrors(['bulk' => 'Не отмечено ни одного клиента с суммой']);
+    }
+
+    public function test_bulk_ignores_foreign_and_unknown_clients(): void
+    {
+        $this->tenant->setSettlementsEnabled(true);
+
+        $chief = $this->employee(Role::HEAD_ACCOUNTANT);
+        $chief->modules()->sync([$this->moduleId()]);
+        $own      = $this->client(['name' => 'Свой', 'responsible_employee_id' => $chief->id]);
+        $foreign  = $this->client(['name' => 'Чужой', 'responsible_employee_id' => $this->admin->id]);
+        $inactive = $this->client(['name' => 'Ушедший', 'responsible_employee_id' => $chief->id, 'is_active' => false]);
+
+        $this->actingAs($chief->fresh(), 'employee')->post(route('settlements.bulk'), ['bulk' => [
+            $own->id      => ['on' => '1', 'amount' => '5000'],
+            $foreign->id  => ['on' => '1', 'amount' => '5000'],
+            $inactive->id => ['on' => '1', 'amount' => '5000'],
+            999999999     => ['on' => '1', 'amount' => '5000'],
+        ]])->assertSessionHas('success', 'Выставлено 1 счёт, № 1');
+
+        $this->assertSame(1, ClientInvoice::count());
+        $this->assertSame($own->id, ClientInvoice::first()->client_id);
+
+        $accountant = $this->employee(Role::ACCOUNTANT);
+        $this->actingAs($accountant->fresh(), 'employee')->post(route('settlements.bulk'), ['bulk' => [
+            $foreign->id => ['on' => '1', 'amount' => '5000'],
+        ]])->assertNotFound();
+    }
+
+    public function test_list_has_filters_and_clickable_cards(): void
+    {
+        $client = $this->client(['name' => 'Альфа']);
+        $this->opening($client, 'debt', '10000', '2026-09-01')->assertSessionHasNoErrors();
+
+        $this->asVendor()->get(route('settlements.index'))
+            ->assertOk()
+            ->assertSee('data-filter="no"', false)
+            ->assertSee('Просрочены 1')
+            ->assertSee('Не выставлены 1')
+            ->assertSee('показать, кому');
+    }
+
+    public function test_history_shows_missed_month(): void
+    {
+        $client = $this->client();
+        $this->issue($client, '10000', '2026-08');
+        $this->issue($client, '10000', '2026-10');
+
+        $this->asVendor()->get(route('settlements.show', $client))
+            ->assertOk()
+            ->assertSee('data-history="2026-09" data-missed', false)
+            ->assertSee('Счёт за этот месяц не выставлен')
+            ->assertDontSee('data-history="2026-11" data-missed', false)
+            ->assertDontSee('data-history="2026-07"', false);
+    }
+
     private function opening(Client $client, string $kind, string $amount, string $date)
     {
         return $this->asVendor()->post(route('settlements.opening', $client), [

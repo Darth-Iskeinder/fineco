@@ -143,12 +143,7 @@ class ClientInvoices
             $invoice->total  = round(($amount ?? 0) + array_sum(array_column($extras, 'amount')), 2);
 
             if ($issue && !$invoice->isIssued()) {
-                $today = self::today();
-
-                $invoice->number    = $this->nextNumber();
-                $invoice->issued_on = $today;
-                $invoice->due_on    = $today->addDays(ClientInvoice::DUE_DAYS);
-                $invoice->issued_by = $by?->id;
+                $this->markIssued($invoice, $by);
             }
 
             $invoice->save();
@@ -160,6 +155,88 @@ class ClientInvoices
 
             return $invoice->load('extras');
         });
+    }
+
+    /**
+     * Выставить счета нескольким клиентам за месяц одним нажатием («Выставить всем»).
+     *
+     * Сумма за месяц приходит из окна, дополнительные услуги берутся из черновика,
+     * если он был. Всё в одной транзакции: номера идут подряд в порядке $amounts.
+     * Счёт, который успели выставить, пока окно было открыто (второй человек, второе
+     * нажатие), не трогаем и второй номер не даём, только считаем.
+     *
+     * Кого можно выставлять, решает вызывающий: сюда приходят уже проверенные клиенты.
+     *
+     * @param  array<int, float>  $amounts  client_id => сумма за месяц, больше нуля
+     * @return array{issued: Collection<int, ClientInvoice>, already: int}
+     */
+    public function issueMany(CarbonImmutable $period, array $amounts, ?Employee $by): array
+    {
+        return DB::transaction(function () use ($period, $amounts, $by) {
+            $issued  = collect();
+            $already = 0;
+
+            foreach ($amounts as $clientId => $amount) {
+                $invoice = ClientInvoice::query()
+                    ->where('client_id', $clientId)
+                    ->where('period', $period->toDateString())
+                    ->lockForUpdate()
+                    ->first()
+                    ?? new ClientInvoice(['client_id' => $clientId, 'period' => $period]);
+
+                if ($invoice->isIssued()) {
+                    $already++;
+                    continue;
+                }
+
+                $extras = $invoice->exists ? (float) $invoice->extras()->sum('amount') : 0.0;
+
+                $invoice->amount = $amount;
+                $invoice->total  = round($amount + $extras, 2);
+                $this->markIssued($invoice, $by);
+                $invoice->save();
+
+                $issued->push($invoice);
+            }
+
+            return ['issued' => $issued, 'already' => $already];
+        });
+    }
+
+    /** Номер, дата и срок оплаты. Вызывать внутри транзакции: номер держит строку фирмы. */
+    private function markIssued(ClientInvoice $invoice, ?Employee $by): void
+    {
+        $today = self::today();
+
+        $invoice->number    = $this->nextNumber();
+        $invoice->issued_on = $today;
+        $invoice->due_on    = $today->addDays(ClientInvoice::DUE_DAYS);
+        $invoice->issued_by = $by?->id;
+    }
+
+    /**
+     * Месяцы, за которые клиенту не выставили счёт: между первым выставленным счётом
+     * и текущим месяцем. Текущий не считаем, он ещё идёт и виден в списке.
+     *
+     * @return Collection<int, CarbonImmutable>
+     */
+    public function missedMonths(Collection $history): Collection
+    {
+        if ($history->isEmpty()) {
+            return collect();
+        }
+
+        $billed  = $history->map(fn (ClientInvoice $i) => $i->period->format('Y-m'))->flip();
+        $current = self::currentPeriod();
+        $missed  = collect();
+
+        for ($month = $history->min('period')->addMonth(); $month->lt($current); $month = $month->addMonth()) {
+            if (!$billed->has($month->format('Y-m'))) {
+                $missed->push($month);
+            }
+        }
+
+        return $missed;
     }
 
     /** Вернуть счёт в черновик. Номер освобождается. */

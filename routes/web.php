@@ -149,10 +149,11 @@ Route::middleware('auth:employee')->group(function () {
     Route::post('/auto-audit/findings/{finding}/accept', [AutoAuditController::class, 'accept'])->name('auto-audit.findings.accept');
     Route::post('/auto-audit/findings/{finding}/reject', [AutoAuditController::class, 'reject'])->name('auto-audit.findings.reject');
 
-    // Расчёты с клиентами: пока только вендору, зашедшему в фирму, и руководителю по флагу
-    // фирмы (settlements:access). Остальным 404, проверка внутри контроллера.
+    // Расчёты с клиентами: вендору и сотрудникам фирмы с включённым флагом (settlements:access),
+    // кто именно, решает SettlementsAccess. Остальным 404, проверка внутри контроллера.
     Route::prefix('settlements')->name('settlements.')->group(function () {
         Route::get('/', [ClientSettlementsController::class, 'index'])->name('index');
+        Route::post('/bulk', [ClientSettlementsController::class, 'bulk'])->name('bulk');
         Route::get('/{client}', [ClientSettlementsController::class, 'show'])->whereNumber('client')->name('show');
         Route::post('/{client}', [ClientSettlementsController::class, 'save'])->whereNumber('client')->name('save');
         Route::post('/{client}/unissue', [ClientSettlementsController::class, 'unissue'])->whereNumber('client')->name('unissue');
