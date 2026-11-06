@@ -635,8 +635,8 @@ class DashboardTest extends TestCase
 
         $response = $this->actingAs($this->manager, 'employee')
             ->get(route('dashboard.index'))
-            ->assertOk()
-            ->assertSee('Дисциплина по месяцам');
+            ->assertOk();
+        // Блок «Дисциплина по месяцам» скрыт 06.11.2026, расчёт пока остаётся
 
         $discipline = $response->viewData('discipline');
         $current    = end($discipline); // последний месяц окна — текущий

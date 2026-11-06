@@ -141,6 +141,10 @@
         @endif
     </div>
 
+    {{-- Скрыто 06.11.2026: «Просрочено сейчас» и «Дисциплина по месяцам», вероятно удалить
+         вместе с расчётом $overdue/$discipline в контроллере. Плитка «Просрочено сейчас»
+         в итогах осталась. @if(false), а не комментарий: внутри есть свои комментарии Blade. --}}
+    @if(false)
     <div class="grid grid-cols-1 xl:grid-cols-5 gap-6 items-start">
 
     {{-- Просрочено сейчас --}}
@@ -260,6 +264,7 @@
     </div>
 
     </div>
+    @endif
 
     {{-- По сотрудникам --}}
     @php
@@ -455,6 +460,10 @@
         @endif
     </div>
 
+    @if($payback)
+        @include('partials.dashboard-payback', ['payback' => $payback, 'monthLabel' => $monthLabel, 'isCurrent' => $isCurrent])
+    @endif
+
     {{-- По компаниям --}}
     <div class="bg-white rounded-2xl border border-slate-200/80 overflow-hidden">
         <div class="flex flex-wrap items-baseline gap-3 px-6 pt-5">
@@ -513,7 +522,9 @@
         @endif
     </div>
 
-    {{-- Куда уходит время --}}
+    {{-- Скрыто 06.11.2026: «Куда уходит время» повторяет окупаемость, вероятно удалить
+         вместе с $timeTop/$timeRest в контроллере. --}}
+    @if(false)
     <div class="bg-white rounded-2xl border border-slate-200/80 overflow-hidden">
         <div class="flex flex-wrap items-baseline gap-3 px-6 pt-5">
             <h2 class="text-base font-semibold text-slate-800">Куда уходит время</h2>
@@ -554,6 +565,7 @@
             </div>
         @endif
     </div>
+    @endif
 
 </div>
 @endsection

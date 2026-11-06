@@ -7,6 +7,8 @@ use App\Models\BuhTaskLog;
 use App\Models\Client;
 use App\Models\Employee;
 use App\Models\Service;
+use App\Services\Settlements\ClientPayback;
+use App\Services\Settlements\SettlementsAccess;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 
@@ -334,6 +336,8 @@ class DashboardController extends Controller
             }
         }
 
+        $this->addHandedTime($byCompany, $stats, $year, $month);
+
         /**
          * Закрытые задачи, которым слота в этом месяце нет.
          *
@@ -385,12 +389,20 @@ class DashboardController extends Controller
             $row['time'] = $row['elapsed'] > 0 ? $this->formatDuration($row['elapsed']) : null;
         }
         unset($row);
+
+        // Окупаемость только там, где ведут расчёты с клиентами: без счетов считать не из чего,
+        // а смету как источник денег скрыли ещё 15.07.2026.
+        $payback = SettlementsAccess::openHere() ? (new ClientPayback())->build($byCompany, $monthStart) : null;
+
         // Проблемные сверху: просрочка, затем объём задач месяца, затем имя
         uasort($byCompany, fn ($x, $y) =>
             [$y['overdue'], $y['total'], $x['name']] <=> [$x['overdue'], $x['total'], $y['name']]);
 
         // Компании по затраченному времени месяца — для горизонтальных баров:
-        // топ-7 отдельными строками, остальные одной строкой «Остальные»
+        // топ-7 отдельными строками, остальные одной строкой «Остальные».
+        // Блок «Куда уходит время» скрыт 06.11.2026 (повторяет окупаемость), вероятно удалить
+        // вместе с этим расчётом. Так же скрыты «Просрочено сейчас» ($overdue) и «Дисциплина
+        // по месяцам» ($discipline); плитка «Просрочено сейчас» в итогах берёт count($overdue).
         $timeAll = array_values(array_filter($byCompany, fn ($r) => $r['elapsed'] > 0));
         usort($timeAll, fn ($x, $y) => $y['elapsed'] <=> $x['elapsed']);
         $timeTop  = array_slice($timeAll, 0, 7);
@@ -423,6 +435,7 @@ class DashboardController extends Controller
             'leads'        => $leads,
             'accountants'  => $accountants,
             'byCompany'    => $byCompany,
+            'payback'      => $payback,
             'timeTop'      => $timeTop,
             'timeRest'     => $timeRest,
             'timeMax'      => $timeTop[0]['elapsed'] ?? 0,
@@ -712,6 +725,29 @@ class DashboardController extends Controller
         $stats['elapsed'] += $elapsed;
         if ($elapsed > 0) {
             $stats['with_time']++;
+        }
+    }
+
+    /**
+     * Время «Переданных»: прежний исполнитель работал, потом задачу отдали другому.
+     * Сама запись в разрез не идёт (задача засчитана новому), но её часы это настоящая
+     * работа над клиентом. Без них окупаемость завышалась. Таймер у такой записи уже
+     * досчитан до момента передачи, поэтому paused_seconds окончательный.
+     */
+    private function addHandedTime(array &$byCompany, array &$stats, int $year, int $month): void
+    {
+        $handed = BuhTaskLog::where('year', $year)
+            ->where('month', $month)
+            ->where('status', BuhTaskLog::STATUS_HANDED)
+            ->groupBy('client_id')
+            ->selectRaw('client_id, sum(paused_seconds) as seconds')
+            ->pluck('seconds', 'client_id');
+
+        foreach ($handed as $clientId => $seconds) {
+            if (isset($byCompany[$clientId])) {
+                $byCompany[$clientId]['elapsed'] += (int) $seconds;
+                $stats['elapsed']                += (int) $seconds;
+            }
         }
     }
 
