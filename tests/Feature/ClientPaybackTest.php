@@ -3,8 +3,8 @@
 namespace Tests\Feature;
 
 use App\Models\Client;
+use App\Models\BuhAdhocTask;
 use App\Models\ClientInvoice;
-use App\Models\ClientPayment;
 use App\Models\Employee;
 use App\Models\Role;
 use App\Models\Tenant;
@@ -18,7 +18,8 @@ use Tests\TestCase;
 
 /**
  * Окупаемость на странице «Руководитель» (06.11.2026): деньги из счёта месяца, часы из
- * разреза дашборда, долг на сегодня, «мало данных» ниже половины задач с таймером.
+ * разреза дашборда, «мало данных» ниже половины задач с таймером. 09.11.2026 долг из блока
+ * убрали, а в текущем месяце блок показывает прошлый, закрытый.
  *
  * Сегодня 06.11.2026, смотрим октябрь.
  */
@@ -105,48 +106,70 @@ class ClientPaybackTest extends TestCase
 
         $this->assertSame(120000.0, $result['summary']['billed']);
         $this->assertSame(4, $result['summary']['billedCount']);
-        $this->assertSame('35ч 0м', $result['summary']['time']);
         // Начатых 4+4+3+4+2 = 17, с таймером 4+2+3+1+2 = 12
         $this->assertSame(71, $result['summary']['timedShare']);
     }
 
-    public function test_debt_is_for_today_and_counts_departed_clients(): void
+    public function test_unbilled_group_needs_hours_and_debt_is_not_shown(): void
     {
-        $client   = $this->client('Должник');
-        $departed = $this->client('Ушедший', ['is_active' => false]);
+        $worked  = $this->client('Работали без счёта');
+        $debtor  = $this->client('Только старый долг');
 
-        // Сентябрь не оплачен и просрочен больше 30 дней, октябрь оплачен частично
-        $this->invoice($client, 15000, '2026-09-01', '2026-09-03');
-        $this->invoice($client, 15000, '2026-10-01', '2026-10-02');
-        ClientPayment::create(['client_id' => $client->id, 'paid_on' => '2026-10-20', 'amount' => 20000, 'method' => ClientPayment::BANK]);
-
-        $this->invoice($departed, 5000, '2026-08-01', '2026-08-01');
+        // Старый неоплаченный счёт: долг есть, но в октябре ни счёта, ни часов
+        $this->invoice($debtor, 15000, '2026-08-01', '2026-08-01');
 
         $result = (new ClientPayback())->build([
-            $client->id => $this->row('Должник', 5 * 3600, total: 2, pending: 0, withTime: 2),
+            $worked->id => $this->row('Работали без счёта', 2 * 3600, total: 1, pending: 0, withTime: 1),
+            $debtor->id => $this->row('Только старый долг', 0, total: 0, pending: 0, withTime: 0),
         ], CarbonImmutable::create(2026, 10, 1));
 
-        $row = $result['rated'][0];
-        $this->assertSame(15000.0, $row['sum']);
-        $this->assertSame(10000.0, $row['debt']);
-        $this->assertSame(0.0, $row['overdue']);
+        $this->assertSame(['Работали без счёта'], array_column($result['unbilled'], 'name'));
+        $this->assertSame([], $result['rated']);
+        $this->assertSame([], $result['weak']);
+        $this->assertArrayNotHasKey('debt', $result['summary']);
+    }
 
-        // Ушедший в таблице не виден, но его долг в дебиторке есть
-        $this->assertSame(['Должник'], array_column($result['rated'], 'name'));
-        $this->assertSame([], $result['unbilled']);
-        $this->assertSame(15000.0, $result['summary']['debt']);
-        $this->assertSame(5000.0, $result['summary']['overdue']);
-        $this->assertSame(2, $result['summary']['debtors']);
+    public function test_current_month_shows_previous_closed_month(): void
+    {
+        $this->tenant->setSettlementsEnabled(true);
+        $this->tenant->save();
+
+        $client = $this->client('Октябрьский');
+        $this->invoice($client, 20000);
+        $this->invoice($client, 20000, '2026-11-01', '2026-11-01');
+
+        $manager = $this->manager();
+
+        foreach ([[10, 4 * 3600], [11, 3600]] as [$month, $seconds]) {
+            BuhAdhocTask::create([
+                'employee_id' => $manager->id, 'client_id' => $client->id, 'name' => 'Работа ' . $month,
+                'cost' => 0, 'year' => 2026, 'month' => $month, 'due_day' => 5,
+                'status' => 'completed', 'started_at' => '2026-' . $month . '-02 10:00:00',
+                'completed_at' => '2026-' . $month . '-03 10:00:00', 'paused_seconds' => $seconds,
+            ]);
+        }
+
+        // Ноябрь (текущий): блок про октябрь, 20 000 за 4 часа
+        $payback = $this->actingAs($manager, 'employee')->get(route('dashboard.index'))
+            ->assertOk()
+            ->assertSee('Текущий месяц ещё идёт')
+            ->viewData('payback');
+        $this->assertSame('Октябрь 2026', $payback['monthLabel']);
+        $this->assertTrue($payback['shifted']);
+        $this->assertSame([5000], array_column($payback['rated'], 'rate'));
+
+        // Октябрь, выбранный руками: те же числа, без пометки
+        $payback = $this->actingAs($manager, 'employee')->get(route('dashboard.index', ['year' => 2026, 'month' => 10]))
+            ->assertOk()
+            ->assertDontSee('Текущий месяц ещё идёт')
+            ->viewData('payback');
+        $this->assertFalse($payback['shifted']);
+        $this->assertSame([5000], array_column($payback['rated'], 'rate'));
     }
 
     public function test_dashboard_shows_block_only_with_settlements(): void
     {
-        $manager = Employee::create([
-            'full_name' => 'Руководитель окупаемости', 'position' => 'Директор',
-            'email' => 'payback.' . uniqid() . '@example.com', 'password' => 'secret123',
-            'role_id' => Role::where('name', Role::MANAGER)->value('id'),
-            'status' => Employee::STATUS_ACTIVE,
-        ]);
+        $manager = $this->manager();
 
         $this->actingAs($manager, 'employee')->get(route('dashboard.index'))
             ->assertOk()
@@ -160,7 +183,17 @@ class ClientPaybackTest extends TestCase
         $this->actingAs($manager, 'employee')->get(route('dashboard.index'))
             ->assertOk()
             ->assertSee('Окупаемость')
-            ->assertSee('Месяц ещё идёт');
+            ->assertSee('Окупаемость');
+    }
+
+    private function manager(): Employee
+    {
+        return Employee::create([
+            'full_name' => 'Руководитель окупаемости', 'position' => 'Директор',
+            'email' => 'payback.' . uniqid() . '@example.com', 'password' => 'secret123',
+            'role_id' => Role::where('name', Role::MANAGER)->value('id'),
+            'status' => Employee::STATUS_ACTIVE,
+        ]);
     }
 
     private function row(string $name, int $elapsed, int $total, int $pending, int $withTime): array

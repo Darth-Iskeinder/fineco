@@ -11,7 +11,8 @@ use Carbon\CarbonImmutable;
  * Деньги: выставленный счёт за месяц, вместе с доп. услугами. Оплачен он или нет, не важно.
  * Часы: таймеры задач клиента этого месяца (по смете, внеплановые, переданные). Их
  * считает дашборд, сюда они приходят готовыми, чтобы два экрана не расходились.
- * Долг: на сегодня по всем счетам, от выбранного месяца не зависит.
+ * Долга здесь нет (убрали 09.11.2026): он на сегодня и от месяца не зависит, а блок про
+ * месяц. Долги смотрят в «Расчётах с клиентами».
  *
  * Сом за час не считаем, если таймер был меньше чем у половины начатых задач:
  * часов тогда сильно меньше правды, и клиент выглядел бы выгоднее, чем есть.
@@ -21,10 +22,6 @@ class ClientPayback
 {
     /** Ниже этой доли задач с таймером сом за час не показываем. */
     public const MIN_TIMED_SHARE = 50;
-
-    public function __construct(private readonly ClientLedger $ledger = new ClientLedger())
-    {
-    }
 
     /**
      * @param  array<int, array{name: string, elapsed: int, total: int, pending: int, with_time: int}>  $companies
@@ -42,26 +39,19 @@ class ClientPayback
             ->get(['id', 'client_id', 'total'])
             ->keyBy('client_id');
 
-        // Дебиторка как на странице расчётов: с ушедшими клиентами, которых в таблице нет
-        $moneyIds = $this->ledger->clientsWithMoney(null);
-        $balances = $this->ledger->forClients(
-            $moneyIds->merge(array_keys($companies))->merge($invoices->keys())->unique()
-        );
-
         $rows = [];
         foreach (array_unique([...array_keys($companies), ...$invoices->keys()->all()]) as $id) {
             $c       = $companies[$id] ?? null;
             $invoice = $invoices->get($id);
-            $balance = $balances[$id] ?? null;
 
             $elapsed = (int) ($c['elapsed'] ?? 0);
             $started = $c ? $c['total'] - $c['pending'] : 0;
             $timed   = min($started, (int) ($c['with_time'] ?? 0));
             $sum     = $invoice ? (float) $invoice->total : null;
-            $debt    = $balance?->debt() ?? 0.0;
 
-            // Нечего сказать: ни счёта, ни работы, ни долга
-            if ($sum === null && $elapsed === 0 && $debt == 0.0) {
+            // Нечего сказать: ни счёта, ни часов. Без счёта, но с часами остаётся:
+            // это «работали, счёта нет», забыли выставить.
+            if ($sum === null && $elapsed === 0) {
                 continue;
             }
 
@@ -70,8 +60,6 @@ class ClientPayback
             $rows[] = [
                 'name'    => $c['name'] ?? $invoice->client?->name ?? '—',
                 'sum'     => $sum,
-                'debt'    => $debt,
-                'overdue' => $balance?->overdue() ?? 0.0,
                 'elapsed' => $elapsed,
                 'time'    => self::duration($elapsed),
                 'started' => $started,
@@ -107,30 +95,13 @@ class ClientPayback
         usort($weak, $byName);
         usort($unbilled, $byName);
 
-        $debtAll = 0.0;
-        $overdueAll = 0.0;
-        $debtors = 0;
-        foreach ($moneyIds->merge(array_keys($companies))->unique() as $id) {
-            $b = $balances[$id] ?? null;
-            if ($b && $b->debt() > 0) {
-                $debtAll    += $b->debt();
-                $overdueAll += $b->overdue();
-                $debtors++;
-            }
-        }
-
         $started = array_sum(array_column($rows, 'started'));
         $timed   = array_sum(array_column($rows, 'timed'));
-        $seconds = array_sum(array_column($rows, 'elapsed'));
 
         return [
             'summary' => [
                 'billed'       => (float) $invoices->sum('total'),
                 'billedCount'  => $invoices->count(),
-                'debt'         => $debtAll,
-                'debtors'      => $debtors,
-                'overdue'      => $overdueAll,
-                'time'         => self::duration($seconds),
                 'avg'          => $avg,
                 'ratedCount'   => count($rated),
                 'timedShare'   => $started > 0 ? (int) round($timed / $started * 100) : null,

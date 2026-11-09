@@ -461,7 +461,7 @@
     </div>
 
     @if($payback)
-        @include('partials.dashboard-payback', ['payback' => $payback, 'monthLabel' => $monthLabel, 'isCurrent' => $isCurrent])
+        @include('partials.dashboard-payback', ['payback' => $payback])
     @endif
 
     {{-- По компаниям --}}

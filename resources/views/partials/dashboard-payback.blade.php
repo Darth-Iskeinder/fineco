@@ -1,5 +1,9 @@
 {{--
     Окупаемость клиентов за месяц (ClientPayback). Только при включённых расчётах с клиентами.
+    Месяц свой, в $payback['monthLabel']: в текущем месяце блок показывает прошлый, закрытый
+    ($payback['shifted']). Переменные страницы $monthLabel/$isCurrent сюда видны, но про другой
+    месяц, не путать.
+    Долга здесь нет намеренно (09.11.2026): он на сегодня, а блок про месяц.
     Ширины полосок и положение риски среднего задаются style: классов под проценты нет.
     Новые классы Tailwind не вводить без npm run build, сборка лежит в public/build.
 --}}
@@ -7,21 +11,20 @@
     $s     = $payback['summary'];
     $money = fn ($v) => \App\Models\ClientInvoice::money($v);
     $tierBar = ['worst' => 'bg-red-600', 'below' => 'bg-amber-500', 'above' => 'bg-indigo-600'];
-    $dim   = $isCurrent ? 'opacity-60' : '';
 @endphp
 
 <div class="bg-white rounded-2xl border border-slate-200/80 overflow-hidden">
     <div class="flex flex-wrap items-baseline gap-3 px-6 pt-5">
         <h2 class="text-base font-semibold text-slate-800">Окупаемость</h2>
         <span class="text-xs text-slate-400">
-            {{ $monthLabel }} · деньги из счетов, часы из таймеров{{ $s['timedShare'] !== null ? ', таймер у ' . $s['timedShare'] . '% начатых задач' : '' }}
+            {{ $payback['monthLabel'] }} · деньги из счетов, часы из таймеров{{ $s['timedShare'] !== null ? ', таймер у ' . $s['timedShare'] . '% начатых задач' : '' }}
         </span>
     </div>
 
-    @if($isCurrent)
-        <div class="mx-6 mt-3 rounded-xl bg-amber-50 border border-amber-200 px-4 py-2 text-xs text-amber-800">
-            Месяц ещё идёт: счёт выставлен целиком, а часы только копятся. Сом за час к концу месяца упадёт, сравнивать лучше по закрытым месяцам.
-        </div>
+    @if($payback['shifted'])
+        <p class="px-6 mt-1 text-xs text-slate-500">
+            Текущий месяц ещё идёт, часы в нём только копятся. Поэтому здесь прошлый, закрытый месяц.
+        </p>
     @endif
 
     <div class="mx-6 mt-4 rounded-xl border border-slate-200 overflow-hidden">
@@ -32,25 +35,8 @@
                 <div class="mt-1 text-xs text-slate-400">{{ $s['billedCount'] }} {{ $plural($s['billedCount'], ['счёт', 'счёта', 'счетов']) }}</div>
             </div>
             <div class="flex-1 bg-white px-5 py-4" style="min-width: 150px">
-                <div class="text-[13px] text-slate-500">Дебиторка сейчас</div>
-                <div class="mt-2 text-2xl font-semibold text-slate-900 tabular-nums">{{ $money($s['debt']) }} <span class="text-sm font-medium text-slate-400">сом</span></div>
-                <div class="mt-1 text-xs text-slate-400">{{ $s['debtors'] }} {{ $plural($s['debtors'], ['должник', 'должника', 'должников']) }}</div>
-            </div>
-            <div class="flex-1 bg-white px-5 py-4" style="min-width: 150px">
-                <div class="text-[13px] text-slate-500">Просрочено больше 30 дней</div>
-                <div class="mt-2 text-2xl font-semibold tabular-nums {{ $s['overdue'] > 0 ? 'text-red-600' : 'text-slate-900' }}">{{ $money($s['overdue']) }} <span class="text-sm font-medium text-slate-400">сом</span></div>
-                <div class="mt-1 text-xs text-slate-400">
-                    @if($s['debt'] > 0) {{ (int) round($s['overdue'] / $s['debt'] * 100) }}% дебиторки @else долгов нет @endif
-                </div>
-            </div>
-            <div class="flex-1 bg-white px-5 py-4" style="min-width: 150px">
-                <div class="text-[13px] text-slate-500">Часов по таймерам</div>
-                <div class="mt-2 text-2xl font-semibold text-slate-900 tabular-nums {{ $dim }}">{{ $s['time'] }}</div>
-                <div class="mt-1 text-xs text-slate-400">все задачи клиентов</div>
-            </div>
-            <div class="flex-1 bg-white px-5 py-4" style="min-width: 150px">
                 <div class="text-[13px] text-slate-500">Средний сом за час</div>
-                <div class="mt-2 text-2xl font-semibold tabular-nums {{ $s['avg'] === null ? 'text-slate-300' : 'text-slate-900' }} {{ $dim }}">{{ $s['avg'] === null ? '—' : $money($s['avg']) }}</div>
+                <div class="mt-2 text-2xl font-semibold tabular-nums {{ $s['avg'] === null ? 'text-slate-300' : 'text-slate-900' }}">{{ $s['avg'] === null ? '—' : $money($s['avg']) }}</div>
                 <div class="mt-1 text-xs text-slate-400">
                     @if($s['avg'] === null) не хватает данных @else по {{ $s['ratedCount'] }} {{ $plural($s['ratedCount'], ['клиенту', 'клиентам', 'клиентам']) }} с данными @endif
                 </div>
@@ -65,25 +51,18 @@
         </div>
     @else
         @php
-            $shareCell = function (array $r) {
-                if ($r['share'] === null) {
-                    return '<span class="text-slate-300">—</span>';
-                }
-
-                return '<span class="inline-flex items-center justify-end gap-2" title="Таймер у ' . $r['timed'] . ' из ' . $r['started'] . ' начатых задач">'
-                    . '<span class="w-10 h-1 rounded-full bg-slate-100 overflow-hidden"><span class="block h-full rounded-full bg-slate-400" style="width: ' . $r['share'] . '%"></span></span>'
-                    . '<span class="text-slate-500 tabular-nums w-9">' . $r['share'] . '%</span></span>';
-            };
+            // Почему сом за час не посчитан: вместо метки прямо пишем, сколько задач с таймером
+            $weakNote = fn (array $r) => $r['started'] > 0
+                ? 'таймер у ' . $r['timed'] . ' из ' . $r['started'] . ' ' . $plural($r['started'], ['задачи', 'задач', 'задач'])
+                : 'задачи не начинали';
         @endphp
         <div class="overflow-x-auto px-2 pb-2 pt-2">
-            <table class="w-full text-sm" style="min-width: 820px">
+            <table class="w-full text-sm" style="min-width: 560px">
                 <thead>
                     <tr class="text-left">
                         <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200">Компания</th>
                         <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right">Выставлено, сом</th>
-                        <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right" title="Сколько клиент должен сегодня по всем счетам, от месяца не зависит">Долг сейчас</th>
                         <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right">Часов</th>
-                        <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200 text-right" title="Из начатых задач месяца у скольких запускали таймер">Задач с таймером</th>
                         <th class="px-4 py-2.5 text-xs font-medium text-slate-400 border-b border-slate-200">Сом за час</th>
                     </tr>
                 </thead>
@@ -92,10 +71,8 @@
                         <tr class="border-b border-slate-100 last:border-0">
                             <td class="px-4 py-3 font-medium text-slate-700">{{ $r['name'] }}</td>
                             <td class="px-4 py-3 text-right text-slate-700 tabular-nums whitespace-nowrap">{{ $money($r['sum']) }}</td>
-                            @include('partials.dashboard-payback-debt', ['r' => $r, 'money' => $money])
                             <td class="px-4 py-3 text-right text-slate-500 tabular-nums whitespace-nowrap">{{ $r['time'] }}</td>
-                            <td class="px-4 py-3 text-right">{!! $shareCell($r) !!}</td>
-                            <td class="px-4 py-3 w-64 {{ $dim }}">
+                            <td class="px-4 py-3 w-64">
                                 <div class="flex items-center gap-3" title="Средний по фирме: {{ $money($s['avg']) }} сом за час">
                                     <div class="relative flex-1 h-2 rounded-full bg-slate-100">
                                         <div class="absolute inset-y-0 left-0 rounded-full {{ $tierBar[$r['tier']] }}" style="width: {{ round($r['rate'] / $s['max'] * 100, 1) }}%"></div>
@@ -107,20 +84,22 @@
                         </tr>
                     @endforeach
 
-                    @foreach([['weak', 'Мало данных: таймер меньше чем у половины начатых задач', 'мало данных'], ['unbilled', 'Без счёта за месяц', 'нет счёта']] as [$group, $caption, $chip])
+                    @foreach([['weak', 'Мало данных: таймер меньше чем у половины начатых задач, сом за час не считаем'], ['unbilled', 'Работали, а счёта за месяц нет']] as [$group, $caption])
                         @if(count($payback[$group]) > 0)
                             <tr>
-                                <td colspan="6" class="px-4 pt-4 pb-2 text-xs text-slate-400">{{ $caption }}</td>
+                                <td colspan="4" class="px-4 pt-4 pb-2 text-xs text-slate-400">{{ $caption }}</td>
                             </tr>
                             @foreach($payback[$group] as $r)
                                 <tr class="border-b border-slate-100 last:border-0">
                                     <td class="px-4 py-3 text-slate-400">{{ $r['name'] }}</td>
                                     <td class="px-4 py-3 text-right text-slate-400 tabular-nums whitespace-nowrap">{{ $r['sum'] === null ? '—' : $money($r['sum']) }}</td>
-                                    @include('partials.dashboard-payback-debt', ['r' => $r, 'money' => $money])
                                     <td class="px-4 py-3 text-right text-slate-400 tabular-nums whitespace-nowrap">{{ $r['time'] }}</td>
-                                    <td class="px-4 py-3 text-right">{!! $shareCell($r) !!}</td>
                                     <td class="px-4 py-3">
-                                        <span class="inline-block rounded-full px-2 text-[11px] whitespace-nowrap {{ $group === 'weak' ? 'bg-slate-100 text-slate-500' : 'bg-indigo-50 text-indigo-700' }}">{{ $chip }}</span>
+                                        @if($group === 'weak')
+                                            <span class="text-xs text-slate-500 whitespace-nowrap">{{ $weakNote($r) }}</span>
+                                        @else
+                                            <span class="inline-block rounded-full px-2 text-[11px] whitespace-nowrap bg-indigo-50 text-indigo-700">нет счёта</span>
+                                        @endif
                                     </td>
                                 </tr>
                             @endforeach

@@ -55,8 +55,17 @@ class DashboardController extends Controller
         $cutoff        = CarbonImmutable::parse(self::BACKLOG_CUTOFF)->startOfDay();
         $lookbackStart = $today->subMonths(6)->max($cutoff);
 
-        // Общее окно генерации дат: покрывает и выбранный месяц, и окно просрочки
-        $scanFrom = $lookbackStart->min($monthStart);
+        // Окупаемость по текущему месяцу врёт: счёт выставлен целиком, а часы только копятся.
+        // Поэтому в текущем месяце блок считает прошлый, закрытый (решение 09.11.2026). Его
+        // разрез по компаниям собираем в том же проходе, второй раз базу не читаем.
+        // null = окупаемость считается по разрезу выбранного месяца ($byCompany).
+        $isCurrent     = $year === $today->year && $month === $today->month;
+        $paybackOn     = SettlementsAccess::openHere();
+        $paybackStart  = $isCurrent ? $monthStart->subMonth() : $monthStart;
+        $paybackByCompany = ($paybackOn && $isCurrent) ? [] : null;
+
+        // Общее окно генерации дат: покрывает выбранный месяц, окно просрочки и месяц окупаемости
+        $scanFrom = $lookbackStart->min($monthStart)->min($paybackStart);
         $scanTo   = $today->max($monthEnd);
 
         $clients = Client::query()
@@ -174,6 +183,9 @@ class DashboardController extends Controller
 
             // Клиент со сметой виден всегда, даже без задач в выбранном месяце
             $this->ensureCompanyRow($byCompany, (int) $client->id, $client->name, (float) $items->sum('total'));
+            if ($paybackByCompany !== null) {
+                $this->ensureCompanyRow($paybackByCompany, (int) $client->id, $client->name, null);
+            }
 
             // Не генерируем даты раньше старта обслуживания клиента и раньше начала
             // генерации по смете (месяц её создания холостой) — те же границы, что в задачнике.
@@ -281,6 +293,10 @@ class DashboardController extends Controller
                         $this->accumulate($byCompany[$client->id], $status, $dueObj, $log?->completed_at, $elapsed);
                     }
 
+                    if ($paybackByCompany !== null && $wy === $paybackStart->year && $wm === $paybackStart->month) {
+                        $this->accumulate($paybackByCompany[$client->id], $status, $dueObj, $log?->completed_at, $this->calcElapsed($log));
+                    }
+
                     if ($dueObj && $dueObj->lt($today) && $dueObj->gte($cutoff)
                         && in_array($status, self::OPEN_STATUSES, true)) {
                         $byCompany[$client->id]['overdue']++;
@@ -320,6 +336,11 @@ class DashboardController extends Controller
                 $this->accumulate($byCompany[$companyId], $a->status, $dueObj, $a->completed_at, $elapsed);
             }
 
+            if ($paybackByCompany !== null && (int) $a->year === $paybackStart->year && (int) $a->month === $paybackStart->month) {
+                $this->ensureCompanyRow($paybackByCompany, $companyId, $a->client?->name ?? 'Без компании', null);
+                $this->accumulate($paybackByCompany[$companyId], $a->status, $dueObj, $a->completed_at, $this->calcElapsed($a));
+            }
+
             if ($dueObj && $dueObj->lt($today) && $dueObj->gte($cutoff)
                 && in_array($a->status, self::OPEN_STATUSES, true)) {
                 $this->ensureCompanyRow($byCompany, $companyId, $a->client?->name ?? 'Без компании', null);
@@ -337,6 +358,10 @@ class DashboardController extends Controller
         }
 
         $this->addHandedTime($byCompany, $stats, $year, $month);
+        if ($paybackByCompany !== null) {
+            $paybackStats = ['elapsed' => 0]; // сводка страницы про выбранный месяц, сюда не пишем
+            $this->addHandedTime($paybackByCompany, $paybackStats, $paybackStart->year, $paybackStart->month);
+        }
 
         /**
          * Закрытые задачи, которым слота в этом месяце нет.
@@ -392,7 +417,10 @@ class DashboardController extends Controller
 
         // Окупаемость только там, где ведут расчёты с клиентами: без счетов считать не из чего,
         // а смету как источник денег скрыли ещё 15.07.2026.
-        $payback = SettlementsAccess::openHere() ? (new ClientPayback())->build($byCompany, $monthStart) : null;
+        $payback = $paybackOn
+            ? (new ClientPayback())->build($paybackByCompany ?? $byCompany, $paybackStart)
+                + ['monthLabel' => self::MONTH_LABELS[$paybackStart->month] . ' ' . $paybackStart->year, 'shifted' => $isCurrent]
+            : null;
 
         // Проблемные сверху: просрочка, затем объём задач месяца, затем имя
         uasort($byCompany, fn ($x, $y) =>
@@ -425,7 +453,7 @@ class DashboardController extends Controller
             'monthLabel'   => self::MONTH_LABELS[$month] . ' ' . $year,
             'prev'         => ['year' => $prev->year, 'month' => $prev->month],
             'next'         => ['year' => $next->year, 'month' => $next->month],
-            'isCurrent'    => $year === $today->year && $month === $today->month,
+            'isCurrent'    => $isCurrent,
             'stats'        => $stats,
             'onTimePct'    => $stats['completed'] > 0 ? (int) round($stats['on_time'] / $stats['completed'] * 100) : null,
             'totalTime'    => $this->formatDuration($stats['elapsed']),
