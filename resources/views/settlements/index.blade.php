@@ -13,12 +13,14 @@
     $bulkReopen  = $errors->has('bulk') && $bulkLines !== [];
     // Для фильтров, поиска и сортировки на экране: всё, по чему отбирают строку.
     // index совпадает с порядком строк в таблице, по нему их и переставляем.
-    $rowMeta = $rows->values()->map(function ($r, $index) use ($balances) {
+    $rowMeta = $rows->values()->map(function ($r, $index) use ($balances, $comments) {
         $balance = $balances[$r['client']->id];
         $invoice = $r['invoice'];
 
         return [
             'index'       => $index,
+            'id'          => $r['client']->id,
+            'comment'     => mb_strtolower($comments->get($r['client']->id)?->body ?? ''),
             'state'       => $invoice?->isIssued() ? 'yes' : 'no',
             'late'        => $balance->overdue() > 0,
             'name'        => mb_strtolower($r['client']->name),
@@ -30,12 +32,14 @@
         ];
     });
     $statusLabels = collect(Invoice::STATUSES)->map(fn ($s) => $s['label']);
+    // Комментарии про деньги по client_id: правятся прямо в списке, без перезагрузки
+    $commentMap = $comments->map(fn ($c) => ['text' => $c->body, 'signature' => $c->signature()]);
     // Память фильтров своя у каждого сотрудника в каждой фирме: компьютер бывает общий,
     // а вендор ходит по разным фирмам.
     $filtersKey = 'settlements.listFilters.' . \App\Support\TenantContext::id() . '.' . auth('employee')->id();
 @endphp
 
-<div class="space-y-4" x-data="settlementsBoard(@js($bulkLines), @js($bulkReopen), @js($rowMeta), @js($statusLabels), @js($filtersKey))">
+<div class="space-y-4" x-data="settlementsBoard(@js($bulkLines), @js($bulkReopen), @js($rowMeta), @js($statusLabels), @js($filtersKey), @js((object) $commentMap->all()))">
 
     @php
         $notIssued = $rows->count() - $issuedCount;
@@ -109,7 +113,7 @@
             <div class="flex flex-wrap items-center gap-3">
                 <button type="button" x-show="hasListFilters()" style="display: none;" @click="resetListFilters()" data-filters-reset
                         class="text-[13px] text-slate-500 hover:text-indigo-600 underline decoration-dotted underline-offset-2">Сбросить фильтры</button>
-                <input type="search" x-model="search" placeholder="Найти клиента" aria-label="Найти клиента"
+                <input type="search" x-model="search" placeholder="Клиент или комментарий" aria-label="Найти клиента или комментарий"
                        class="w-full sm:w-72 rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:border-indigo-500 focus:ring-indigo-500">
             </div>
         </div>
@@ -127,6 +131,7 @@
                         @include('partials.column-filter', ['key' => 'debtKind', 'sort' => 'debt', 'title' => 'Долг', 'plain' => true, 'pad' => 'px-3 py-3', 'align' => 'right', 'thClass' => 'sticky top-0 z-10 bg-white border-b border-slate-100'])
                         <th class="sticky top-0 z-10 bg-white border-b border-slate-100 px-3 py-3">Счёт за {{ $month }}</th>
                         @include('partials.column-filter', ['key' => 'status', 'title' => 'Статус', 'plain' => true, 'pad' => 'px-3 py-3', 'thClass' => 'sticky top-0 z-10 bg-white border-b border-slate-100'])
+                        <th class="sticky top-0 z-10 bg-white border-b border-slate-100 px-3 py-3">Комментарий</th>
                         <th class="sticky top-0 z-10 bg-white border-b border-slate-100 px-6 py-3"></th>
                     </tr>
                 </thead>
@@ -146,7 +151,7 @@
                             <td class="px-6 py-3">
                                 <a href="{{ $url }}" class="font-medium text-slate-900 hover:text-indigo-700">{{ $client->name }}</a>
                             </td>
-                            <td class="px-3 py-3 text-slate-500">{{ $client->responsibleEmployee?->full_name ?? 'не назначен' }}</td>
+                            <td class="px-3 py-3 text-slate-500 whitespace-nowrap">{{ $client->responsibleEmployee?->full_name ?? 'не назначен' }}</td>
                             <td class="px-3 py-3 text-right tabular-nums whitespace-nowrap">
                                 @if ($issued)
                                     <span class="font-semibold text-slate-900">{{ Invoice::money($sum) }}</span>
@@ -163,7 +168,7 @@
                                     {{ Invoice::money($balance->debt()) }}
                                 @endif
                             </td>
-                            <td class="px-3 py-3 text-[13px]">
+                            <td class="px-3 py-3 text-[13px] whitespace-nowrap">
                                 @if ($issued)
                                     <span class="text-slate-600">{{ $invoice->title() }}</span>
                                 @else
@@ -172,6 +177,35 @@
                             </td>
                             <td class="px-3 py-3">
                                 <span class="inline-block whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold {{ $status['class'] }}">{{ $status['label'] }}</span>
+                            </td>
+                            {{-- Комментарий про деньги: нажатие открывает правку тут же, в ячейке.
+                                 Ширина задана style: классов под эти числа в сборке нет. --}}
+                            <td class="px-3 py-2 text-[13px] align-middle" style="min-width: 180px; max-width: 280px">
+                                <template x-if="commentEdit !== {{ $client->id }}">
+                                    <button type="button" @click="startComment({{ $client->id }})"
+                                            class="block w-full text-left rounded-lg px-2 py-1 hover:bg-slate-100"
+                                            :title="comments[{{ $client->id }}] ? comments[{{ $client->id }}].text + '\n\n' + comments[{{ $client->id }}].signature : 'Добавить комментарий'">
+                                        <span x-show="comments[{{ $client->id }}]" class="line-clamp-2 whitespace-pre-line break-words text-slate-700"
+                                              x-text="comments[{{ $client->id }}]?.text"></span>
+                                        <span x-show="!comments[{{ $client->id }}]" class="text-slate-300">добавить</span>
+                                    </button>
+                                </template>
+                                <template x-if="commentEdit === {{ $client->id }}">
+                                    <div>
+                                        <textarea x-model="commentDraft" rows="4" maxlength="{{ \App\Models\ClientSettlementComment::MAX_LENGTH }}"
+                                                  aria-label="Комментарий: {{ $client->name }}" placeholder="Например: платит в конце месяца"
+                                                  x-init="$nextTick(() => $el.focus())"
+                                                  @keydown.escape.stop="cancelComment()" @keydown.enter.ctrl.prevent="saveComment()"
+                                                  class="block w-full rounded-lg border border-slate-200 px-2 py-1 text-[13px] resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500/50"></textarea>
+                                        <div class="mt-1 flex items-center gap-2">
+                                            <button type="button" @click="saveComment()" :disabled="commentSaving"
+                                                    class="rounded-lg bg-indigo-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-indigo-700"
+                                                    x-text="commentSaving ? 'Сохраняем…' : 'Сохранить'"></button>
+                                            <button type="button" @click="cancelComment()" class="text-xs text-slate-500 hover:text-slate-700">Отмена</button>
+                                        </div>
+                                        <p x-show="commentError" x-text="commentError" class="mt-1 text-xs text-red-700"></p>
+                                    </div>
+                                </template>
                             </td>
                             <td class="px-6 py-3 text-right">
                                 @if ($issued)
@@ -183,12 +217,12 @@
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="7" class="px-6 py-10 text-center text-slate-500">Действующих клиентов нет</td>
+                            <td colspan="8" class="px-6 py-10 text-center text-slate-500">Действующих клиентов нет</td>
                         </tr>
                     @endforelse
                     @if ($rows->isNotEmpty())
                         <tr x-show="!anyRowShown()" style="display: none;" data-empty-row>
-                            <td colspan="7" class="px-6 py-10 text-center text-slate-500">В этом списке никого нет</td>
+                            <td colspan="8" class="px-6 py-10 text-center text-slate-500">В этом списке никого нет</td>
                         </tr>
                     @endif
                 </tbody>
@@ -242,6 +276,7 @@
                                         <td class="px-3 py-2 align-top">
                                             <div class="pt-1 font-medium text-slate-900" :class="line.on ? '' : 'text-slate-400'" x-text="line.name"></div>
                                             <div class="text-xs text-slate-500" x-show="line.extra > 0" x-text="'+ дополнительные услуги ' + money(line.extra)"></div>
+                                            <div class="mt-0.5 text-xs text-amber-800 whitespace-pre-line break-words" x-show="line.comment" x-text="line.comment"></div>
                                         </td>
                                         <td class="px-3 py-2 align-top">
                                             <div class="pt-1 text-[13px] text-slate-500" x-text="line.hint"></div>
@@ -295,7 +330,7 @@
      * Список «Расчёты с клиентами»: быстрые кнопки, поиск, воронки, сортировка
      * и окно «Выставить всем». Всё на экране, данные не перезапрашиваем.
      */
-    function settlementsBoard(lines, reopen, rowMeta, statusLabels, filtersKey) {
+    function settlementsBoard(lines, reopen, rowMeta, statusLabels, filtersKey, comments) {
         const parseMoney = (value) => {
             const n = parseFloat(String(value ?? '').replace(/[\s\u00A0\u202F]/g, '').replace(',', '.'));
             return isNaN(n) ? 0 : n;
@@ -311,6 +346,11 @@
             sending: false,
             lines: lines.map(l => ({ ...l, blank: !l.on && !(parseMoney(l.amount) > 0) })),
             rowMeta: rowMeta,
+            comments: comments,
+            commentEdit: null,
+            commentDraft: '',
+            commentSaving: false,
+            commentError: '',
 
             init() {
                 this.restoreListFilters();
@@ -344,7 +384,7 @@
             /** Отбор до воронок: быстрые кнопки и поиск. По нему же считаются числа в меню. */
             matchesBase(row) {
                 const query = this.search.trim().toLowerCase();
-                if (query && !row.name.includes(query)) return false;
+                if (query && !row.name.includes(query) && !row.comment.includes(query)) return false;
                 if (this.quickFilter === 'no' || this.quickFilter === 'yes') return row.state === this.quickFilter;
                 if (this.quickFilter === 'late') return row.late;
                 return true;
@@ -470,6 +510,75 @@
                 if (['sum', 'debt'].includes(saved.sortBy) && ['asc', 'desc'].includes(saved.sortDir)) {
                     this.sortBy = saved.sortBy;
                     this.sortDir = saved.sortDir;
+                }
+            },
+
+            // --- Комментарий в строке ---
+
+            startComment(id) {
+                this.commentEdit = id;
+                this.commentDraft = this.comments[id]?.text ?? '';
+                this.commentError = '';
+            },
+
+            cancelComment() {
+                this.commentEdit = null;
+                this.commentError = '';
+            },
+
+            async saveComment() {
+                const id = this.commentEdit;
+                if (id === null || this.commentSaving) return;
+
+                const url = @js(url('settlements')) + '/' + id + '/comment';
+                this.commentSaving = true;
+                this.commentError = '';
+                try {
+                    const r = await fetch(url, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json',
+                            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+                        },
+                        body: JSON.stringify({ comment: this.commentDraft }),
+                    });
+                    const text = await r.text();
+                    let data = null;
+                    try { data = JSON.parse(text); } catch (e) { /* разберём ниже */ }
+
+                    if (r.status === 422 && data) {
+                        this.commentError = data.errors?.comment?.[0] || data.message || 'Комментарий не сохранён';
+                        return;
+                    }
+                    if (!r.ok || !data) {
+                        // Сам человек скажет только «не сохранилось», без кода и адреса не найти
+                        window.reportClientError?.({
+                            message: 'Комментарий в расчётах не сохранился (код ' + r.status + ')',
+                            source:  url,
+                            status:  r.status,
+                            context: (text || '').slice(0, 2000) || '(пустое тело ответа)',
+                        });
+                        this.commentError = r.status === 419
+                            ? 'Сессия истекла. Обновите страницу, текст скопируйте заранее.'
+                            : 'Не сохранилось. Обновите страницу и попробуйте ещё раз.';
+                        return;
+                    }
+
+                    if (data.comment === '') {
+                        delete this.comments[id];
+                    } else {
+                        this.comments[id] = { text: data.comment, signature: data.signature };
+                    }
+                    const meta = this.rowMeta.find(m => m.id === id);
+                    if (meta) meta.comment = data.comment.toLowerCase();
+                    const line = this.lines.find(l => l.id === id);
+                    if (line) line.comment = data.comment;
+                    this.commentEdit = null;
+                } catch (e) {
+                    this.commentError = 'Нет связи с сервером, комментарий не сохранён.';
+                } finally {
+                    this.commentSaving = false;
                 }
             },
 

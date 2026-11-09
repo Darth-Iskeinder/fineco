@@ -290,6 +290,34 @@
                         </div>
                     </form>
                 </div>
+
+                {{-- Комментарий про деньги: один на клиента, тот же, что в колонке списка. --}}
+                <div class="mt-4 border-t border-slate-100 pt-3 text-sm" x-data="{ edit: @js($errors->has('comment')) }">
+                    <div x-show="!edit">
+                        <div class="flex items-baseline justify-between gap-2">
+                            <span class="text-slate-500">Комментарий</span>
+                            <button type="button" @click="edit = true" class="text-[13px] text-indigo-600 hover:underline">{{ $comment ? 'изменить' : 'добавить' }}</button>
+                        </div>
+                        @if ($comment)
+                            <p class="mt-1 whitespace-pre-line break-words text-slate-800">{{ $comment->body }}</p>
+                            <p class="mt-1 text-xs text-slate-400">{{ $comment->signature() }}</p>
+                        @endif
+                    </div>
+                    <form x-show="edit" style="display: none;" method="POST" action="{{ route('settlements.comment', [$client, 'month' => $monthKey]) }}" class="space-y-2">
+                        @csrf
+                        <span class="text-[13px] font-medium text-slate-600">Комментарий</span>
+                        <textarea name="comment" rows="4" maxlength="{{ \App\Models\ClientSettlementComment::MAX_LENGTH }}" placeholder="Например: платит в конце месяца"
+                                  class="block w-full rounded-lg border border-slate-200 px-3 py-2 text-sm resize-none focus:border-indigo-500 focus:ring-indigo-500">{{ old('comment', $comment?->body) }}</textarea>
+                        @error('comment')
+                            <p class="text-xs text-red-700">{{ $message }}</p>
+                        @enderror
+                        <p class="text-xs text-slate-400">Виден в списке расчётов. Чтобы убрать, сотрите текст и сохраните.</p>
+                        <div class="flex justify-end gap-2">
+                            <button type="button" @click="edit = false" class="rounded-lg border border-slate-200 px-3 py-1.5 text-[13px] font-medium text-slate-700 hover:bg-slate-50">Отмена</button>
+                            <button type="submit" class="rounded-lg bg-indigo-600 px-3 py-1.5 text-[13px] font-semibold text-white hover:bg-indigo-700">Сохранить</button>
+                        </div>
+                    </form>
+                </div>
             </div>
 
             <div class="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">

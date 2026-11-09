@@ -6,11 +6,13 @@ use App\Models\Client;
 use App\Models\ClientInvoice;
 use App\Models\ClientOpeningBalance;
 use App\Models\ClientPayment;
+use App\Models\ClientSettlementComment;
 use App\Services\AutoAudit\AutoAuditClientBoard;
 use App\Services\Settlements\ClientInvoices;
 use App\Services\Settlements\ClientLedger;
 use App\Services\Settlements\SettlementsAccess;
 use Carbon\CarbonImmutable;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -58,6 +60,9 @@ class ClientSettlementsController extends Controller
         $debtors   = $withMoney->map(fn (int $id) => $balances[$id]);
         $issuedSum = $issued->sum(fn (array $r) => (float) $r['invoice']->total);
         $received  = $this->ledger->receivedIn($period, $withMoney);
+        $comments  = ClientSettlementComment::query()->with('author:id,full_name')
+            ->whereIn('client_id', $rows->map(fn (array $r) => $r['client']->id))
+            ->get()->keyBy('client_id');
 
         return view('settlements.index', [
             'period'       => $period,
@@ -71,7 +76,8 @@ class ClientSettlementsController extends Controller
             'debt'         => $debtors->sum(fn ($b) => $b->debt()),
             'overdue'      => $debtors->sum(fn ($b) => $b->overdue()),
             'overdueCount' => $debtors->filter(fn ($b) => $b->overdue() > 0)->count(),
-            'bulkLines'    => $this->bulkLines($rows),
+            'comments'     => $comments,
+            'bulkLines'    => $this->bulkLines($rows, $comments),
         ]);
     }
 
@@ -90,6 +96,7 @@ class ClientSettlementsController extends Controller
             'history'  => $history = $this->invoices->history($client),
             'missed'   => $this->invoices->missedMonths($history),
             'balance'  => $this->ledger->forClient($client),
+            'comment'  => ClientSettlementComment::query()->with('author:id,full_name')->where('client_id', $client->id)->first(),
             'payments' => ClientPayment::query()->with('author:id,full_name')
                 ->where('client_id', $client->id)->orderByDesc('paid_on')->orderByDesc('id')->get(),
             'today'    => ClientInvoices::today(),
@@ -189,11 +196,11 @@ class ClientSettlementsController extends Controller
      *
      * @return array<int, array{id: int, name: string, hint: string, was: ?float, amount: string, extra: float, on: bool}>
      */
-    private function bulkLines(Collection $rows): array
+    private function bulkLines(Collection $rows, Collection $comments): array
     {
         $old = old('bulk');
 
-        return $rows->reject(fn (array $r) => $r['invoice']?->isIssued())->map(function (array $r) use ($old) {
+        return $rows->reject(fn (array $r) => $r['invoice']?->isIssued())->map(function (array $r) use ($old, $comments) {
             $draft  = $r['invoice'];
             $amount = $draft?->amount ?? $r['suggested'];
             $extra  = $draft ? round((float) $draft->total - (float) $draft->amount, 2) : 0.0;
@@ -207,6 +214,8 @@ class ClientSettlementsController extends Controller
                 'amount' => $amount !== null ? ClientInvoice::money($amount) : '',
                 'extra'  => $extra,
                 'on'     => (float) $amount > 0,
+                // Комментарий в окне: чтобы не выставить тому, с кем договорились иначе
+                'comment' => $comments->get($id)?->body ?? '',
             ];
 
             if (is_array($old)) {
@@ -324,6 +333,35 @@ class ClientSettlementsController extends Controller
         ]);
 
         return $back->with('success', ($data['opening_kind'] === 'advance' ? 'Аванс' : 'Долг') . ' на начало сохранён');
+    }
+
+    /**
+     * Комментарий про деньги клиента. Из списка приходит запросом и ждёт JSON,
+     * со страницы клиента обычной формой. Пустой текст убирает комментарий.
+     */
+    public function saveComment(Request $request, Client $client): JsonResponse|RedirectResponse
+    {
+        $this->allowedOnly($client);
+
+        $data = $request->validate([
+            'comment' => ['nullable', 'string', 'max:' . ClientSettlementComment::MAX_LENGTH],
+        ], [
+            'comment.max' => 'Комментарий длиннее ' . ClientSettlementComment::MAX_LENGTH . ' знаков, сократите его',
+            'comment.*'   => 'Комментарий записан непонятно',
+        ]);
+
+        $body    = trim((string) ($data['comment'] ?? ''));
+        $comment = ClientSettlementComment::saveFor($client, $body, auth('employee')->user());
+
+        if ($request->expectsJson()) {
+            return response()->json([
+                'comment'   => $comment?->body ?? '',
+                'signature' => $comment?->signature() ?? '',
+            ]);
+        }
+
+        return redirect()->route('settlements.show', [$client, 'month' => $this->period($request)->format('Y-m')])
+            ->with('success', $comment ? 'Комментарий сохранён' : 'Комментарий убран');
     }
 
     /** Удалить ошибочную оплату. Остальные сами перераскладываются по счетам. */

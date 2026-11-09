@@ -159,6 +159,7 @@ Route::middleware('auth:employee')->group(function () {
         Route::post('/{client}/unissue', [ClientSettlementsController::class, 'unissue'])->whereNumber('client')->name('unissue');
         Route::post('/{client}/payments', [ClientSettlementsController::class, 'storePayment'])->whereNumber('client')->name('payments.store');
         Route::post('/{client}/opening', [ClientSettlementsController::class, 'saveOpening'])->whereNumber('client')->name('opening');
+        Route::post('/{client}/comment', [ClientSettlementsController::class, 'saveComment'])->whereNumber('client')->name('comment');
         Route::delete('/{client}/payments/{payment}', [ClientSettlementsController::class, 'destroyPayment'])
             ->whereNumber('client')->whereNumber('payment')->name('payments.destroy');
     });
