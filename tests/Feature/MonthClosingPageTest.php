@@ -259,6 +259,19 @@ class MonthClosingPageTest extends TestCase
         $this->assertCount(2, $cell['tasks']);
     }
 
+    /** Запись после окончания обслуживания не создаёт месяц (счёт ушедшему, ШД Айсу). */
+    public function test_log_after_service_end_does_not_count(): void
+    {
+        $client = $this->client(['service_end_date' => '2026-09-02']);
+        $item   = $this->item($client, $this->bank);
+        $this->task($client, $item, 8, 'completed');
+        $this->task($client, $item, 10, 'review');
+
+        $this->assertSame(MonthClosingBoard::CLOSED, $this->statusOf($client, '2026-07'));
+        $this->assertSame(MonthClosingBoard::NONE, $this->statusOf($client, '2026-09'));
+        $this->assertSame(MonthClosingBoard::NONE, $this->tableStatusOf($client, '2026-09'));
+    }
+
     // ── Чей месяц ─────────────────────────────────────────────────────────
 
     public function test_responsible_change_is_recorded(): void

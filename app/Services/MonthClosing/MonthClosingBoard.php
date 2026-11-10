@@ -288,8 +288,17 @@ class MonthClosingBoard
             }
         }
 
+        // Журнал за месяц после окончания обслуживания в закрытие не идёт: сметные задачи по
+        // этой дате уже обрезаны, а поздняя запись (счёт ушедшему клиенту, ШД Айсу 02.10.2026)
+        // создавала бы месяц, которого у клиента не было.
+        $end = $client->serviceEndsAt();
+
         foreach ($items as $item) {
             foreach ($logs['byItem'][$item->id] ?? [] as $log) {
+                if ($end && CarbonImmutable::create((int) $log->year, (int) $log->month, 1)->gt($end)) {
+                    continue;
+                }
+
                 if (!isset($used[$log->id])) {
                     $used[$log->id] = true;
                     $due = $log->due_date ? CarbonImmutable::parse(substr((string) $log->due_date, 0, 10)) : null;
