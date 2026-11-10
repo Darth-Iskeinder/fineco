@@ -219,6 +219,14 @@ class MonthClosingPageTest extends TestCase
         $cell = $this->cell($client, '2026-09');
         $this->assertSame(MonthClosingBoard::OVERDUE, $cell['status']);
         $this->assertSame(['вопросы автоаудита'], $cell['reasons']);
+
+        // Таблица считает вопросы облегчённо, без вкладки целиком: ответ тот же, что в карточке.
+        $this->assertSame(MonthClosingBoard::OVERDUE, $this->tableStatusOf($client, '2026-09'));
+
+        // Клиента без полного обслуживания автоаудит не проверяет: его строка не в счёт.
+        $client->update(['serves_payroll' => false]);
+        $this->assertSame(MonthClosingBoard::CLOSED, $this->statusOf($client, '2026-09'));
+        $this->assertSame(MonthClosingBoard::CLOSED, $this->tableStatusOf($client, '2026-09'));
     }
 
     public function test_handed_log_does_not_count(): void
@@ -271,6 +279,29 @@ class MonthClosingPageTest extends TestCase
 
         $this->asVendor()->get(route('month-closing.index', ['month' => '2026-09', 'chief' => $chief->id]))
             ->assertOk()->assertSee($open->name);
+    }
+
+    /** Главбух, у которого в выбранном месяце нет клиентов с задачами, чипом не показывается. */
+    public function test_chief_without_clients_in_the_month_is_hidden(): void
+    {
+        $active = $this->employee(Role::HEAD_ACCOUNTANT);
+        $fired = $this->employee(Role::HEAD_ACCOUNTANT);
+
+        $this->item($this->client(['responsible_employee_id' => $active->id]), $this->bank);
+        // Обслуживание остановлено в конце июля: задачи были только за июнь.
+        $stopped = $this->client(['responsible_employee_id' => $fired->id, 'service_end_date' => '2026-07-31']);
+        $this->item($stopped, $this->bank);
+
+        $chiefIds = fn (string $month) => $this->asVendor()->get(route('month-closing.index', ['month' => $month]))
+            ->assertOk()->viewData('chiefs')->pluck('id')->all();
+
+        $this->assertSame([$active->id], $chiefIds('2026-08'));
+        $this->assertEqualsCanonicalizing([$active->id, $fired->id], $chiefIds('2026-06'));
+
+        // Выбранный чип не пропадает, даже если клиентов в месяце нет: иначе его не снять.
+        $this->assertContains($fired->id, $this->asVendor()
+            ->get(route('month-closing.index', ['month' => '2026-08', 'chief' => $fired->id]))
+            ->viewData('chiefs')->pluck('id')->all());
     }
 
     public function test_card_lists_open_tasks_and_marks_what_is_not_connected(): void
@@ -331,6 +362,17 @@ class MonthClosingPageTest extends TestCase
         $this->assertNotNull($row, 'Клиента нет в таблице');
 
         return $row['cells'][$month];
+    }
+
+    /** Статус из расчёта всей таблицы, а не карточки одного клиента. */
+    private function tableStatusOf(Client $client, string $month): string
+    {
+        $today = CarbonImmutable::now()->startOfDay();
+        $rows  = (new MonthClosingBoard($today))->build(MonthClosingBoard::window(CarbonImmutable::parse($month . '-01'), $today))['rows'];
+        $row   = collect($rows)->firstWhere('client.id', $client->id);
+        $this->assertNotNull($row, 'Клиента нет в таблице');
+
+        return $row['cells'][$month]['status'];
     }
 
     private function statusOf(Client $client, string $month): string

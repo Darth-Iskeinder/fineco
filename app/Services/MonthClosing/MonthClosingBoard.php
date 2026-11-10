@@ -4,11 +4,13 @@ namespace App\Services\MonthClosing;
 
 use App\Models\BuhTaskLog;
 use App\Models\Client;
+use App\Models\ClientServiceSchedule;
 use App\Models\Employee;
 use App\Models\EstimateItem;
 use App\Models\Service;
 use App\Models\Tenant;
 use App\Services\AutoAudit\AutoAuditClientBoard;
+use App\Services\AutoAudit\AutoAuditSources;
 use App\Support\TenantContext;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
@@ -59,6 +61,11 @@ class MonthClosingBoard
 
     /** Статусы автоаудита, которые держат месяц открытым: по ним ждут ответа или решения. */
     public const AUDIT_BLOCKING = [AutoAuditClientBoard::ACCOUNTANT, AutoAuditClientBoard::CHIEF];
+
+    /** Разобранное расписание БП, сроки по отрезку и месяц работы по месяцу задачи: кеш на один расчёт. */
+    private array $schedules = [];
+    private array $dueCache  = [];
+    private array $periods   = [];
 
     public function __construct(private readonly CarbonImmutable $today) {}
 
@@ -117,7 +124,9 @@ class MonthClosingBoard
             ->with([
                 'clientStatus',
                 'serviceSchedules',
-                'estimates.rootItems' => fn ($q) => $q->whereNull('parent_id')->orderBy('sort_order'),
+                // Только нужные колонки: у Fineco 2000 позиций, лишнее заметно на скорости.
+                'estimates.rootItems' => fn ($q) => $q->whereNull('parent_id')->orderBy('sort_order')
+                    ->select(['id', 'estimate_id', 'parent_id', 'service_id', 'name', 'branch_label', 'assignee_id', 'tasks_start_from', 'tasks_end_at', 'sort_order']),
             ])
             ->whereHas('estimates.rootItems', fn ($q) => $q->whereNull('parent_id'))
             ->orderBy('name')
@@ -127,8 +136,14 @@ class MonthClosingBoard
         $services = Service::whereIn('id', $items->pluck('service_id')->filter()->unique()->values())->get()->keyBy('id');
         $logs     = $this->logs($items->pluck('id')->all(), $taskFrom, $taskTo);
 
+        // Автоаудит: карточке нужна клетка целиком (статус и пояснение), таблице хватает
+        // ответа «есть ли вопрос». Полный расчёт вкладки на всю фирму стоил 2 с (10.11.2026).
         $autoAudit = self::withAutoAudit();
-        $audit     = $autoAudit ? $this->autoAuditCells($months, $clientId) : [];
+        $audit     = match (true) {
+            !$autoAudit        => [],
+            $clientId !== null => $this->autoAuditCells($months, $clientId),
+            default            => $this->autoAuditQuestions($months, $clients, $services),
+        };
 
         $rows = [];
 
@@ -205,17 +220,19 @@ class MonthClosingBoard
 
             $itemFrom = $item->tasksStartFrom()?->max($from) ?? $from;
             $itemTo   = $item->tasksEndAt()?->min($to) ?? $to;
-            $dues     = $itemFrom->lte($itemTo)
-                ? $service->dueDatesForClient($overrides->get($item->service_id), $itemFrom, $itemTo)
-                : [];
-            $weekly   = $service->periodicityKind() === 'weekly';
 
-            foreach ($dues as $due) {
-                $due = CarbonImmutable::parse($due)->startOfDay();
+            if ($itemFrom->gt($itemTo)) {
+                continue;
+            }
 
+            [$weekly, $dues] = $this->dues($service, $overrides->get($item->service_id), $itemFrom, $itemTo);
+            $name     = $this->taskName($item);
+            $assignee = (int) ($item->assignee_id ?? 0) ?: null;
+
+            foreach ($dues as $date => $due) {
                 // Недельных в месяце несколько, их различает дата. У помесячных дата в журнале
                 // бывает, а бывает и нет: тогда ищем по месяцу (как дашборд).
-                $log = $logs['byDate']["{$item->id}:{$due->toDateString()}"]
+                $log = $logs['byDate']["{$item->id}:{$date}"]
                     ?? ($weekly ? null : ($logs['byMonth']["{$item->id}:{$due->year}:{$due->month}"] ?? null));
 
                 if ($log && isset($used[$log->id])) {
@@ -226,7 +243,7 @@ class MonthClosingBoard
                     $used[$log->id] = true;
                 }
 
-                $this->addTask($tasks, $item, $due->year, $due->month, $due, $log);
+                $this->addTask($tasks, $name, $assignee, $due->year, $due->month, $due, $log);
             }
         }
 
@@ -234,7 +251,8 @@ class MonthClosingBoard
             foreach ($logs['byItem'][$item->id] ?? [] as $log) {
                 if (!isset($used[$log->id])) {
                     $used[$log->id] = true;
-                    $this->addTask($tasks, $item, (int) $log->year, (int) $log->month, $log->due_date?->toImmutable()->startOfDay(), $log);
+                    $due = $log->due_date ? CarbonImmutable::parse(substr((string) $log->due_date, 0, 10)) : null;
+                    $this->addTask($tasks, $this->taskName($item), (int) ($item->assignee_id ?? 0) ?: null, (int) $log->year, (int) $log->month, $due, $log);
                 }
             }
         }
@@ -242,13 +260,52 @@ class MonthClosingBoard
         return $tasks;
     }
 
-    private function addTask(array &$tasks, EstimateItem $item, int $year, int $month, ?CarbonImmutable $due, ?BuhTaskLog $log): void
+    /**
+     * Сроки БП за отрезок, ключ 'Y-m-d'. То же, что Service::dueDatesForClient, но расписание
+     * БП разбирается один раз, а сроки без особого расписания клиента считаются один раз на
+     * отрезок: у большинства клиентов отрезок одинаковый, и это главная экономия.
+     *
+     * @return array{0: bool, 1: array<string, CarbonImmutable>} [недельный ли, сроки]
+     */
+    private function dues(Service $service, ?ClientServiceSchedule $override, CarbonImmutable $from, CarbonImmutable $to): array
     {
-        $period = CarbonImmutable::create($year, $month, 1)->subMonth()->format('Y-m');
+        $schedule = $override
+            ? $service->resolveForClient($override)
+            : ($this->schedules[$service->id] ??= $service->resolveForClient(null));
+        $kind = Service::kindForPeriodicity($schedule['periodicity']);
+        $key  = $override ? null : "{$service->id}:{$from->timestamp}:{$to->timestamp}";
+
+        if ($key !== null && isset($this->dueCache[$key])) {
+            return $this->dueCache[$key];
+        }
+
+        $dues = [];
+        foreach (Service::computeDueDates($kind, $schedule['months'], $schedule['days'], $from, $to) as $due) {
+            $dues[$due->toDateString()] = $due;
+        }
+
+        $result = [$kind === 'weekly', $dues];
+
+        if ($key !== null) {
+            $this->dueCache[$key] = $result;
+        }
+
+        return $result;
+    }
+
+    private function taskName(EstimateItem $item): string
+    {
+        return $item->name . ($item->branch_label ? ', ' . $item->branch_label : '');
+    }
+
+    /** @param object|null $log строка журнала задачи (без модели, см. logs()) */
+    private function addTask(array &$tasks, string $name, ?int $itemAssignee, int $year, int $month, ?CarbonImmutable $due, ?object $log): void
+    {
+        $period = $this->periods[$year * 100 + $month] ??= CarbonImmutable::create($year, $month, 1)->subMonth()->format('Y-m');
 
         $tasks[$period][] = [
-            'name'     => $item->name . ($item->branch_label ? ', ' . $item->branch_label : ''),
-            'assignee' => (int) ($log?->employee_id ?: ($item->assignee_id ?? 0)) ?: null,
+            'name'     => $name,
+            'assignee' => (int) ($log?->employee_id ?: $itemAssignee) ?: null,
             'due'      => $due,
             'log'      => $log,
             'done'     => $log?->status === 'completed',
@@ -291,6 +348,7 @@ class MonthClosingBoard
             return $empty;
         }
 
+        // Без моделей и только нужные колонки: на Fineco 4000 журналов, модели стоили секунду.
         $rows = BuhTaskLog::whereIn('estimate_item_id', $itemIds)
             ->where('status', '<>', BuhTaskLog::STATUS_HANDED)
             ->where(fn (Builder $q) => $q->where('year', '>', $from->year)
@@ -298,13 +356,14 @@ class MonthClosingBoard
             ->where(fn (Builder $q) => $q->where('year', '<', $to->year)
                 ->orWhere(fn (Builder $q) => $q->where('year', $to->year)->where('month', '<=', $to->month)))
             ->orderBy('id')
-            ->get();
+            ->toBase()
+            ->get(['id', 'estimate_item_id', 'employee_id', 'year', 'month', 'due_date', 'status']);
 
         $logs = $empty;
 
         foreach ($rows as $log) {
             if ($log->due_date) {
-                $logs['byDate']["{$log->estimate_item_id}:{$log->due_date->toDateString()}"] = $log;
+                $logs['byDate'][$log->estimate_item_id . ':' . substr((string) $log->due_date, 0, 10)] = $log;
             }
 
             $logs['byMonth']["{$log->estimate_item_id}:{$log->year}:{$log->month}"] = $log;
@@ -312,14 +371,8 @@ class MonthClosingBoard
 
         // Для «сирот» берём только последний журнал слота, иначе старый журнал того же
         // месяца встал бы отдельной задачей.
-        foreach ($logs['byMonth'] as $log) {
-            $logs['byItem'][$log->estimate_item_id][] = $log;
-        }
-
-        foreach ($logs['byDate'] as $log) {
-            if (!in_array($log, $logs['byItem'][$log->estimate_item_id] ?? [], true)) {
-                $logs['byItem'][$log->estimate_item_id][] = $log;
-            }
+        foreach ([...array_values($logs['byMonth']), ...array_values($logs['byDate'])] as $log) {
+            $logs['byItem'][$log->estimate_item_id][$log->id] = $log;
         }
 
         return $logs;
@@ -340,6 +393,34 @@ class MonthClosingBoard
         }
 
         return $cells;
+    }
+
+    /**
+     * Вопросы автоаудита для таблицы: только «ждёт бухгалтера» и «ждёт руководителя» по
+     * клиенту и месяцу. Клиенты те же, что видит вкладка «По клиентам»: полное обслуживание
+     * и размеченные БП автоаудита в смете. Остальных вкладка не проверяет, их строки не в счёт.
+     *
+     * @return array<int, array<string, array{status: string}>>
+     */
+    private function autoAuditQuestions(array $months, Collection $clients, Collection $services): array
+    {
+        $refs = array_column(AutoAuditSources::SIDES, 'ref');
+
+        $connected = $clients
+            ->filter(fn (Client $c) => $c->servesEverything()
+                && ($c->estimates->first()?->rootItems ?? collect())->contains(fn (EstimateItem $i) => in_array((int) $services->get($i->service_id)?->reference_id, $refs, true)))
+            ->pluck('id')
+            ->flip();
+
+        $questions = [];
+
+        foreach ((new AutoAuditClientBoard($this->today))->questions($months) as $clientId => $byMonth) {
+            if (isset($connected[$clientId])) {
+                $questions[$clientId] = array_map(fn (string $status) => ['status' => $status], $byMonth);
+            }
+        }
+
+        return $questions;
     }
 
     /**

@@ -44,16 +44,20 @@ class MonthClosingController extends Controller
         $name      = fn (?int $id) => $id ? ($employees[$id] ?? 'сотрудник удалён') : 'без главбуха';
         $rows      = collect($data['rows']);
 
+        $chief = $request->query('chief');
+        $chief = $chief === 'none' ? 'none' : ((int) $chief ?: null);
+
         // Плитки считаются до фильтра: чип выбирает строки, а не меняет итоги.
-        $firm  = $this->tally($rows, $key);
+        // Главбух без клиентов с задачами в выбранном месяце не показывается: «0 из 0» только
+        // мешает. Так уходят уволенные, на которых остались остановленные клиенты (Жусупова,
+        // 10.11.2026). Выбранный чип остаётся, иначе его не снять.
+        $firm   = $this->tally($rows, $key);
         $chiefs = $rows
             ->groupBy(fn (array $r) => $r['chief'] ?? 0)
             ->map(fn ($group, $id) => ['id' => (int) $id ?: null, 'name' => $name((int) $id ?: null)] + $this->tally($group, $key))
+            ->filter(fn (array $c) => $c['total'] > 0 || (string) ($c['id'] ?? 'none') === (string) $chief)
             ->sortBy(fn (array $c) => [$c['id'] === null ? 1 : 0, mb_strtolower($c['name'])])
             ->values();
-
-        $chief = $request->query('chief');
-        $chief = $chief === 'none' ? 'none' : ((int) $chief ?: null);
 
         $filtered = $rows
             ->filter(fn (array $r) => match (true) {

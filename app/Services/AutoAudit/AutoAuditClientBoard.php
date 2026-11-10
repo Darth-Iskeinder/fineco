@@ -508,6 +508,55 @@ class AutoAuditClientBoard
             ->all();
     }
 
+    /**
+     * Открытые вопросы по клиентам и месяцам: тот же ответ, что дают клетки build()
+     * «ждёт бухгалтера» и «ждёт руководителя», но без задач и сверок. Нужен «Закрытию
+     * месяца»: ему важно только, есть ли вопрос (10.11.2026, полный расчёт стоил 2 с).
+     *
+     * Клиентов не фильтрует: какие клиенты подключены к автоаудиту, решает вызывающий.
+     *
+     * @param CarbonImmutable[] $months см. window()
+     * @return array<int, array<string, string>> клиент => 'Y-m' => ACCOUNTANT или CHIEF
+     */
+    public function questions(array $months): array
+    {
+        $first  = $months[0];
+        $last   = end($months);
+        $tenant = Tenant::find(TenantContext::id());
+
+        // Раньше старта автоаудита в фирме клеток нет, как в build().
+        $start = $tenant?->autoAuditFrom() ?? AutoAuditResult::current()->min('period_from');
+        $start = $start ? CarbonImmutable::parse(substr((string) $start, 0, 7) . '-01') : null;
+
+        $results = AutoAuditResult::current()
+            ->whereIn('outcome', AutoAuditResult::FINDING_OUTCOMES)
+            ->whereNotNull('period_to')
+            ->whereBetween('period_to', [$first->toDateString(), $last->endOfMonth()->toDateString()])
+            ->get();
+
+        $findings  = $this->findings($results, false);
+        $questions = [];
+
+        foreach ($results as $result) {
+            $month = $result->period_to->format('Y-m');
+
+            if ($start && $result->period_to->lt($start)) {
+                continue;
+            }
+
+            $turn = $this->issue($result, $findings[$result->key()] ?? null)['turn'];
+
+            // Вопрос бухгалтеру важнее ответа, ждущего руководителя: как в monthCell().
+            if ($turn === self::TURN_ACCOUNTANT) {
+                $questions[$result->client_id][$month] = self::ACCOUNTANT;
+            } elseif ($turn === self::TURN_CHIEF) {
+                $questions[$result->client_id][$month] ??= self::CHIEF;
+            }
+        }
+
+        return $questions;
+    }
+
     /** Строка результата, за кем по ней ход и сколько дней он там. */
     private function issue(AutoAuditResult $result, ?AutoAuditFinding $finding): array
     {
