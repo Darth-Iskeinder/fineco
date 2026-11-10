@@ -4,6 +4,7 @@ namespace App\Services\MonthClosing;
 
 use App\Models\BuhTaskLog;
 use App\Models\Client;
+use App\Models\ClientResponsibleChange;
 use App\Models\ClientServiceSchedule;
 use App\Models\Employee;
 use App\Models\EstimateItem;
@@ -145,6 +146,15 @@ class MonthClosingBoard
             default            => $this->autoAuditQuestions($months, $clients, $services),
         };
 
+        $changes   = ClientResponsibleChange::whereIn('client_id', $clients->pluck('id'))
+            ->orderBy('changed_at')->orderBy('id')
+            ->get(['client_id', 'previous_employee_id', 'employee_id', 'changed_at'])
+            ->groupBy('client_id');
+        $employees = Employee::withTrashed()->get(['id', 'full_name', 'created_at', 'hired_at']);
+        // С какого дня человек мог вести клиентов: принят или заведён в системе, что раньше.
+        $since     = $employees->mapWithKeys(fn (Employee $e) => [$e->id => collect([$e->created_at, $e->hired_at])
+            ->filter()->map(fn ($d) => CarbonImmutable::parse($d)->startOfDay())->min()]);
+
         $rows = [];
 
         foreach ($clients as $client) {
@@ -164,6 +174,7 @@ class MonthClosingBoard
                     $tasks[$key] ?? [],
                     $autoAudit ? ($audit[$client->id][$key] ?? null) : null,
                 );
+                $cells[$key] += $this->monthChief($client, $cells[$key]['deadline'], $changes->get($client->id, collect()), $since);
             }
 
             $rows[] = [
@@ -175,9 +186,39 @@ class MonthClosingBoard
 
         return [
             'rows'      => $rows,
-            'employees' => Employee::withTrashed()->pluck('full_name', 'id'),
+            'employees' => $employees->pluck('full_name', 'id'),
             'autoAudit' => $autoAudit,
         ];
+    }
+
+    /**
+     * Чей это месяц: кто вёл клиента в день срока закрытия (договорились 10.11.2026).
+     *
+     * Кто вёл, берём из истории смен ответственного. Она пишется с 10.11.2026, прежние
+     * передачи неизвестны: до первой записи считаем, что вёл нынешний. Поэтому ещё одна
+     * страховка: месяц не засчитывается человеку, который появился в системе позже срока.
+     * Без неё новая главбух получала июль, закрытый до неё (Сыдыкова, Fineco, 10.11.2026).
+     *
+     * Позже, когда будем помнить дату закрытия: закрытый до срока месяц засчитывается тому,
+     * кто вёл в день закрытия, и передача за 10 дней до срока выводит месяц из процента.
+     *
+     * @return array{chief: ?int, chiefUnknown: bool}
+     */
+    private function monthChief(Client $client, ?CarbonImmutable $deadline, Collection $changes, Collection $since): array
+    {
+        $current = $client->responsible_employee_id ? (int) $client->responsible_employee_id : null;
+
+        if ($deadline === null) {
+            return ['chief' => $current, 'chiefUnknown' => false];
+        }
+
+        [$chief] = ClientResponsibleChange::responsibleAt($changes, $current, $deadline->endOfDay());
+
+        if ($chief !== null && ($since[$chief] ?? null)?->gt($deadline)) {
+            return ['chief' => null, 'chiefUnknown' => true];
+        }
+
+        return ['chief' => $chief, 'chiefUnknown' => false];
     }
 
     /**

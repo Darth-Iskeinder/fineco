@@ -3,7 +3,9 @@
 namespace App\Http\Controllers;
 
 use App\Models\Client;
+use App\Models\ClientResponsibleChange;
 use App\Models\Tenant;
+use App\Services\AutoAudit\AutoAuditSources;
 use App\Services\MonthClosing\MonthClosingBoard;
 use App\Support\Impersonation;
 use App\Support\TenantContext;
@@ -44,8 +46,17 @@ class MonthClosingController extends Controller
         $name      = fn (?int $id) => $id ? ($employees[$id] ?? 'сотрудник удалён') : 'без главбуха';
         $rows      = collect($data['rows']);
 
-        $chief = $request->query('chief');
-        $chief = $chief === 'none' ? 'none' : ((int) $chief ?: null);
+        $chief = (string) $request->query('chief') ?: null;
+        $chief = in_array($chief, ['none', 'unknown'], true) || ctype_digit((string) $chief) ? $chief : null;
+
+        // Главбух строки за выбранный месяц: кто вёл клиента в срок закрытия, а не нынешний
+        // ответственный (см. MonthClosingBoard::monthChief). 'unknown' = пришёл позже срока.
+        $keyOf = fn (array $r) => $r['cells'][$key]['chiefUnknown'] ? 'unknown' : (string) ($r['cells'][$key]['chief'] ?? 'none');
+        $label = fn (string $k) => match ($k) {
+            'none'    => 'Без главбуха',
+            'unknown' => 'Не определён',
+            default   => AutoAuditSources::shortName($name((int) $k)),
+        };
 
         // Плитки считаются до фильтра: чип выбирает строки, а не меняет итоги.
         // Главбух без клиентов с задачами в выбранном месяце не показывается: «0 из 0» только
@@ -53,20 +64,19 @@ class MonthClosingController extends Controller
         // 10.11.2026). Выбранный чип остаётся, иначе его не снять.
         $firm   = $this->tally($rows, $key);
         $chiefs = $rows
-            ->groupBy(fn (array $r) => $r['chief'] ?? 0)
-            ->map(fn ($group, $id) => ['id' => (int) $id ?: null, 'name' => $name((int) $id ?: null)] + $this->tally($group, $key))
-            ->filter(fn (array $c) => $c['total'] > 0 || (string) ($c['id'] ?? 'none') === (string) $chief)
+            ->groupBy($keyOf)
+            ->map(fn ($group, $k) => ['key' => (string) $k, 'id' => ctype_digit((string) $k) ? (int) $k : null, 'name' => $label((string) $k)] + $this->tally($group, $key))
+            ->filter(fn (array $c) => $c['total'] > 0 || $c['key'] === $chief)
             ->sortBy(fn (array $c) => [$c['id'] === null ? 1 : 0, mb_strtolower($c['name'])])
             ->values();
 
         $filtered = $rows
-            ->filter(fn (array $r) => match (true) {
-                $chief === null   => true,
-                $chief === 'none' => $r['chief'] === null,
-                default           => $r['chief'] === $chief,
-            })
-            ->sortBy(fn (array $r) => [$r['chief'] === null ? 1 : 0, mb_strtolower($name($r['chief'])), mb_strtolower($r['client']->name)])
+            ->filter(fn (array $r) => $chief === null || $keyOf($r) === $chief)
+            ->sortBy(fn (array $r) => [ctype_digit($keyOf($r)) ? 0 : 1, mb_strtolower($label($keyOf($r))), mb_strtolower($r['client']->name)])
             ->values();
+
+        // С какого дня записываются смены ответственных: раньше передачи не известны.
+        $historySince = ClientResponsibleChange::min('changed_at');
 
         return view('month-closing.index', [
             'months'    => $months,
@@ -79,6 +89,9 @@ class MonthClosingController extends Controller
             'chiefs'    => $chiefs,
             'chief'     => $chief,
             'name'      => $name,
+            'keyOf'     => $keyOf,
+            'label'     => $label,
+            'historySince' => $historySince ? CarbonImmutable::parse($historySince)->setTimezone(config('app.display_timezone')) : null,
             'autoAudit' => $data['autoAudit'],
             'vendor'    => Impersonation::isActive(),
             'openToManager' => (bool) Tenant::find(TenantContext::id())?->monthClosingEnabled(),

@@ -7,6 +7,7 @@ use App\Models\AuditTaskReview;
 use App\Models\AutoAuditResult;
 use App\Models\BuhTaskLog;
 use App\Models\Client;
+use App\Models\ClientResponsibleChange;
 use App\Models\Employee;
 use App\Models\Estimate;
 use App\Models\EstimateItem;
@@ -258,6 +259,69 @@ class MonthClosingPageTest extends TestCase
         $this->assertCount(2, $cell['tasks']);
     }
 
+    // ── Чей месяц ─────────────────────────────────────────────────────────
+
+    public function test_responsible_change_is_recorded(): void
+    {
+        $first  = $this->employee(Role::HEAD_ACCOUNTANT);
+        $second = $this->employee(Role::HEAD_ACCOUNTANT);
+
+        $client = $this->client(['responsible_employee_id' => $first->id]);
+        $client->update(['name' => 'Другое имя ' . uniqid()]);
+        $client->update(['responsible_employee_id' => $second->id]);
+
+        $changes = ClientResponsibleChange::where('client_id', $client->id)->orderBy('id')->get();
+
+        $this->assertCount(1, $changes, 'Только смена: создание и правка имени не в счёт');
+        $this->assertSame([$first->id, $second->id], [(int) $changes[0]->previous_employee_id, (int) $changes[0]->employee_id]);
+        $this->assertSame($this->tenant->id, (int) $changes[0]->tenant_id);
+    }
+
+    /** Месяц засчитывается тому, кто вёл клиента в срок закрытия, а не нынешнему. */
+    public function test_month_belongs_to_whoever_led_the_client_at_the_deadline(): void
+    {
+        $before = $this->employee(Role::HEAD_ACCOUNTANT);
+        $after  = $this->employee(Role::HEAD_ACCOUNTANT);
+
+        Carbon::setTestNow('2026-09-01 12:00:00');
+        $client = $this->client(['responsible_employee_id' => $before->id]);
+        $this->task($client, $this->item($client, $this->bank), 10, 'completed');
+
+        // Передали 20 октября: срок сентября (05.10) уже прошёл, срок октября (05.11) впереди.
+        Carbon::setTestNow('2026-10-20 12:00:00');
+        $client->update(['responsible_employee_id' => $after->id]);
+
+        Carbon::setTestNow('2026-11-10 12:00:00');
+
+        $this->assertSame($before->id, $this->cell($client, '2026-09')['chief']);
+        $this->assertSame($after->id, $this->cell($client, '2026-10')['chief']);
+
+        $this->asVendor()->get(route('month-closing.index', ['month' => '2026-09']))
+            ->assertOk()
+            ->assertViewHas('chiefs', fn ($chiefs) => $chiefs->pluck('id')->all() === [$before->id]);
+    }
+
+    /** До истории передач: новичку не засчитывается месяц, срок которого прошёл до его прихода. */
+    public function test_newcomer_does_not_get_months_before_they_joined(): void
+    {
+        $newcomer = $this->employee(Role::HEAD_ACCOUNTANT, null, '2026-11-02 09:00:00');
+        $client   = $this->client(['responsible_employee_id' => $newcomer->id]);
+        // Клиента передали до того, как стали записывать историю: записей нет.
+        $this->task($client, $this->item($client, $this->bank), 10, 'completed');
+
+        $september = $this->cell($client, '2026-09');
+        $this->assertNull($september['chief']);
+        $this->assertTrue($september['chiefUnknown']);
+
+        // Октябрь закрывают до 05.11, а она пришла 02.11: её месяц.
+        $this->assertSame($newcomer->id, $this->cell($client, '2026-10')['chief']);
+
+        $this->asVendor()->get(route('month-closing.index', ['month' => '2026-09']))
+            ->assertOk()
+            ->assertSee('Не определён')
+            ->assertViewHas('chiefs', fn ($chiefs) => $chiefs->pluck('key')->all() === ['unknown']);
+    }
+
     // ── Страница и карточка ───────────────────────────────────────────────
 
     public function test_tiles_count_closed_clients_by_chief(): void
@@ -380,9 +444,10 @@ class MonthClosingPageTest extends TestCase
         return $this->cell($client, $month)['status'];
     }
 
-    private function employee(string $role, ?string $login = null): Employee
+    /** Сотрудник «работает давно»: появился в системе в начале года, раньше всех сроков. */
+    private function employee(string $role, ?string $login = null, string $since = '2026-01-01 00:00:00'): Employee
     {
-        return Employee::firstOrCreate(
+        $employee = Employee::firstOrCreate(
             ['email' => 'month.closing.' . ($login ?? $role . '.' . uniqid()) . '@example.com'],
             [
                 'full_name' => 'Сотрудник ' . $role, 'position' => $role, 'password' => 'secret123',
@@ -390,6 +455,12 @@ class MonthClosingPageTest extends TestCase
                 'status' => Employee::STATUS_ACTIVE,
             ],
         );
+
+        if ($employee->wasRecentlyCreated) {
+            $employee->forceFill(['created_at' => $since])->saveQuietly();
+        }
+
+        return $employee;
     }
 
     private function asVendor(): static

@@ -164,6 +164,38 @@ class Client extends Model
         });
 
         static::saving(fn (Client $client) => $client->syncServiceWithStatus());
+
+        // История ответственных для «Закрытия месяца». Пишем здесь, а не в контроллерах:
+        // ответственного меняют карточка, импорт и увольнение сотрудника. Сбой записи не
+        // должен ломать сохранение клиента, поэтому только в журнал ошибок.
+        // Только смены: до первой смены вёл тот, кто записан в ней «был». Запись о создании
+        // клиента сказала бы «до этого никто», и месяцы до создания остались бы без главбуха.
+        static::updated(function (Client $client) {
+            if ($client->wasChanged('responsible_employee_id')) {
+                $client->recordResponsibleChange($client->getOriginal('responsible_employee_id'));
+            }
+        });
+    }
+
+    private function recordResponsibleChange(mixed $previous): void
+    {
+        // Своя точка сохранения: в PostgreSQL упавший запрос портит всю внешнюю транзакцию,
+        // и клиент бы не сохранился, даже если ошибку поймали.
+        try {
+            $change = new ClientResponsibleChange([
+                'client_id'            => $this->id,
+                'previous_employee_id' => $previous ? (int) $previous : null,
+                'employee_id'          => $this->responsible_employee_id ? (int) $this->responsible_employee_id : null,
+                'changed_by'           => auth('employee')->id(),
+                'changed_at'           => now(),
+            ]);
+            // Фирма клиента, а не текущая: импорт и команды бывают и без выбранной фирмы.
+            $change->tenant_id = $this->tenant_id;
+
+            \Illuminate\Support\Facades\DB::transaction(fn () => $change->save());
+        } catch (\Throwable $e) {
+            report($e);
+        }
     }
 
     /**

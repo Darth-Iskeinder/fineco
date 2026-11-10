@@ -13,8 +13,7 @@
     $lower     = fn ($m) => mb_strtolower(Page::MONTHS[$m->month]);
     $count     = fn (int $n, array $forms) => \App\Services\AutoAudit\AutoAuditClientBoard::count($n, $forms);
 
-    $chiefParam = $chief === 'none' ? 'none' : $chief;
-    $url = fn (array $change) => route('month-closing.index', array_filter(array_merge(['month' => $key, 'chief' => $chiefParam], $change), fn ($v) => $v !== null));
+    $url = fn (array $change) => route('month-closing.index', array_filter(array_merge(['month' => $key, 'chief' => $chief], $change), fn ($v) => $v !== null));
 
     $pctColor = fn (?int $pct) => match (true) {
         $pct === null => 'text-slate-300',
@@ -37,6 +36,11 @@
             Месяц клиента закрыт, когда все его сметные задачи приняты{{ $autoAudit ? ' и по автоаудиту нет вопросов' : '' }}.
             Работа за месяц идёт в задачах следующего: сентябрь закрывают в октябре.
             Срок закрытия пока по последнему сроку задач месяца. Ручной аудит к закрытию пока не подключён.
+            <span class="block mt-1">
+                Месяц засчитывается главбуху, который вёл клиента в срок закрытия.
+                Передачи клиентов {{ $historySince ? 'записываются с ' . $historySince->format('d.m.Y') : 'пока не записывались' }}, более ранние не учтены:
+                до них главбухом считается нынешний ответственный, но не тот, кто появился в системе позже срока.
+            </span>
         </p>
 
         <div class="inline-flex items-center rounded-lg border border-slate-200 bg-white text-sm">
@@ -59,9 +63,9 @@
         <a href="{{ $url(['chief' => null]) }}"
            @class(['rounded-full border px-4 py-1.5 text-sm font-medium transition-colors', 'border-slate-900 bg-slate-900 text-white' => $chief === null, 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50' => $chief !== null])>Все</a>
         @foreach ($chiefs as $c)
-            @php $value = $c['id'] ?? 'none'; $active = (string) $chief === (string) $value; @endphp
+            @php $value = $c['key']; $active = $chief === $value; @endphp
             <a href="{{ $url(['chief' => $active ? null : $value]) }}"
-               @class(['rounded-full border px-4 py-1.5 text-sm font-medium transition-colors', 'border-slate-900 bg-slate-900 text-white' => $active, 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50' => !$active])>{{ AutoAuditSources::shortName($c['name']) }}</a>
+               @class(['rounded-full border px-4 py-1.5 text-sm font-medium transition-colors', 'border-slate-900 bg-slate-900 text-white' => $active, 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50' => !$active])>{{ $c['name'] }}</a>
         @endforeach
     </div>
 
@@ -69,12 +73,12 @@
     <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4" data-tiles>
         @foreach ([['id' => null, 'name' => $firmName ? 'Вся ' . $firmName : 'Вся фирма', 'all' => true] + $firm, ...$chiefs->map(fn ($c) => $c + ['all' => false])] as $tile)
             @php
-                $value  = $tile['all'] ? null : ($tile['id'] ?? 'none');
-                $active = $tile['all'] ? $chief === null : (string) $chief === (string) $value;
+                $value  = $tile['all'] ? null : $tile['key'];
+                $active = $tile['all'] ? $chief === null : $chief === $value;
             @endphp
             <a href="{{ $url(['chief' => $tile['all'] || $active ? null : $value]) }}"
                @class(['block rounded-2xl border bg-white p-5 shadow-sm transition-colors', 'border-indigo-300 ring-1 ring-indigo-200' => $active && !$tile['all'], 'border-slate-200/50 hover:border-slate-300' => !$active || $tile['all']])>
-                <div class="text-sm text-slate-600 truncate">{{ $tile['all'] ? $tile['name'] : AutoAuditSources::shortName($tile['name']) }}</div>
+                <div class="text-sm text-slate-600 truncate">{{ $tile['name'] }}</div>
                 <div class="mt-2 flex items-baseline gap-2">
                     <span class="text-3xl font-bold tabular-nums {{ $pctColor($tile['pct']) }}">{{ $tile['pct'] === null ? '·' : $tile['pct'] . '%' }}</span>
                     <span class="text-sm text-slate-500">клиентов закрыли {{ $lower($focus) }}</span>
@@ -125,7 +129,15 @@
                             @php $client = $row['client']; @endphp
                             <tr class="hover:bg-slate-50" data-client="{{ $client->id }}">
                                 <td class="px-6 py-1.5 font-medium text-slate-900 max-w-[280px] truncate" title="{{ $client->name }}">{{ $client->name }}</td>
-                                <td class="px-4 py-1.5 text-slate-500 whitespace-nowrap">{{ $row['chief'] ? AutoAuditSources::shortName($name($row['chief'])) : 'без главбуха' }}</td>
+                                @php
+                                    // Главбух месяца, а если клиента с тех пор передали, то и нынешний.
+                                    $monthKey = $keyOf($row);
+                                    $nowKey   = (string) ($row['chief'] ?? 'none');
+                                @endphp
+                                <td class="px-4 py-1.5 text-slate-500 whitespace-nowrap"
+                                    title="{{ $monthKey === 'unknown' ? 'Ответственный сейчас появился в системе позже срока закрытия этого месяца, а кто вёл клиента тогда, неизвестно' : '' }}">
+                                    {{ in_array($monthKey, ['none', 'unknown'], true) ? mb_strtolower($label($monthKey)) : $label($monthKey) }}@if ($monthKey !== $nowKey) <span class="text-slate-400">→ {{ $nowKey === 'none' ? 'без главбуха' : $label($nowKey) }}</span>@endif
+                                </td>
                                 @foreach ($months as $m)
                                     @php $mk = $m->format('Y-m'); $c = $row['cells'][$mk]; $s = $c['status']; @endphp
                                     <td @class(['px-1 py-1.5 text-center', 'bg-slate-50' => $mk === $key])>

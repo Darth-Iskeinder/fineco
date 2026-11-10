@@ -38,7 +38,11 @@
     </div>
 
     <p class="text-[13px] text-slate-500">
-        Главбух {{ $row['chief'] ? $short($row['chief']) : 'не назначен' }}@if ($cell['deadline']) · срок закрытия {{ $cell['deadline']->format('d.m') }}@endif
+        @php
+            $monthChief = $cell['chiefUnknown'] ? 'не определён' : ($cell['chief'] ? $short($cell['chief']) : 'не назначен');
+            $nowChief   = $row['chief'] ? $short($row['chief']) : 'не назначен';
+        @endphp
+        Главбух {{ $monthChief }}@if ($monthChief !== $nowChief), сейчас {{ $nowChief }}@endif @if ($cell['deadline']) · срок закрытия {{ $cell['deadline']->format('d.m') }}@endif
     </p>
 
     <span class="inline-block rounded-full px-3 py-1 text-sm font-semibold {{ Page::STYLES[$status]['badge'] }}">{{ Board::STATUSES[$status]['label'] }}</span>
