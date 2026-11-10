@@ -49,6 +49,9 @@ class Tenant extends Model
     /** Ключ в settings: раздел «Расчёты с клиентами» открыт руководителю фирмы. */
     public const SETTING_SETTLEMENTS = 'settlements';
 
+    /** Ключ в settings: страница «Закрытие месяца» открыта руководителю фирмы. */
+    public const SETTING_MONTH_CLOSING = 'month_closing';
+
     protected $fillable = [
         'name', 'slug', 'status', 'plan', 'settings', 'is_template',
         // Профиль фирмы: правится в настройках, уходит в акты и сметы.
@@ -182,6 +185,21 @@ class Tenant extends Model
     public function setSettlementsEnabled(bool $enabled): void
     {
         $this->settings = array_merge($this->settings ?? [], [self::SETTING_SETTLEMENTS => $enabled]);
+        $this->save();
+    }
+
+    /**
+     * Видит ли руководитель фирмы страницу «Закрытие месяца» (month-closing:access).
+     * Вендору, зашедшему в фирму, страница видна всегда.
+     */
+    public function monthClosingEnabled(): bool
+    {
+        return (bool) ($this->settings[self::SETTING_MONTH_CLOSING] ?? false);
+    }
+
+    public function setMonthClosingEnabled(bool $enabled): void
+    {
+        $this->settings = array_merge($this->settings ?? [], [self::SETTING_MONTH_CLOSING => $enabled]);
         $this->save();
     }
 

@@ -269,6 +269,22 @@
                     </a>
                 @endif
 
+                {{-- Закрытие месяца: вендор всегда, руководитель по флагу фирмы (month-closing:access). --}}
+                @if(\App\Http\Controllers\MonthClosingController::visible())
+                    <a href="{{ route('month-closing.index') }}"
+                       class="flex items-center px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200
+                              @if(request()->routeIs('month-closing.*'))
+                                  bg-gradient-to-r from-violet-500 to-indigo-600 text-white shadow-lg shadow-indigo-500/25
+                              @else
+                                  text-slate-600 hover:bg-slate-100 hover:text-slate-900
+                              @endif">
+                        <svg class="w-5 h-5 mr-3 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2zm4-5l2 2 4-4" />
+                        </svg>
+                        Закрытие месяца
+                    </a>
+                @endif
+
                 {{-- Автоаудит видят владелец системы, зашедший в фирму, и руководитель фирмы,
                      которой страницу открыли. Остальным пункта нет, а страница отвечает 404. --}}
                 @if(\App\Support\Impersonation::isActive() || ($currentEmployee && $currentEmployee->canSeeAutoAudit()))
