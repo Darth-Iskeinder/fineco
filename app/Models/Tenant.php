@@ -51,6 +51,7 @@ class Tenant extends Model
 
     /** Ключ в settings: страница «Закрытие месяца» открыта руководителю фирмы. */
     public const SETTING_MONTH_CLOSING = 'month_closing';
+    public const SETTING_MONTH_CLOSING_TAXES = 'month_closing_taxes';
 
     protected $fillable = [
         'name', 'slug', 'status', 'plan', 'settings', 'is_template',
@@ -200,6 +201,21 @@ class Tenant extends Model
     public function setMonthClosingEnabled(bool $enabled): void
     {
         $this->settings = array_merge($this->settings ?? [], [self::SETTING_MONTH_CLOSING => $enabled]);
+        $this->save();
+    }
+
+    /**
+     * Показывает ли «Закрытие месяца» строку «Налоги и отчетность» (month-closing:access
+     * --taxes-on). Пока пробуем только у Fineco (11.11.2026), отсюда отдельный флаг.
+     */
+    public function monthClosingTaxesEnabled(): bool
+    {
+        return (bool) ($this->settings[self::SETTING_MONTH_CLOSING_TAXES] ?? false);
+    }
+
+    public function setMonthClosingTaxesEnabled(bool $enabled): void
+    {
+        $this->settings = array_merge($this->settings ?? [], [self::SETTING_MONTH_CLOSING_TAXES => $enabled]);
         $this->save();
     }
 

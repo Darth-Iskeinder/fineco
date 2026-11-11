@@ -122,6 +122,7 @@ class MonthClosingController extends Controller
             'name'      => fn (?int $id) => $id ? ($employees[$id] ?? 'сотрудник удалён') : 'не назначен',
             'today'     => $today,
             'autoAudit' => $data['autoAudit'],
+            'taxes'     => $data['taxes'],
             'auditLink' => AutoAuditClientsController::visible(),
         ]);
     }

@@ -30,9 +30,13 @@ use Illuminate\Support\Collection;
  *   - у автоаудита нет вопросов (ждёт бухгалтера или руководителя). Только у фирм, где
  *     страница автоаудита открыта руководителю, иначе он не увидит, о чём речь.
  *
- * Чего в условии нет и почему. «Отчёты сданы» и «налоги оплачены» со скрина: какие БП
- * отчёты, не размечено, факт оплаты налога не фиксируем; пока они просто часть сметных
- * задач. Ручной аудит в разработке и к закрытию не подключён, карточка так и пишет.
+ * Налоги и отчёты (11.11.2026): задачи БП с группой «Налоги и отчетность» показываются
+ * отдельно, «сдано N из M». Сдано = задача принята, квитанцию не требуем, «на проверке» не
+ * сдано. Правило закрытия от этого не меняется: эти задачи и так среди сметных, меняется
+ * только причина («не сданы налоги и отчёты» отдельно от прочих задач). Включается флагом
+ * фирмы (monthClosingTaxesEnabled), пока пробуем у Fineco.
+ *
+ * Ручной аудит в разработке и к закрытию не подключён, карточка так и пишет.
  *
  * Срок закрытия пока = самый поздний срок задач месяца. Жёсткое 25-е спорит со сметой: у
  * фирм есть БП со сроком 28-30 числа (разведка 10.11.2026). Окончательно решим в процессе,
@@ -62,6 +66,9 @@ class MonthClosingBoard
 
     /** Статусы автоаудита, которые держат месяц открытым: по ним ждут ответа или решения. */
     public const AUDIT_BLOCKING = [AutoAuditClientBoard::ACCOUNTANT, AutoAuditClientBoard::CHIEF];
+
+    /** Группа БП с налогами и отчётами. Сравниваем через taxKey(): «е» и «ё», регистр, пробелы. */
+    public const TAX_GROUP = 'Налоги и отчетность';
 
     /** Разобранное расписание БП, сроки по отрезку и месяц работы по месяцу задачи: кеш на один расчёт. */
     private array $schedules = [];
@@ -105,11 +112,38 @@ class MonthClosingBoard
     }
 
     /**
+     * Строка «Налоги и отчетность»: null выключена у фирмы, 'missing' ни в одном БП фирмы
+     * нет такой группы, 'on' считаем.
+     */
+    public static function taxesMode(): ?string
+    {
+        if (!Tenant::find(TenantContext::id())?->monthClosingTaxesEnabled()) {
+            return null;
+        }
+
+        $has = Service::query()->whereNotNull('service_group')->distinct()->pluck('service_group')
+            ->contains(fn ($group) => self::isTaxGroup($group));
+
+        return $has ? 'on' : 'missing';
+    }
+
+    /** БП из группы «Налоги и отчетность». На бою были и «отчётность», и «отчетность». */
+    public static function isTaxGroup(?string $group): bool
+    {
+        return $group !== null && self::taxKey($group) === self::taxKey(self::TAX_GROUP);
+    }
+
+    private static function taxKey(string $group): string
+    {
+        return preg_replace('/\s+/u', ' ', trim(str_replace('ё', 'е', mb_strtolower($group))));
+    }
+
+    /**
      * Строки таблицы.
      *
      * @param CarbonImmutable[] $months   см. window()
      * @param int|null          $clientId только один клиент: для карточки
-     * @return array{rows: array<int, array>, employees: Collection, autoAudit: bool}
+     * @return array{rows: array<int, array>, employees: Collection, autoAudit: bool, taxes: ?string}
      */
     public function build(array $months, ?int $clientId = null): array
     {
@@ -139,6 +173,7 @@ class MonthClosingBoard
 
         // Автоаудит: карточке нужна клетка целиком (статус и пояснение), таблице хватает
         // ответа «есть ли вопрос». Полный расчёт вкладки на всю фирму стоил 2 с (10.11.2026).
+        $taxes     = self::taxesMode();
         $autoAudit = self::withAutoAudit();
         $audit     = match (true) {
             !$autoAudit        => [],
@@ -173,6 +208,7 @@ class MonthClosingBoard
                     $month,
                     $tasks[$key] ?? [],
                     $autoAudit ? ($audit[$client->id][$key] ?? null) : null,
+                    $taxes === 'on',
                 );
                 $cells[$key] += $this->monthChief($client, $cells[$key]['deadline'], $changes->get($client->id, collect()), $since);
             }
@@ -188,6 +224,7 @@ class MonthClosingBoard
             'rows'      => $rows,
             'employees' => $employees->pluck('full_name', 'id'),
             'autoAudit' => $autoAudit,
+            'taxes'     => $taxes,
         ];
     }
 
@@ -269,6 +306,7 @@ class MonthClosingBoard
             [$weekly, $dues] = $this->dues($service, $overrides->get($item->service_id), $itemFrom, $itemTo);
             $name     = $this->taskName($item);
             $assignee = (int) ($item->assignee_id ?? 0) ?: null;
+            $tax      = self::isTaxGroup($service->service_group);
 
             foreach ($dues as $date => $due) {
                 // Недельных в месяце несколько, их различает дата. У помесячных дата в журнале
@@ -284,7 +322,7 @@ class MonthClosingBoard
                     $used[$log->id] = true;
                 }
 
-                $this->addTask($tasks, $name, $assignee, $due->year, $due->month, $due, $log);
+                $this->addTask($tasks, $name, $assignee, $due->year, $due->month, $due, $log, $tax);
             }
         }
 
@@ -302,7 +340,8 @@ class MonthClosingBoard
                 if (!isset($used[$log->id])) {
                     $used[$log->id] = true;
                     $due = $log->due_date ? CarbonImmutable::parse(substr((string) $log->due_date, 0, 10)) : null;
-                    $this->addTask($tasks, $this->taskName($item), (int) ($item->assignee_id ?? 0) ?: null, (int) $log->year, (int) $log->month, $due, $log);
+                    $tax = self::isTaxGroup($services->get($item->service_id)?->service_group);
+                    $this->addTask($tasks, $this->taskName($item), (int) ($item->assignee_id ?? 0) ?: null, (int) $log->year, (int) $log->month, $due, $log, $tax);
                 }
             }
         }
@@ -349,7 +388,7 @@ class MonthClosingBoard
     }
 
     /** @param object|null $log строка журнала задачи (без модели, см. logs()) */
-    private function addTask(array &$tasks, string $name, ?int $itemAssignee, int $year, int $month, ?CarbonImmutable $due, ?object $log): void
+    private function addTask(array &$tasks, string $name, ?int $itemAssignee, int $year, int $month, ?CarbonImmutable $due, ?object $log, bool $tax = false): void
     {
         $period = $this->periods[$year * 100 + $month] ??= CarbonImmutable::create($year, $month, 1)->subMonth()->format('Y-m');
 
@@ -359,6 +398,7 @@ class MonthClosingBoard
             'due'      => $due,
             'log'      => $log,
             'done'     => $log?->status === 'completed',
+            'tax'      => $tax,
         ];
     }
 
@@ -478,13 +518,14 @@ class MonthClosingBoard
      *
      * @param array<int, array> $tasks
      * @param array|null        $audit клетка автоаудита, null если автоаудит не в условии
+     * @param bool              $taxes считать налоги и отчёты отдельно (taxesMode() === 'on')
      */
-    private function cell(CarbonImmutable $month, array $tasks, ?array $audit): array
+    private function cell(CarbonImmutable $month, array $tasks, ?array $audit, bool $taxes = false): array
     {
         if (!$tasks) {
             return [
                 'status' => self::NONE, 'tasks' => [], 'open' => 0, 'late' => 0, 'deadline' => null,
-                'audit' => $audit, 'auditBlocks' => false, 'reasons' => [],
+                'audit' => $audit, 'auditBlocks' => false, 'reasons' => [], 'taxes' => null,
             ];
         }
 
@@ -494,8 +535,14 @@ class MonthClosingBoard
 
         $auditBlocks = $audit !== null && in_array($audit['status'], self::AUDIT_BLOCKING, true);
 
+        // Налоги и отчёты отдельной причиной: несданный отчёт важнее невыгруженной 1С.
+        $taxTasks = $taxes ? array_filter($tasks, fn (array $t) => $t['tax']) : [];
+        $taxOpen  = array_filter($taxTasks, fn (array $t) => !$t['done']);
+        $other    = $taxes ? array_filter($open, fn (array $t) => !$t['tax']) : $open;
+
         $reasons = array_values(array_filter([
-            $open ? AutoAuditClientBoard::count(count($open), ['задача не закрыта', 'задачи не закрыты', 'задач не закрыто']) : null,
+            $taxOpen ? 'не сданы налоги и отчёты' : null,
+            $other ? AutoAuditClientBoard::count(count($other), ['задача не закрыта', 'задачи не закрыты', 'задач не закрыто']) : null,
             $auditBlocks ? 'вопросы автоаудита' : null,
         ]));
 
@@ -514,6 +561,7 @@ class MonthClosingBoard
             'audit'       => $audit,
             'auditBlocks' => $auditBlocks,
             'reasons'     => $reasons,
+            'taxes'       => $taxes ? ['total' => count($taxTasks), 'done' => count($taxTasks) - count($taxOpen)] : null,
         ];
     }
 }

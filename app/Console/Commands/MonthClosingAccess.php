@@ -16,7 +16,9 @@ class MonthClosingAccess extends Command
     protected $signature = 'month-closing:access
         {--tenant= : Фирма (id)}
         {--on : Открыть страницу руководителю}
-        {--off : Закрыть страницу руководителю}';
+        {--off : Закрыть страницу руководителю}
+        {--taxes-on : Показывать строку «Налоги и отчетность»}
+        {--taxes-off : Скрыть строку «Налоги и отчетность»}';
 
     protected $description = 'Показать или поменять, видит ли руководитель фирмы «Закрытие месяца»';
 
@@ -36,6 +38,12 @@ class MonthClosingAccess extends Command
             return self::FAILURE;
         }
 
+        if ($this->option('taxes-on') && $this->option('taxes-off')) {
+            $this->error('Выберите что-то одно: --taxes-on или --taxes-off');
+
+            return self::FAILURE;
+        }
+
         $tenant = Tenant::find($id);
 
         if (!$tenant) {
@@ -48,11 +56,16 @@ class MonthClosingAccess extends Command
             $tenant->setMonthClosingEnabled((bool) $this->option('on'));
         }
 
+        if ($this->option('taxes-on') || $this->option('taxes-off')) {
+            $tenant->setMonthClosingTaxesEnabled((bool) $this->option('taxes-on'));
+        }
+
         $this->line(sprintf(
-            'Фирма %d «%s»: «Закрытие месяца» руководителю %s',
+            'Фирма %d «%s»: «Закрытие месяца» руководителю %s, строка «Налоги и отчетность» %s',
             $tenant->id,
             $tenant->name,
             $tenant->monthClosingEnabled() ? 'открыто' : 'закрыто',
+            $tenant->monthClosingTaxesEnabled() ? 'показана' : 'скрыта',
         ));
 
         return self::SUCCESS;

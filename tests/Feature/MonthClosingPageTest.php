@@ -406,6 +406,106 @@ class MonthClosingPageTest extends TestCase
             ->assertDontSee('Для фирмы не включён');
     }
 
+    // ── Налоги и отчётность ───────────────────────────────────────────────
+
+    /** Задачи группы считаются отдельно, правило закрытия то же. «ё» и «е» одна группа. */
+    public function test_tax_group_tasks_are_counted_separately(): void
+    {
+        $this->tenant->setMonthClosingTaxesEnabled(true);
+
+        $client = $this->client();
+        $report = $this->service('ФНО 200');
+        $report->update(['service_group' => 'Налоги и отчётность']);
+        $pay = $this->service('Оплата налогов');
+        $pay->update(['service_group' => ' налоги и  ОТЧЕТНОСТЬ']);
+        $other = $this->service('Выгрузка 1С');
+        $other->update(['service_group' => 'Прочее']);
+
+        $this->task($client, $this->item($client, $report), 10, 'completed');
+        $this->task($client, $this->item($client, $pay), 10, 'review');
+        $this->task($client, $this->item($client, $other), 10, 'running');
+
+        $cell = $this->cell($client, '2026-09');
+
+        $this->assertSame(MonthClosingBoard::OVERDUE, $cell['status']);
+        $this->assertSame(['total' => 2, 'done' => 1], $cell['taxes']);
+        $this->assertSame(['не сданы налоги и отчёты', '1 задача не закрыта'], $cell['reasons']);
+
+        $this->asVendor()->get(route('month-closing.card', [$client->id, 'month' => '2026-09']))
+            ->assertOk()
+            ->assertSee('Не все налоги и отчёты сданы')
+            ->assertSee('Сдано 1 из 2')
+            ->assertSee('на проверке у главбуха')
+            ->assertSee('Принято 1 из 3');
+    }
+
+    public function test_month_with_tax_tasks_accepted_closes_as_before(): void
+    {
+        $this->tenant->setMonthClosingTaxesEnabled(true);
+
+        $client = $this->client();
+        $report = $this->service('ФНО 910');
+        $report->update(['service_group' => 'Налоги и отчетность']);
+        $this->task($client, $this->item($client, $report), 10, 'completed');
+        $this->task($client, $this->item($client, $this->bank), 10, 'completed');
+
+        $cell = $this->cell($client, '2026-09');
+        $this->assertSame(MonthClosingBoard::CLOSED, $cell['status']);
+        $this->assertSame(['total' => 1, 'done' => 1], $cell['taxes']);
+
+        $this->asVendor()->get(route('month-closing.card', [$client->id, 'month' => '2026-09']))
+            ->assertSee('Налоги и отчёты сданы');
+    }
+
+    public function test_month_without_tax_tasks_says_so(): void
+    {
+        $this->tenant->setMonthClosingTaxesEnabled(true);
+        $this->service('ФНО 200')->update(['service_group' => 'Налоги и отчетность']);
+
+        $client = $this->client();
+        $this->task($client, $this->item($client, $this->bank), 10, 'completed');
+
+        $this->assertSame(['total' => 0, 'done' => 0], $this->cell($client, '2026-09')['taxes']);
+        $this->asVendor()->get(route('month-closing.card', [$client->id, 'month' => '2026-09']))
+            ->assertSee('В этом месяце отчётов и налогов нет');
+    }
+
+    public function test_taxes_hidden_without_flag_and_grey_without_group(): void
+    {
+        $client = $this->client();
+        $report = $this->service('ФНО 200');
+        $report->update(['service_group' => 'Налоги и отчетность']);
+        $this->task($client, $this->item($client, $report), 10, 'running');
+
+        // Флага нет: всё как раньше.
+        $cell = $this->cell($client, '2026-09');
+        $this->assertNull($cell['taxes']);
+        $this->assertSame(['1 задача не закрыта'], $cell['reasons']);
+        $this->asVendor()->get(route('month-closing.card', [$client->id, 'month' => '2026-09']))
+            ->assertDontSee('data-section="taxes"', false);
+
+        // Флаг есть, а группы ни в одном БП нет.
+        $this->tenant->setMonthClosingTaxesEnabled(true);
+        $report->update(['service_group' => 'Отчеты']);
+
+        $this->asVendor()->get(route('month-closing.card', [$client->id, 'month' => '2026-09']))
+            ->assertSee('Ни в одном БП нет группы');
+    }
+
+    public function test_taxes_flag_command(): void
+    {
+        $this->artisan('month-closing:access', ['--tenant' => $this->tenant->id, '--taxes-on' => true])
+            ->expectsOutputToContain('строка «Налоги и отчетность» показана')
+            ->assertSuccessful();
+        $this->assertTrue($this->tenant->fresh()->monthClosingTaxesEnabled());
+        $this->assertFalse($this->tenant->fresh()->monthClosingEnabled());
+
+        $this->artisan('month-closing:access', ['--tenant' => $this->tenant->id, '--taxes-on' => true, '--taxes-off' => true])->assertFailed();
+
+        $this->artisan('month-closing:access', ['--tenant' => $this->tenant->id, '--taxes-off' => true])->assertSuccessful();
+        $this->assertFalse($this->tenant->fresh()->monthClosingTaxesEnabled());
+    }
+
     public function test_query_count_does_not_grow_with_clients(): void
     {
         $count = function (int $clients): int {

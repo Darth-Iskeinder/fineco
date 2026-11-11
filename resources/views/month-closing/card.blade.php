@@ -13,8 +13,13 @@
     $short  = fn (?int $id) => $id ? AutoAuditSources::shortName($name($id)) : 'не назначен';
 
     $open = array_values(array_filter($cell['tasks'], fn (array $t) => !$t['done']));
+    // Налоги и отчёты идут своим блоком, в общем списке открытых их не повторяем.
+    $taxOpen   = $taxes === 'on' ? array_values(array_filter($open, fn (array $t) => $t['tax'])) : [];
+    $otherOpen = $taxes === 'on' ? array_values(array_filter($open, fn (array $t) => !$t['tax'])) : $open;
     $done = array_values(array_filter($cell['tasks'], fn (array $t) => $t['done']));
-    usort($open, fn ($a, $b) => ($a['due']?->timestamp ?? PHP_INT_MAX) <=> ($b['due']?->timestamp ?? PHP_INT_MAX));
+    $byDue = fn ($a, $b) => ($a['due']?->timestamp ?? PHP_INT_MAX) <=> ($b['due']?->timestamp ?? PHP_INT_MAX);
+    usort($taxOpen, $byDue);
+    usort($otherOpen, $byDue);
 
     // Где открытая задача, словами БухЗадачника.
     $taskState = fn ($log) => match ($log?->status) {
@@ -78,20 +83,42 @@
                 </div>
             </div>
 
-            @if ($open)
-                <ul class="mt-3 space-y-2 pl-8">
-                    @foreach ($open as $task)
-                        @php $late = $task['due'] && $task['due']->lt($today); @endphp
-                        <li class="text-sm">
-                            <div class="font-medium text-slate-900">{{ $task['name'] }}</div>
-                            <div @class(['text-[13px]', 'text-red-700' => $late, 'text-slate-500' => !$late])>
-                                {{ $short($task['assignee']) }} · {{ $taskState($task['log']) }}@if ($task['due']), срок {{ $late ? 'был ' : '' }}{{ $task['due']->format('d.m') }}@endif
-                            </div>
-                        </li>
-                    @endforeach
-                </ul>
+            @if ($otherOpen)
+                @include('month-closing._open-tasks', ['tasks' => $otherOpen])
+            @elseif ($taxOpen)
+                <p class="mt-2 pl-8 text-[13px] text-slate-500">Открыты только налоги и отчёты, они ниже</p>
             @endif
         </section>
+
+        {{-- Налоги и отчётность: задачи БП этой группы. Сдано = принята. --}}
+        @if ($taxes === 'on')
+            @php
+                $tax    = $cell['taxes'];
+                $taxOk  = !$taxOpen;
+                $taxLate = (bool) array_filter($taxOpen, fn (array $t) => $t['due'] && $t['due']->lt($today));
+            @endphp
+            <section @class(['rounded-xl px-4 py-3', 'bg-slate-50' => $taxOk, 'bg-red-50/60' => !$taxOk && $taxLate, 'bg-amber-50/60' => !$taxOk && !$taxLate]) data-section="taxes">
+                <div class="flex gap-3">
+                    <span @class(['mt-0.5 inline-grid h-5 w-5 flex-shrink-0 place-items-center rounded-full text-[11px] font-bold', 'bg-emerald-100 text-emerald-700' => $taxOk, 'bg-red-100 text-red-700' => !$taxOk && $taxLate, 'bg-amber-100 text-amber-700' => !$taxOk && !$taxLate])>{{ $taxOk ? '✓' : '!' }}</span>
+                    <div class="min-w-0 flex-1">
+                        <div class="font-semibold text-slate-900">{{ $taxOk ? 'Налоги и отчёты сданы' : 'Не все налоги и отчёты сданы' }}</div>
+                        <div class="text-[13px] text-slate-600">
+                            @if ($tax['total'])
+                                Сдано {{ $tax['done'] }} из {{ $tax['total'] }}
+                            @else
+                                В этом месяце отчётов и налогов нет
+                            @endif
+                        </div>
+                    </div>
+                </div>
+
+                @if ($taxOpen)
+                    @include('month-closing._open-tasks', ['tasks' => $taxOpen])
+                @endif
+            </section>
+        @elseif ($taxes === 'missing')
+            @include('month-closing._not-connected', ['section' => 'taxes', 'title' => 'Налоги и отчетность', 'text' => 'Ни в одном БП нет группы «Налоги и отчетность»'])
+        @endif
 
         {{-- Автоаудит: в условии только у фирм, где его страница открыта руководителю. --}}
         @if ($autoAudit)
