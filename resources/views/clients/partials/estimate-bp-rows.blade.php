@@ -28,7 +28,7 @@
                         </span>
                     </template>
                 </div>
-                <p class="text-xs text-slate-400 mt-0.5" x-show="bp.periodicity" x-text="bp.periodicity"></p>
+                <p class="text-xs text-slate-400 mt-0.5" x-show="rowPeriodicity(bp)" x-text="rowPeriodicity(bp)"></p>
 
                 {{-- Срок выполнения (с учётом индивидуального расписания клиента) + исполнитель --}}
                 @include('clients.partials.estimate-schedule-assignee', ['row' => 'bp', 'assigneeShow' => 'bp.enabled'])

@@ -184,7 +184,7 @@
                                                 x-text="extra.type === 'recurring' ? 'Постоянная' : 'Временная'">
                                         </button>
                                     </div>
-                                    <p class="text-xs text-slate-400 mt-0.5" x-show="extra.periodicity" x-text="extra.periodicity"></p>
+                                    <p class="text-xs text-slate-400 mt-0.5" x-show="rowPeriodicity(extra)" x-text="rowPeriodicity(extra)"></p>
 
                                     {{-- Постоянная доп. услуга = обычная строка сметы: срок и исполнитель
                                          как у тарифных БП. У временной («только этот месяц») их нет. --}}
@@ -739,6 +739,13 @@ function estimatePage(clientId, tariffBPs, extras, closed, initialNotes, initial
         get regularBPs() { return this.tariffBPs.filter(bp => !this.primaryFlag(bp)); },
         flagBPs(key) { return this.tariffBPs.filter(bp => this.primaryFlag(bp) === key); },
 
+        // Подпись периодичности строки: при своём расписании клиента его периодичность,
+        // иначе каталожная. Без этого над датами 01.01, 01.04... стояло «Ежемесячно»
+        // (Хаус фор ю, Fineco, 12.11.2026).
+        rowPeriodicity(row) {
+            return (row.schedule && row.schedule.is_custom && row.schedule.periodicity) || row.periodicity || '';
+        },
+
         // Тип периодичности БП по её названию: 'monthly' | 'quarterly' | ... | null.
         kindOf(periodicityName) {
             const p = this.periodicities.find(x => x.name === periodicityName);
@@ -832,7 +839,7 @@ function estimatePage(clientId, tariffBPs, extras, closed, initialNotes, initial
                 items.push({
                     key: 'bp-' + bp.row_key,
                     name: bp.branch_label ? (bp.name + ' — ' + bp.branch_label) : bp.name,
-                    periodicity: bp.periodicity,
+                    periodicity: this.rowPeriodicity(bp),
                     total: this.bpTotal(bp),
                     remove: () => { bp.enabled = false; },   // гасит тумблер слева
                 });
@@ -841,7 +848,7 @@ function estimatePage(clientId, tariffBPs, extras, closed, initialNotes, initial
                 items.push({
                     key: 'ex-' + i,
                     name: ex.name,
-                    periodicity: ex.periodicity,
+                    periodicity: this.rowPeriodicity(ex),
                     total: this.extraTotal(ex),
                     remove: () => {
                         const idx = this.extras.indexOf(ex);
