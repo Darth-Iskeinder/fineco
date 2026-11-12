@@ -314,6 +314,8 @@ class DashboardTest extends TestCase
             'email' => 'head4_' . uniqid() . '@test.kg', 'password' => bcrypt('x'),
             'role_id' => $headRole->id, 'status' => Employee::STATUS_ACTIVE,
         ]);
+        // Главбух работает давно: прошлый месяц Дашборд показывает людьми того месяца.
+        $head->forceFill(['created_at' => now()->subYear()])->saveQuietly();
 
         // Услуга без периодичности: расписания у неё нет вовсе
         $service = Service::create([
@@ -463,6 +465,45 @@ class DashboardTest extends TestCase
         ]);
 
         return [$head, $client->fresh()];
+    }
+
+    /**
+     * Сотрудник, заведённый в этом месяце, в прошлых месяцах не виден: клиента ему передали
+     * сегодня, а прошлый месяц остаётся за тем, кто вёл тогда (Fineco, 12.11.2026).
+     */
+    public function test_newcomer_is_not_shown_in_past_months(): void
+    {
+        [$old, $client] = $this->clientWithMonthlyItem('ТОО Передали', 'DASH0000000N');
+        $old->forceFill(['created_at' => now()->subYear()])->saveQuietly();
+
+        $newcomer = Employee::create([
+            'full_name' => 'Новенькая ' . uniqid(), 'position' => 'Главбух',
+            'email' => 'new_' . uniqid() . '@test.kg', 'password' => bcrypt('x'),
+            'role_id' => $old->role_id, 'status' => Employee::STATUS_ACTIVE,
+        ]);
+
+        // Передача: клиент и его БП на новенькой. Смена ответственного пишется в историю.
+        $client->update(['responsible_employee_id' => $newcomer->id]);
+        $client->estimates()->first()->items()->update(['assignee_id' => $newcomer->id]);
+
+        $past = now()->subMonths(2);
+        $response = $this->actingAs($this->manager, 'employee')
+            ->get(route('dashboard.index', ['year' => $past->year, 'month' => $past->month]))->assertOk();
+
+        $leads = collect($response->viewData('leads'));
+        $this->assertNull($leads->firstWhere('id', $newcomer->id));
+        $this->assertNull(collect($response->viewData('accountants'))->firstWhere('id', $newcomer->id));
+
+        // Незакрытая задача прошлого месяца осталась у прежней главбух
+        $lead = $leads->firstWhere('id', $old->id);
+        $this->assertNotNull($lead);
+        $this->assertSame(1, $lead['total']);
+        $this->assertSame([$old->full_name], collect($lead['members'])->pluck('name')->all());
+
+        // В текущем месяце клиент уже на новенькой
+        $now = $this->actingAs($this->manager, 'employee')->get(route('dashboard.index'))->assertOk();
+        $this->assertNotNull(collect($now->viewData('leads'))->firstWhere('id', $newcomer->id));
+        $this->assertNull(collect($now->viewData('leads'))->firstWhere('id', $old->id));
     }
 
     /** Клиент со сметой и одной помесячной позицией на этом сотруднике. */

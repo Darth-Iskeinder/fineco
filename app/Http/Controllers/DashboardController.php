@@ -7,6 +7,7 @@ use App\Models\BuhTaskLog;
 use App\Models\Client;
 use App\Models\Employee;
 use App\Models\Service;
+use App\Services\Dashboard\MonthPeople;
 use App\Services\Settlements\ClientPayback;
 use App\Services\Settlements\SettlementsAccess;
 use Carbon\CarbonImmutable;
@@ -114,9 +115,12 @@ class DashboardController extends Controller
         // сливаются в общее «Не назначено» вместе с чужими бесхозными.
         $employees     = Employee::withTrashed()
             ->with('role:id,display_name')
-            ->get(['id', 'full_name', 'role_id', 'employment_status', 'fired_at', 'deleted_at']);
+            ->get(['id', 'full_name', 'role_id', 'employment_status', 'fired_at', 'deleted_at', 'created_at', 'hired_at']);
         $employeeNames = $employees->pluck('full_name', 'id');
         $employeeRoles = $employees->mapWithKeys(fn ($e) => [$e->id => $e->role?->display_name]);
+
+        // Разрез по сотрудникам показывает людей того месяца: кто вёл и кто делал тогда.
+        $people = MonthPeople::load($monthEnd, $clients->pluck('id'), $employees);
 
         // Метка «уволен»/«удалён» рядом с именем. Она про сегодняшний день, а не про
         // выбранный месяц, поэтому в подсказку кладём дату: в августе человек мог ещё
@@ -283,8 +287,8 @@ class DashboardController extends Controller
                             $team,
                             (int) $client->id,
                             $client->name,
-                            (int) ($client->responsible_employee_id ?? 0),
-                            $this->doerOf($status, $log, $assigneeId),
+                            $people->lead($client),
+                            $this->doerOf($status, $log, $people->doer($client, $assigneeId)),
                             $status,
                             $dueObj,
                             $today,
@@ -392,7 +396,7 @@ class DashboardController extends Controller
                 $team,
                 (int) $client->id,
                 $client->name,
-                (int) ($client->responsible_employee_id ?? 0),
+                $people->lead($client),
                 (int) $log->employee_id,
                 'completed',
                 null,
@@ -477,7 +481,7 @@ class DashboardController extends Controller
 
     /**
      * Кому засчитать задачу: закрытую — тому, кто её закрыл, остальные — тому, за кем
-     * она числится. Логи при переносе работы не двигаются, а позиции сметы двигаются,
+     * она числится (в прошлом месяце с поправкой MonthPeople::doer). Логи при переносе работы не двигаются, а позиции сметы двигаются,
      * поэтому по назначению закрытый месяц меняется каждый раз после смены ответственного.
      */
     private function doerOf(string $status, ?BuhTaskLog $log, int $assigneeId): int
