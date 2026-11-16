@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use App\Models\Client;
-use App\Models\ClientResponsibleChange;
 use App\Models\Tenant;
 use App\Services\AutoAudit\AutoAuditSources;
 use App\Services\MonthClosing\MonthClosingBoard;
@@ -75,9 +74,6 @@ class MonthClosingController extends Controller
             ->sortBy(fn (array $r) => [ctype_digit($keyOf($r)) ? 0 : 1, mb_strtolower($label($keyOf($r))), mb_strtolower($r['client']->name)])
             ->values();
 
-        // С какого дня записываются смены ответственных: раньше передачи не известны.
-        $historySince = ClientResponsibleChange::min('changed_at');
-
         return view('month-closing.index', [
             'months'    => $months,
             'focus'     => $focus,
@@ -91,10 +87,7 @@ class MonthClosingController extends Controller
             'name'      => $name,
             'keyOf'     => $keyOf,
             'label'     => $label,
-            'historySince' => $historySince ? CarbonImmutable::parse($historySince)->setTimezone(config('app.display_timezone')) : null,
             'autoAudit' => $data['autoAudit'],
-            'vendor'    => Impersonation::isActive(),
-            'openToManager' => (bool) Tenant::find(TenantContext::id())?->monthClosingEnabled(),
             'firmName'  => Tenant::find(TenantContext::id())?->name,
         ]);
     }

@@ -90,7 +90,10 @@ class MonthClosingPageTest extends TestCase
         $this->asVendor()->get(route('month-closing.index'))
             ->assertOk()
             ->assertSee('Клиенты × месяцы')
-            ->assertSee('Руководитель фирмы эту страницу пока не видит.');
+            // Служебных пометок на странице нет: её читает руководитель.
+            ->assertDontSee('Руководитель фирмы')
+            ->assertDontSee('пока по последнему сроку')
+            ->assertDontSee('Передачи клиентов');
     }
 
     public function test_manager_needs_the_flag(): void
@@ -395,15 +398,15 @@ class MonthClosingPageTest extends TestCase
             ->assertSee($this->bank->name)
             ->assertSee('Принято 1 из 2')
             ->assertDontSee('Принятые задачи')
-            ->assertSee('Пока не подключён к закрытию месяца')
-            ->assertSee('Для фирмы не включён, на закрытие месяца не влияет');
+            // Условий, которых у фирмы нет, в карточке нет совсем: ни ручного аудита, ни автоаудита.
+            ->assertDontSee('data-section="manual-audit"', false)
+            ->assertDontSee('data-section="auto-audit"', false);
 
         $this->tenant->setAutoAuditEnabled(true);
 
         $this->asVendor()->get(route('month-closing.card', [$client->id, 'month' => '2026-09']))
             ->assertOk()
-            ->assertSee('Вопросов автоаудита нет')
-            ->assertDontSee('Для фирмы не включён');
+            ->assertSee('Вопросов автоаудита нет');
     }
 
     // ── Налоги и отчётность ───────────────────────────────────────────────
@@ -484,12 +487,12 @@ class MonthClosingPageTest extends TestCase
         $this->asVendor()->get(route('month-closing.card', [$client->id, 'month' => '2026-09']))
             ->assertDontSee('data-section="taxes"', false);
 
-        // Флаг есть, а группы ни в одном БП нет.
+        // Флаг есть, а группы ни в одном БП нет: блока тоже нет.
         $this->tenant->setMonthClosingTaxesEnabled(true);
         $report->update(['service_group' => 'Отчеты']);
 
         $this->asVendor()->get(route('month-closing.card', [$client->id, 'month' => '2026-09']))
-            ->assertSee('Ни в одном БП нет группы');
+            ->assertDontSee('data-section="taxes"', false);
     }
 
     public function test_taxes_flag_command(): void

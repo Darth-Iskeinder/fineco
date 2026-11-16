@@ -116,8 +116,6 @@
                     @include('month-closing._open-tasks', ['tasks' => $taxOpen])
                 @endif
             </section>
-        @elseif ($taxes === 'missing')
-            @include('month-closing._not-connected', ['section' => 'taxes', 'title' => 'Налоги и отчетность', 'text' => 'Ни в одном БП нет группы «Налоги и отчетность»'])
         @endif
 
         {{-- Автоаудит: в условии только у фирм, где его страница открыта руководителю. --}}
@@ -145,11 +143,6 @@
                     </div>
                 </div>
             </section>
-        @else
-            @include('month-closing._not-connected', ['section' => 'auto-audit', 'title' => 'Автоаудит', 'text' => 'Для фирмы не включён, на закрытие месяца не влияет'])
         @endif
-
-        @include('month-closing._not-connected', ['section' => 'manual-audit', 'title' => 'Ручной аудит', 'text' => 'Пока не подключён к закрытию месяца: модуль в разработке'])
-
     @endif
 </div>
