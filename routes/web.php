@@ -6,6 +6,7 @@ use App\Http\Controllers\AutoAuditClientsController;
 use App\Http\Controllers\AutoAuditController;
 use App\Http\Controllers\AutoAuditSettingsController;
 use App\Http\Controllers\ClientSettlementsController;
+use App\Http\Controllers\MicroworldController;
 use App\Http\Controllers\MonthClosingController;
 use App\Http\Controllers\BuhSmetaController;
 use App\Http\Controllers\BuhTasksController;
@@ -137,6 +138,10 @@ Route::middleware('auth:employee')->group(function () {
     // с любой страницы ERP и вне системы модулей (доступ проверяет сам контроллер).
     Route::get('/task-alerts', [TaskAlertController::class, 'index'])->name('task-alerts.index');
     Route::post('/task-alerts/seen', [TaskAlertController::class, 'seen'])->name('task-alerts.seen');
+
+    // «Микромир»: своя успеваемость сотрудника. Видят сотрудники по флагу фирмы и
+    // вендор, проверка в контроллере.
+    Route::get('/my', [MicroworldController::class, 'index'])->name('microworld.index');
 
     // Закрытие месяца: только чтение. Видят вендор и руководитель по флагу фирмы, проверка
     // в контроллере. Карточка клиента отдельным запросом по клику.

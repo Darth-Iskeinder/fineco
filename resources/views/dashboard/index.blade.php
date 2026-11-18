@@ -350,7 +350,7 @@
                                     @endif
                                 </span>
                                 <span class="sm:ml-auto text-sm text-slate-500 tabular-nums whitespace-nowrap">
-                                    закрыто <span class="font-medium text-slate-700">{{ $row['completed'] }}</span> ·
+                                    сдано <span class="font-medium text-slate-700">{{ $row['done'] }}</span> ·
                                     <span class="text-lg font-semibold text-slate-800">{{ $row['pct'] }}%</span>
                                 </span>
                             </div>
@@ -358,7 +358,7 @@
                             <div>
                                 @foreach($row['members'] as $i => $m)
                                     @php
-                                        $donePct = $m['total'] > 0 ? round($m['completed'] / $m['total'] * 100, 1) : 0;
+                                        $donePct = $m['total'] > 0 ? round($m['done'] / $m['total'] * 100, 1) : 0;
                                         $latePct = $m['total'] > 0 ? round($m['overdue'] / $m['total'] * 100, 1) : 0;
                                     @endphp
                                     <div class="grid grid-cols-[minmax(0,1fr)_44px] sm:grid-cols-[minmax(0,1fr)_88px_128px_44px] gap-3 items-center py-1.5 border-t border-slate-100 first:border-t-0">
@@ -376,7 +376,7 @@
                                         <div class="hidden sm:block text-right text-xs text-slate-500 tabular-nums">{{ $m['total'] }} {{ $tasksWord($m['total']) }}</div>
                                         <div class="hidden sm:block">
                                             <div class="relative h-2 rounded-full bg-slate-100 overflow-hidden"
-                                                 title="закрыто {{ $m['completed'] }} из {{ $m['total'] }}@if($m['overdue'] > 0), просрочено {{ $m['overdue'] }}@endif">
+                                                 title="сдано {{ $m['done'] }} из {{ $m['total'] }}@if($m['overdue'] > 0), просрочено {{ $m['overdue'] }}@endif">
                                                 <span class="absolute inset-y-0 left-0 rounded-l-full" style="width: {{ $donePct }}%; background: {{ $memberColor($m, $i) }}"></span>
                                                 @if($m['overdue'] > 0)
                                                     <span class="absolute inset-y-0" style="left: {{ $donePct }}%; width: {{ $latePct }}%; {{ $overdueFill }}"></span>
@@ -402,7 +402,7 @@
 
                 @foreach($accountants as $row)
                     @php
-                        $donePct = $row['total'] > 0 ? round($row['completed'] / $row['total'] * 100, 1) : 0;
+                        $donePct = $row['total'] > 0 ? round($row['done'] / $row['total'] * 100, 1) : 0;
                         $latePct = $row['total'] > 0 ? round($row['overdue'] / $row['total'] * 100, 1) : 0;
                     @endphp
                     <div class="px-6 py-4 border-b border-slate-100" x-data="{ open: false }">
@@ -434,7 +434,7 @@
                             <div class="hidden sm:block text-right text-xs text-slate-500 tabular-nums">{{ $row['total'] }} {{ $tasksWord($row['total']) }}</div>
                             <div class="hidden sm:block">
                                 <div class="relative h-2 rounded-full bg-slate-100 overflow-hidden"
-                                     title="закрыто {{ $row['completed'] }} из {{ $row['total'] }}@if($row['overdue'] > 0), просрочено {{ $row['overdue'] }}@endif">
+                                     title="сдано {{ $row['done'] }} из {{ $row['total'] }}@if($row['overdue'] > 0), просрочено {{ $row['overdue'] }}@endif">
                                     <span class="absolute inset-y-0 left-0 rounded-l-full bg-indigo-600" style="width: {{ $donePct }}%"></span>
                                     @if($row['overdue'] > 0)
                                         <span class="absolute inset-y-0" style="left: {{ $donePct }}%; width: {{ $latePct }}%; {{ $overdueFill }}"></span>
@@ -452,8 +452,8 @@
             @endif
 
             <div class="flex flex-wrap gap-x-5 gap-y-2 px-6 py-3 bg-slate-50 text-xs text-slate-500">
-                <span class="inline-flex items-center gap-2"><span class="w-5 h-2 rounded-full bg-indigo-600"></span> закрыто</span>
-                <span class="inline-flex items-center gap-2"><span class="w-5 h-2 rounded-full" style="{{ $overdueFill }}"></span> срок прошёл, не закрыто</span>
+                <span class="inline-flex items-center gap-2"><span class="w-5 h-2 rounded-full bg-indigo-600"></span> сдано</span>
+                <span class="inline-flex items-center gap-2"><span class="w-5 h-2 rounded-full" style="{{ $overdueFill }}"></span> срок прошёл, не сдано</span>
                 <span class="inline-flex items-center gap-2"><span class="w-5 h-2 rounded-full bg-slate-100"></span> в работе, срок не наступил</span>
                 <span>Цвета кольца работают внутри строки главбуха, а не сквозь страницу</span>
             </div>

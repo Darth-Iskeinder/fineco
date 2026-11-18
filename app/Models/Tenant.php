@@ -53,6 +53,9 @@ class Tenant extends Model
     public const SETTING_MONTH_CLOSING = 'month_closing';
     public const SETTING_MONTH_CLOSING_TAXES = 'month_closing_taxes';
 
+    /** Ключ в settings: сотрудникам фирмы открыт «Микромир». */
+    public const SETTING_MICROWORLD = 'microworld';
+
     protected $fillable = [
         'name', 'slug', 'status', 'plan', 'settings', 'is_template',
         // Профиль фирмы: правится в настройках, уходит в акты и сметы.
@@ -216,6 +219,21 @@ class Tenant extends Model
     public function setMonthClosingTaxesEnabled(bool $enabled): void
     {
         $this->settings = array_merge($this->settings ?? [], [self::SETTING_MONTH_CLOSING_TAXES => $enabled]);
+        $this->save();
+    }
+
+    /**
+     * Видят ли сотрудники фирмы «Микромир» (microworld:access). Пока пробуем только у
+     * Fineco (17.11.2026). Вендору, зашедшему в фирму, страница видна всегда.
+     */
+    public function microworldEnabled(): bool
+    {
+        return (bool) ($this->settings[self::SETTING_MICROWORLD] ?? false);
+    }
+
+    public function setMicroworldEnabled(bool $enabled): void
+    {
+        $this->settings = array_merge($this->settings ?? [], [self::SETTING_MICROWORLD => $enabled]);
         $this->save();
     }
 

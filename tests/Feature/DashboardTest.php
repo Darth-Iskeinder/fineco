@@ -201,7 +201,7 @@ class DashboardTest extends TestCase
         \App\Models\BuhTaskLog::create([
             'employee_id' => $head->id, 'client_id' => $client->id,
             'estimate_item_id' => $mine->id, 'year' => now()->year, 'month' => now()->month,
-            'status' => 'completed', 'completed_at' => now(),
+            'status' => 'completed', 'completed_at' => now()->startOfMonth()->addHours(10), // до срока 25-го
         ]);
 
         // Внеплановая бухгалтера: в этот разрез она не попадает
@@ -221,7 +221,7 @@ class DashboardTest extends TestCase
         $this->assertNotNull($lead);
         $this->assertSame('Тест Главбух', $lead['name']);
         $this->assertSame(2, $lead['total']);      // своя плюс розданная
-        $this->assertSame(1, $lead['completed']);
+        $this->assertSame(1, $lead['done']);
         $this->assertSame(50, $lead['pct']);
 
         $members = collect($lead['members']);
@@ -232,7 +232,7 @@ class DashboardTest extends TestCase
         $helper = $members->firstWhere('name', $this->accountant->full_name);
         $this->assertNotNull($helper);
         $this->assertSame(1, $helper['total']);
-        $this->assertSame(0, $helper['completed']);
+        $this->assertSame(0, $helper['done']);
 
         // Компании раскрытия — та же половина
         $company = collect($lead['companies'])->firstWhere('id', $client->id);
@@ -280,7 +280,7 @@ class DashboardTest extends TestCase
         \App\Models\BuhTaskLog::create([
             'employee_id' => $closer->id, 'client_id' => $client->id,
             'estimate_item_id' => $item->id, 'year' => now()->year, 'month' => now()->month,
-            'status' => 'completed', 'completed_at' => now(),
+            'status' => 'completed', 'completed_at' => now()->startOfMonth()->addHours(10), // до срока 25-го
         ]);
 
         $response = $this->actingAs($this->manager, 'employee')
@@ -289,11 +289,11 @@ class DashboardTest extends TestCase
         $lead = collect($response->viewData('leads'))->firstWhere('id', $head->id);
         $this->assertNotNull($lead);
         $this->assertSame(1, $lead['total']);
-        $this->assertSame(1, $lead['completed']);
+        $this->assertSame(1, $lead['done']);
 
         $members = collect($lead['members']);
         $this->assertSame([$closer->full_name], $members->pluck('name')->all());
-        $this->assertSame(1, $members->first()['completed']);
+        $this->assertSame(1, $members->first()['done']);
 
         // Тот, за кем позиция числится, эту закрытую задачу себе не забирает
         $this->assertNull(
@@ -347,8 +347,72 @@ class DashboardTest extends TestCase
         $lead = collect($response->viewData('leads'))->firstWhere('id', $head->id);
         $this->assertNotNull($lead, 'Закрытая задача без слота должна попасть в разрез');
         $this->assertSame(1, $lead['total']);
-        $this->assertSame(1, $lead['completed']);
+        $this->assertSame(1, $lead['done']);
         $this->assertSame(100, $lead['pct']);
+    }
+
+    /**
+     * Правило «Микромира» (17.11.2026): в плюс идёт сданное, вовремя или с опозданием.
+     * Сданная и ещё не принятая задача тоже в плюсе и засчитана тому, кто её сдал.
+     * Несданная с прошедшим сроком в минусе.
+     */
+    public function test_people_block_counts_submitted_tasks(): void
+    {
+        $headRole = Role::firstOrCreate(['name' => Role::HEAD_ACCOUNTANT], ['display_name' => 'Главбух']);
+        $head = Employee::create([
+            'full_name' => 'Тест Главбух Срок', 'position' => 'Главбух',
+            'email' => 'head_ontime_' . uniqid() . '@test.kg', 'password' => bcrypt('x'),
+            'role_id' => $headRole->id, 'status' => Employee::STATUS_ACTIVE,
+        ]);
+        $head->forceFill(['created_at' => now()->subYear()])->saveQuietly();
+        $this->accountant->forceFill(['created_at' => now()->subYear()])->saveQuietly();
+
+        $service = Service::create([
+            'name' => 'Отчёт ' . uniqid(), 'periodicity' => 'Ежемесячно',
+            'start_day' => [5], 'is_active' => true,
+        ]);
+        $client = Client::create([
+            'name' => 'ТОО Срок Тест', 'inn' => 'DASH0000000D',
+            'responsible_employee_id' => $head->id,
+        ]);
+        $estimate = Estimate::create(['client_id' => $client->id, 'total' => 0]);
+        $estimate->forceFill(['created_at' => now()->subMonths(4)])->save();
+
+        $make = fn (string $name) => $estimate->items()->create([
+            'service_id' => $service->id, 'type' => 'recurring', 'name' => $name,
+            'periodicity' => 'Ежемесячно', 'cost' => 0, 'quantity' => 1,
+            'total' => 0, 'sort_order' => 0, 'assignee_id' => $this->accountant->id,
+        ]);
+        $late   = $make('Принята, но сдана поздно');
+        $review = $make('Сдана вовремя, ждёт проверки');
+        $make('Не сдана, срок прошёл');
+
+        $prev = now()->toImmutable()->subMonth()->startOfMonth(); // addDays ниже не должен сдвигать саму дату
+
+        \App\Models\BuhTaskLog::create([
+            'employee_id' => $this->accountant->id, 'client_id' => $client->id,
+            'estimate_item_id' => $late->id, 'year' => $prev->year, 'month' => $prev->month,
+            'status' => 'completed', 'review_started_at' => $prev->addDays(9), 'reviewed_at' => $prev->addDays(10),
+            'completed_at' => $prev->addDays(10),
+        ]);
+        \App\Models\BuhTaskLog::create([
+            'employee_id' => $this->accountant->id, 'client_id' => $client->id,
+            'estimate_item_id' => $review->id, 'year' => $prev->year, 'month' => $prev->month,
+            'status' => 'review', 'review_started_at' => $prev->addDays(2),
+        ]);
+
+        $response = $this->actingAs($this->manager, 'employee')
+            ->get(route('dashboard.index', ['year' => $prev->year, 'month' => $prev->month]))
+            ->assertOk();
+
+        $lead = collect($response->viewData('leads'))->firstWhere('id', $head->id);
+        $this->assertSame(3, $lead['total']);
+        $this->assertSame(2, $lead['done'], 'сданная поздно тоже в плюсе, несданная нет');
+        $this->assertSame(66, $lead['pct'], 'вниз: 2 из 3');
+        $this->assertSame(1, $lead['overdue']);
+
+        $person = collect($response->viewData('accountants'))->firstWhere('id', $this->accountant->id);
+        $this->assertSame(2, $person['done']);
     }
 
     /**

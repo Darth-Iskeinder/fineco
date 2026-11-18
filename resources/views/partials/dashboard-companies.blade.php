@@ -23,7 +23,7 @@
         @foreach($shown as $co)
             <div class="flex items-baseline gap-3 text-xs">
                 <span class="flex-1 truncate text-slate-600">{{ $co['name'] }}</span>
-                <span class="text-slate-400 tabular-nums">{{ $co['completed'] }} / {{ $co['total'] }}</span>
+                <span class="text-slate-400 tabular-nums">{{ $co['done'] }} / {{ $co['total'] }}</span>
                 <span class="w-9 text-right text-slate-700 tabular-nums">{{ $co['pct'] }}%</span>
             </div>
         @endforeach

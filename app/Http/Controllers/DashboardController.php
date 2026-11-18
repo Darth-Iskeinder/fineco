@@ -4,10 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Models\BuhAdhocTask;
 use App\Models\BuhTaskLog;
-use App\Models\Client;
 use App\Models\Employee;
-use App\Models\Service;
 use App\Services\Dashboard\MonthPeople;
+use App\Services\Dashboard\PlannedTask;
+use App\Services\Dashboard\PlannedTaskWalk;
+use App\Services\Microworld\OnTimeRule;
 use App\Services\Settlements\ClientPayback;
 use App\Services\Settlements\SettlementsAccess;
 use Carbon\CarbonImmutable;
@@ -69,42 +70,10 @@ class DashboardController extends Controller
         $scanFrom = $lookbackStart->min($monthStart)->min($paybackStart);
         $scanTo   = $today->max($monthEnd);
 
-        $clients = Client::query()
-            ->with([
-                'clientStatus',
-                'serviceSchedules',
-                'estimates' => fn ($q) => $q->with(['rootItems' => fn ($q2) => $q2
-                    ->whereNull('parent_id')
-                    ->orderBy('sort_order'),
-                ]),
-            ])
-            ->whereHas('estimates.rootItems', fn ($q) => $q->whereNull('parent_id'))
-            ->orderBy('name')
-            ->get();
-
-        $serviceIds = $clients
-            ->flatMap(fn ($c) => $c->estimates->first()?->rootItems ?? collect())
-            ->pluck('service_id')->filter()->unique()->values();
-        $services = $serviceIds->isNotEmpty()
-            ? Service::whereIn('id', $serviceIds)->get()->keyBy('id')
-            : collect();
-
-        // Логи всех сотрудников, ключ — «слот» (year-month-item[-дата для weekly]).
-        // После переназначения у слота могут быть логи разных исполнителей — берём последний.
-        // «Передана» не участвует: задача засчитывается тому, кто делает её сейчас.
-        // Иначе запись прежнего исполнителя, как самая свежая, выдавала бы задачу за «в работе».
-        $logRows = BuhTaskLog::where('year', '>=', min($scanFrom->year, $year))
-            ->where('status', '<>', BuhTaskLog::STATUS_HANDED)
-            ->orderBy('id')
-            ->get();
-
-        $logs = $logRows->keyBy(fn ($l) => $l->year . '-' . $l->month . '-' . $l->estimate_item_id
-            . ($l->due_date ? '-' . $l->due_date->toDateString() : ''));
-
-        // Второй, свободный индекс: у части помесячных логов срок всё-таки проставлен,
-        // и точный ключ по ним не сходится — закрытая задача выглядела незакрытой.
-        // Для недельных им пользоваться нельзя: там дата и есть различитель вхождений.
-        $logsByMonth = $logRows->keyBy(fn ($l) => $l->year . '-' . $l->month . '-' . $l->estimate_item_id);
+        // Сметные задачи окна выводятся из смет, как в задачнике. Обход общий с «Моим
+        // микромиром», чтобы обе страницы считали один и тот же набор задач.
+        $walk    = PlannedTaskWalk::load($scanFrom, $scanTo, min($scanFrom->year, $year), $today);
+        $clients = $walk->clients;
 
         // Логи выбранного месяца, которые уже нашли свой слот. Всё закрытое, что осталось
         // за пределами этого списка, добавляем в разрез отдельно — см. ниже про сирот.
@@ -180,143 +149,68 @@ class DashboardController extends Controller
         // Показываем всё, что есть: клиент без времени/сметы получает «—» в этих колонках
         $byCompany = [];
 
+        // Клиент со сметой виден в разрезе по компаниям всегда, даже без задач в выбранном месяце
         foreach ($clients as $client) {
-            $estimate  = $client->estimates->first();
-            $items     = $estimate?->rootItems ?? collect();
-            $overrides = $client->serviceSchedules->keyBy('service_id');
-
-            // Клиент со сметой виден всегда, даже без задач в выбранном месяце
+            $items = $client->estimates->first()?->rootItems ?? collect();
             $this->ensureCompanyRow($byCompany, (int) $client->id, $client->name, (float) $items->sum('total'));
             if ($paybackByCompany !== null) {
                 $this->ensureCompanyRow($paybackByCompany, (int) $client->id, $client->name, null);
             }
-
-            // Не генерируем даты раньше старта обслуживания клиента и раньше начала
-            // генерации по смете (месяц её создания холостой) — те же границы, что в задачнике.
-            $clientFrom = $scanFrom;
-            if ($client->service_start_date) {
-                $serviceStart = CarbonImmutable::parse($client->service_start_date)->startOfDay();
-                if ($serviceStart->gt($clientFrom)) {
-                    $clientFrom = $serviceStart;
-                }
-            }
-            if ($estimate && $estimate->tasksStartFrom()->gt($clientFrom)) {
-                $clientFrom = $estimate->tasksStartFrom();
-            }
-
-            // Возврат после перерыва: за месяцы простоя задач нет. Без этой границы
-            // приостановленный клиент продолжал давать план, и он оседал на том, за
-            // кем клиент числится — в том числе на уволенном.
-            if ($resumedFrom = $client->tasksStartFrom()) {
-                if ($resumedFrom->gt($clientFrom)) {
-                    $clientFrom = $resumedFrom;
-                }
-            }
-
-            // Верхняя граница — конец обслуживания, если он назначен. У действующих
-            // клиентов дата пуста, и окно остаётся прежним. Обе границы — те же, что
-            // в BuhTasksController: экраны обязаны показывать один и тот же набор задач.
-            $clientTo = $scanTo;
-            if ($serviceEnd = $client->serviceEndsAt()) {
-                if ($serviceEnd->lt($clientTo)) {
-                    $clientTo = $serviceEnd;
-                }
-            }
-
-            foreach ($items as $item) {
-                $assigneeId = (int) ($item->assignee_id ?? $client->responsible_employee_id);
-
-                // Своя граница позиции: БП, добавленный в смету в середине месяца,
-                // начинает работать со следующего. У позиций, заведённых до появления
-                // границы, и у разовых доп. услуг она пуста — окно остаётся клиентским.
-                $itemFrom = $clientFrom;
-                if ($itemStart = $item->tasksStartFrom()) {
-                    $itemFrom = $itemStart->gt($itemFrom) ? $itemStart : $itemFrom;
-                }
-
-                // Верхняя граница позиции: закрытый БП после своей даты задач не даёт.
-                // Дальше конца обслуживания клиента она в любом случае не уходит.
-                $itemTo = $clientTo;
-                if ($closedAt = $item->tasksEndAt()) {
-                    $itemTo = $closedAt->lt($itemTo) ? $closedAt : $itemTo;
-                }
-
-                $service     = $item->service_id ? $services->get($item->service_id) : null;
-                $override    = $service ? $overrides->get($item->service_id) : null;
-                $resolved    = $service ? $service->resolveForClient($override) : null;
-                $hasSchedule = !empty($resolved['periodicity']);
-                $kind        = $resolved ? Service::kindForPeriodicity($resolved['periodicity']) : null;
-
-                // Экземпляры задачи: [год, месяц, срок|null]
-                $occurrences = [];
-                if ($hasSchedule) {
-                    foreach ($service->dueDatesForClient($override, $itemFrom, $itemTo) as $due) {
-                        $occurrences[] = [$due->year, $due->month, $due];
-                    }
-                } elseif ($today->startOfMonth()->gte($itemFrom) && $today->startOfMonth()->lte($itemTo)) {
-                    // Позиции без расписания — задача текущего месяца (как в задачнике),
-                    // но не в холостой месяц только что заведённой сметы
-                    $dueDay = $item->due_day ? min((int) $item->due_day, $today->daysInMonth) : null;
-                    $occurrences[] = [$today->year, $today->month, $dueDay ? $today->startOfMonth()->addDays($dueDay - 1) : null];
-                }
-
-                foreach ($occurrences as [$wy, $wm, $dueObj]) {
-                    $slotKey = ($kind === 'weekly' && $dueObj) ? '-' . $dueObj->toDateString() : '';
-                    $log     = $logs->get($wy . '-' . $wm . '-' . $item->id . $slotKey);
-
-                    if (!$log && $kind !== 'weekly') {
-                        $log = $logsByMonth->get($wy . '-' . $wm . '-' . $item->id);
-                    }
-
-                    $status = $log?->status ?? 'pending';
-
-                    if ($log && $wy === $year && $wm === $month) {
-                        $matchedLogIds[$log->id] = true;
-                    }
-
-                    $this->classifyDiscipline($discipline, $wy, $wm, $dueObj, $status, $log?->completed_at, $today);
-
-                    if ($wy === $year && $wm === $month) {
-                        $elapsed = $this->calcElapsed($log);
-                        $this->accumulate($stats, $status, $dueObj, $log?->completed_at, $elapsed);
-
-                        // Закрытую задачу засчитываем тому, кто её закрыл, а не тому, за кем
-                        // она числится сейчас: позиции переезжают при смене ответственного, и
-                        // прошлый месяц иначе переписывается задним числом.
-                        $this->accumulateTeam(
-                            $team,
-                            (int) $client->id,
-                            $client->name,
-                            $people->lead($client),
-                            $this->doerOf($status, $log, $people->doer($client, $assigneeId)),
-                            $status,
-                            $dueObj,
-                            $today,
-                        );
-
-                        $this->accumulate($byCompany[$client->id], $status, $dueObj, $log?->completed_at, $elapsed);
-                    }
-
-                    if ($paybackByCompany !== null && $wy === $paybackStart->year && $wm === $paybackStart->month) {
-                        $this->accumulate($paybackByCompany[$client->id], $status, $dueObj, $log?->completed_at, $this->calcElapsed($log));
-                    }
-
-                    if ($dueObj && $dueObj->lt($today) && $dueObj->gte($cutoff)
-                        && in_array($status, self::OPEN_STATUSES, true)) {
-                        $byCompany[$client->id]['overdue']++;
-                        $overdue[] = [
-                            'name'        => $item->name . ($item->branch_label ? ' — ' . $item->branch_label : ''),
-                            'client_name' => $client->name,
-                            'assignee'    => $employeeNames->get($assigneeId) ?? 'Не назначено',
-                            'due_date'    => $dueObj,
-                            'days'        => (int) $dueObj->diffInDays($today),
-                            'status'      => $status,
-                            'is_adhoc'    => false,
-                        ];
-                    }
-                }
-            }
         }
+
+        $walk->each(function (PlannedTask $task) use (
+            &$matchedLogIds, &$discipline, &$stats, &$team, &$byCompany, &$paybackByCompany, &$overdue,
+            $year, $month, $today, $cutoff, $paybackStart, $people, $employeeNames,
+        ) {
+            $client = $task->client;
+            $item   = $task->item;
+            $log    = $task->log;
+            $status = $task->status;
+            $dueObj = $task->due;
+
+            if ($log && $task->isIn($year, $month)) {
+                $matchedLogIds[$log->id] = true;
+            }
+
+            $this->classifyDiscipline($discipline, $task->year, $task->month, $dueObj, $status, $log?->completed_at, $today);
+
+            if ($task->isIn($year, $month)) {
+                $elapsed = $this->calcElapsed($log);
+                $this->accumulate($stats, $status, $dueObj, $log?->completed_at, $elapsed);
+
+                // Сданную задачу засчитываем тому, кто её сдал, а не тому, за кем
+                // она числится сейчас: позиции переезжают при смене ответственного, и
+                // прошлый месяц иначе переписывается задним числом.
+                $this->accumulateTeam(
+                    $team,
+                    (int) $client->id,
+                    $client->name,
+                    $people->lead($client),
+                    $this->doerOf($status, $log, $people->doer($client, $task->assigneeId)),
+                    OnTimeRule::classify($status, $dueObj, $log, $today),
+                );
+
+                $this->accumulate($byCompany[$client->id], $status, $dueObj, $log?->completed_at, $elapsed);
+            }
+
+            if ($paybackByCompany !== null && $task->isIn($paybackStart->year, $paybackStart->month)) {
+                $this->accumulate($paybackByCompany[$client->id], $status, $dueObj, $log?->completed_at, $this->calcElapsed($log));
+            }
+
+            if ($dueObj && $dueObj->lt($today) && $dueObj->gte($cutoff)
+                && in_array($status, self::OPEN_STATUSES, true)) {
+                $byCompany[$client->id]['overdue']++;
+                $overdue[] = [
+                    'name'        => $item->name . ($item->branch_label ? ' — ' . $item->branch_label : ''),
+                    'client_name' => $client->name,
+                    'assignee'    => $employeeNames->get($task->assigneeId) ?? 'Не назначено',
+                    'due_date'    => $dueObj,
+                    'days'        => (int) $dueObj->diffInDays($today),
+                    'status'      => $status,
+                    'is_adhoc'    => false,
+                ];
+            }
+        });
 
         // Внеплановые задачи (вне сметы) — наравне с плановыми
         foreach (BuhAdhocTask::with('client:id,name')->get() as $a) {
@@ -368,7 +262,7 @@ class DashboardController extends Controller
         }
 
         /**
-         * Закрытые задачи, которым слота в этом месяце нет.
+         * Сданные задачи (закрытые и на проверке), которым слота в этом месяце нет.
          *
          * Так выходит у позиций без периодичности (для них слот создаётся только на
          * текущий месяц, и в прошлом их работа исчезала) и у тех, чьё расписание после
@@ -378,12 +272,12 @@ class DashboardController extends Controller
          */
         $clientsById = $clients->keyBy('id');
 
-        foreach ($logRows as $log) {
+        foreach ($walk->logRows as $log) {
             if ((int) $log->year !== $year || (int) $log->month !== $month) {
                 continue;
             }
 
-            if ($log->status !== 'completed' || !$log->estimate_item_id || isset($matchedLogIds[$log->id])) {
+            if (!in_array($log->status, OnTimeRule::SUBMITTED, true) || !$log->estimate_item_id || isset($matchedLogIds[$log->id])) {
                 continue;
             }
 
@@ -398,9 +292,7 @@ class DashboardController extends Controller
                 $client->name,
                 $people->lead($client),
                 (int) $log->employee_id,
-                'completed',
-                null,
-                $today,
+                OnTimeRule::ON_TIME, // срока у задачи без слота нет: доказать опоздание нечем
             );
         }
 
@@ -480,13 +372,14 @@ class DashboardController extends Controller
     }
 
     /**
-     * Кому засчитать задачу: закрытую — тому, кто её закрыл, остальные — тому, за кем
-     * она числится (в прошлом месяце с поправкой MonthPeople::doer). Логи при переносе работы не двигаются, а позиции сметы двигаются,
-     * поэтому по назначению закрытый месяц меняется каждый раз после смены ответственного.
+     * Кому засчитать задачу: сданную (закрытую или на проверке) тому, кто её сдал, остальные
+     * тому, за кем она числится (в прошлом месяце с поправкой MonthPeople::doer). Логи при
+     * переносе работы не двигаются, а позиции сметы двигаются, поэтому по назначению закрытый
+     * месяц менялся бы после каждой смены ответственного. Правило общее с «Микромиром».
      */
     private function doerOf(string $status, ?BuhTaskLog $log, int $assigneeId): int
     {
-        return $status === 'completed' && $log?->employee_id
+        return in_array($status, OnTimeRule::SUBMITTED, true) && $log?->employee_id
             ? (int) $log->employee_id
             : $assigneeId;
     }
@@ -495,8 +388,10 @@ class DashboardController extends Controller
      * Копит одну сметную задачу в оба разреза «по сотрудникам».
      *
      * Задача идёт и главбуху компании (он отвечает за всё, что по ней делается),
-     * и тому, кто её делает. Просрочка тут месячная: задача выбранного месяца,
-     * срок прошёл, а она открыта. Просрочка «вообще» живёт в своём блоке выше.
+     * и тому, кто её делает. Счёт по правилу «Микромира» (OnTimeRule, 17.11.2026):
+     * в плюс идёт сданное, вовремя или с опозданием. Просрочка тут месячная: задача
+     * выбранного месяца, срок прошёл, а она не сдана. Просрочка «вообще» живёт в своём
+     * блоке выше.
      */
     private function accumulateTeam(
         array &$team,
@@ -504,26 +399,24 @@ class DashboardController extends Controller
         string $clientName,
         int $leadId,
         int $assigneeId,
-        string $status,
-        ?CarbonImmutable $due,
-        CarbonImmutable $today,
+        string $kind,
     ): void {
-        $done = $status === 'completed';
-        $late = !$done && $due && $due->lt($today) && in_array($status, self::OPEN_STATUSES, true);
+        $done = $kind === OnTimeRule::ON_TIME || $kind === OnTimeRule::LATE;
+        $late = $kind === OnTimeRule::OVERDUE;
 
         $lead = &$team['leads'][$leadId];
-        $lead ??= ['total' => 0, 'completed' => 0, 'overdue' => 0, 'companies' => [], 'members' => []];
-        $lead['companies'][$clientId] ??= ['name' => $clientName, 'total' => 0, 'completed' => 0];
-        $lead['members'][$assigneeId] ??= ['total' => 0, 'completed' => 0, 'overdue' => 0];
+        $lead ??= ['total' => 0, 'done' => 0, 'overdue' => 0, 'companies' => [], 'members' => []];
+        $lead['companies'][$clientId] ??= ['name' => $clientName, 'total' => 0, 'done' => 0];
+        $lead['members'][$assigneeId] ??= ['total' => 0, 'done' => 0, 'overdue' => 0];
 
         $lead['total']++;
         $lead['companies'][$clientId]['total']++;
         $lead['members'][$assigneeId]['total']++;
 
         if ($done) {
-            $lead['completed']++;
-            $lead['companies'][$clientId]['completed']++;
-            $lead['members'][$assigneeId]['completed']++;
+            $lead['done']++;
+            $lead['companies'][$clientId]['done']++;
+            $lead['members'][$assigneeId]['done']++;
         }
 
         if ($late) {
@@ -534,16 +427,16 @@ class DashboardController extends Controller
         unset($lead);
 
         $person = &$team['people'][$assigneeId];
-        $person ??= ['total' => 0, 'completed' => 0, 'overdue' => 0, 'companies' => [], 'leads' => []];
-        $person['companies'][$clientId] ??= ['name' => $clientName, 'total' => 0, 'completed' => 0];
+        $person ??= ['total' => 0, 'done' => 0, 'overdue' => 0, 'companies' => [], 'leads' => []];
+        $person['companies'][$clientId] ??= ['name' => $clientName, 'total' => 0, 'done' => 0];
         $person['leads'][$leadId] = true;
 
         $person['total']++;
         $person['companies'][$clientId]['total']++;
 
         if ($done) {
-            $person['completed']++;
-            $person['companies'][$clientId]['completed']++;
+            $person['done']++;
+            $person['companies'][$clientId]['done']++;
         }
 
         if ($late) {
@@ -572,9 +465,9 @@ class DashboardController extends Controller
                     'note'      => $notes->get($memberId),
                     'self'      => $memberId === $id,
                     'total'     => $member['total'],
-                    'completed' => $member['completed'],
+                    'done' => $member['done'],
                     'overdue'   => $member['overdue'],
-                    'pct'       => $this->pct($member['completed'], $member['total']),
+                    'pct'       => $this->pct($member['done'], $member['total']),
                 ];
             }
 
@@ -588,9 +481,9 @@ class DashboardController extends Controller
                 'note'      => $notes->get($id),
                 'role'      => $roles->get($id) ?? 'Главбух',
                 'total'     => $row['total'],
-                'completed' => $row['completed'],
+                'done' => $row['done'],
                 'overdue'   => $row['overdue'],
-                'pct'       => $this->pct($row['completed'], $row['total']),
+                'pct'       => $this->pct($row['done'], $row['total']),
                 'members'   => $this->foldMembers($members),
                 'companies' => $this->sortCompanies($row['companies']),
             ];
@@ -622,9 +515,9 @@ class DashboardController extends Controller
                 'note'      => $notes->get($id),
                 'role'      => $roles->get($id) ?? 'Бухгалтер',
                 'total'     => $row['total'],
-                'completed' => $row['completed'],
+                'done' => $row['done'],
                 'overdue'   => $row['overdue'],
-                'pct'       => $this->pct($row['completed'], $row['total']),
+                'pct'       => $this->pct($row['done'], $row['total']),
                 'leads'     => $leadNames,
                 'companies' => $this->sortCompanies($row['companies']),
             ];
@@ -649,10 +542,10 @@ class DashboardController extends Controller
             'self'      => false,
             'other'     => true,
             'total'     => array_sum(array_column($tail, 'total')),
-            'completed' => array_sum(array_column($tail, 'completed')),
+            'done' => array_sum(array_column($tail, 'done')),
             'overdue'   => array_sum(array_column($tail, 'overdue')),
             'pct'       => $this->pct(
-                array_sum(array_column($tail, 'completed')),
+                array_sum(array_column($tail, 'done')),
                 array_sum(array_column($tail, 'total')),
             ),
         ];
@@ -668,7 +561,7 @@ class DashboardController extends Controller
         foreach ($companies as $id => $company) {
             $rows[] = $company + [
                 'id'  => $id,
-                'pct' => $this->pct($company['completed'], $company['total']),
+                'pct' => $this->pct($company['done'], $company['total']),
             ];
         }
 
@@ -685,9 +578,10 @@ class DashboardController extends Controller
         return $rows;
     }
 
-    private function pct(int $completed, int $total): ?int
+    /** Вниз, как в «Микромире»: 100% только когда сдано всё. */
+    private function pct(int $done, int $total): ?int
     {
-        return $total > 0 ? (int) round($completed / $total * 100) : null;
+        return $total > 0 ? (int) floor($done / $total * 100) : null;
     }
 
     /** Заводит строку компании (счётчики совместимы с accumulate); смета null = у клиента её нет. */

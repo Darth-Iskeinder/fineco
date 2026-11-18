@@ -207,6 +207,23 @@
                     $activeRoutes = ['employees', 'clients', 'buhsmeta', 'buhtasks', 'audit', 'settlements'];
                 @endphp
 
+                {{-- Микромир: первым пунктом, это личная страница. Вендор всегда,
+                     сотрудники по флагу фирмы (microworld:access). --}}
+                @if(\App\Http\Controllers\MicroworldController::visible())
+                    <a href="{{ route('microworld.index') }}"
+                       class="flex items-center px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200
+                              @if(request()->routeIs('microworld.*'))
+                                  bg-gradient-to-r from-violet-500 to-indigo-600 text-white shadow-lg shadow-indigo-500/25
+                              @else
+                                  text-slate-600 hover:bg-slate-100 hover:text-slate-900
+                              @endif">
+                        <svg class="w-5 h-5 mr-3 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                        </svg>
+                        Микромир
+                    </a>
+                @endif
+
                 @foreach($sidebarModules as $module)
                     @php
                         $hasAccess = $currentEmployee && $currentEmployee->hasAccessToModule($module->name);
