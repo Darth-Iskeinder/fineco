@@ -50,6 +50,12 @@ return Application::configure(basePath: dirname(__DIR__))
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
         ]);
 
+        // Счётчик скорости страниц стоит первым, чтобы охватить всю работу
+        // остальных прослоек. Сам ничего не решает и не ломает (см. PageTimer).
+        $middleware->web(prepend: [
+            \App\Http\Middleware\TimePage::class,
+        ]);
+
         $middleware->alias([
             'module' => CheckModuleAccess::class,
             'admin' => AdminMiddleware::class,
