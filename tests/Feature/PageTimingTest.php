@@ -48,6 +48,13 @@ class PageTimingTest extends TestCase
         DB::table('page_timings')->delete();
 
         Route::middleware('web')->get('/__timed/{client}', fn () => 'ok');
+        Route::middleware('web')->get('/__timed-db', function () {
+            DB::select('select 1');
+            DB::select('select 2');
+            DB::select('select 3');
+
+            return 'ok';
+        });
     }
 
     protected function tearDown(): void
@@ -75,6 +82,22 @@ class PageTimingTest extends TestCase
         $this->assertSame(2, (int) $row->hits);
         $this->assertGreaterThanOrEqual((int) $row->max_ms, (int) $row->total_ms);
         $this->assertLessThanOrEqual(2, (int) $row->under_1000);
+    }
+
+    public function test_database_queries_of_the_page_are_counted_without_the_counters_own(): void
+    {
+        $this->get('/__timed-db')->assertOk();
+        $before = (int) DB::table('page_timings')->where('route', '__timed-db')->value('total_queries');
+
+        $this->get('/__timed-db')->assertOk();
+        $row = DB::table('page_timings')->where('route', '__timed-db')->first();
+
+        // Сессия и прочие прослойки тоже ходят в базу, поэтому точное число не
+        // проверяем. Главное: три запроса страницы видны, а второе открытие
+        // добавило ровно столько же, сколько первое (своя запись не в счёт).
+        $this->assertGreaterThanOrEqual(3, $before);
+        $this->assertSame(2 * $before, (int) $row->total_queries);
+        $this->assertLessThanOrEqual((int) $row->total_ms, (int) $row->total_db_ms);
     }
 
     public function test_page_without_firm_is_counted_under_zero(): void
@@ -108,9 +131,9 @@ class PageTimingTest extends TestCase
 
     public function test_report_shows_the_slowest_pages_first(): void
     {
-        PageTimer::record(0, 'GET', 'fast', 50);
-        PageTimer::record(0, 'GET', 'slow', 3400);
-        PageTimer::record(0, 'GET', 'slow', 2000);
+        PageTimer::record(0, 'GET', 'fast', 50, 4, 10);
+        PageTimer::record(0, 'GET', 'slow', 3400, 150, 2500);
+        PageTimer::record(0, 'GET', 'slow', 2000, 110, 1820);
 
         $row = DB::table('page_timings')->where('route', 'slow')->first();
         $this->assertSame(2, (int) $row->hits);
@@ -121,10 +144,10 @@ class PageTimingTest extends TestCase
         $this->artisan('page-timing')
             ->expectsOutputToContain('Счётчик включён')
             ->expectsTable(
-                ['Страница', 'Открытий', 'Среднее, с', 'До 0,3 с', 'До 1 с', 'Худшее, с', 'Всего ждали, мин'],
+                ['Страница', 'Открытий', 'Среднее, с', 'До 0,3 с', 'До 1 с', 'Худшее, с', 'Всего ждали, мин', 'Запросов к базе', 'База, %'],
                 [
-                    ['GET /slow', '2', '2,70', '0%', '0%', '3,40', '0,1'],
-                    ['GET /fast', '1', '0,05', '100%', '100%', '0,05', '0,0'],
+                    ['GET /slow', '2', '2,70', '0%', '0%', '3,40', '0,1', '130', '80%'],
+                    ['GET /fast', '1', '0,05', '100%', '100%', '0,05', '0,0', '4', '20%'],
                 ],
             )
             ->assertSuccessful();

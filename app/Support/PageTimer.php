@@ -30,8 +30,34 @@ class PageTimer
         return !is_file(self::offFlag());
     }
 
+    /** Сколько запросов к базе и сколько мс на них с начала текущего открытия. */
+    public static int $queries = 0;
+    public static float $dbMs = 0.0;
+
+    /**
+     * Обнулить счёт базы перед открытием и слушать запросы. Слушатель ставим один
+     * раз на приложение (в тестах их много подряд, у каждого свой диспетчер).
+     */
+    public static function startQueryCount(): void
+    {
+        self::$queries = 0;
+        self::$dbMs = 0.0;
+
+        try {
+            if (!app()->bound(self::class . '.listening')) {
+                app()->instance(self::class . '.listening', true);
+
+                DB::listen(function ($query) {
+                    self::$queries++;
+                    self::$dbMs += (float) $query->time;
+                });
+            }
+        } catch (Throwable $ignored) {
+        }
+    }
+
     /** Засчитать одно открытие. route это шаблон адреса (clients/{client}), а не сам адрес. */
-    public static function record(int $tenantId, string $method, string $route, int $ms): void
+    public static function record(int $tenantId, string $method, string $route, int $ms, int $queries = 0, int $dbMs = 0): void
     {
         try {
             $key = [
@@ -46,6 +72,8 @@ class PageTimer
                 'total_ms'   => $ms,
                 'under_300'  => $ms < self::FAST_MS ? 1 : 0,
                 'under_1000' => $ms < self::OK_MS ? 1 : 0,
+                'total_queries' => $queries,
+                'total_db_ms'   => $dbMs,
             ];
 
             // Сначала прибавляем к строке дня: это почти всегда так. incrementEach

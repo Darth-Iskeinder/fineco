@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Support\PageTimer;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Отчёт по скорости страниц и выключатель счётчика.
@@ -49,6 +50,12 @@ class PageTiming extends Command
 
         $this->line('Счётчик ' . (PageTimer::enabled() ? 'включён' : 'выключен'));
 
+        if (!Schema::hasTable('page_timings')) {
+            $this->warn('Таблицы page_timings нет, счётчику некуда писать. Запустите: php artisan migrate --force');
+
+            return self::FAILURE;
+        }
+
         $days = max(1, (int) $this->option('days'));
         $from = now()->subDays($days - 1)->toDateString();
 
@@ -59,6 +66,7 @@ class PageTiming extends Command
             ->select('method', 'route')
             ->selectRaw('SUM(hits) AS hits, SUM(total_ms) AS total_ms, MAX(max_ms) AS max_ms')
             ->selectRaw('SUM(under_300) AS under_300, SUM(under_1000) AS under_1000')
+            ->selectRaw('SUM(total_queries) AS total_queries, SUM(total_db_ms) AS total_db_ms')
             ->orderByDesc('total_ms')
             ->limit(max(1, (int) $this->option('limit')))
             ->get();
@@ -72,7 +80,7 @@ class PageTiming extends Command
         $this->line("С {$from}, сверху страницы, где в сумме ждали дольше всего");
 
         $this->table(
-            ['Страница', 'Открытий', 'Среднее, с', 'До 0,3 с', 'До 1 с', 'Худшее, с', 'Всего ждали, мин'],
+            ['Страница', 'Открытий', 'Среднее, с', 'До 0,3 с', 'До 1 с', 'Худшее, с', 'Всего ждали, мин', 'Запросов к базе', 'База, %'],
             $rows->map(fn ($r) => [
                 $r->method . ' /' . ltrim($r->route, '/'),
                 $r->hits,
@@ -81,6 +89,10 @@ class PageTiming extends Command
                 self::pct($r->under_1000, $r->hits),
                 self::sec($r->max_ms),
                 number_format($r->total_ms / 60000, 1, ',', ''),
+                // Среднее на одно открытие: сотня запросов значит, что база
+                // спрашивается в цикле, это первое, что чинить.
+                (int) round($r->total_queries / max(1, $r->hits)),
+                self::pct($r->total_db_ms, $r->total_ms),
             ])->all(),
         );
 

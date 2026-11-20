@@ -21,6 +21,10 @@ class TimePage
 
     public function handle(Request $request, Closure $next): Response
     {
+        // Запросы к базе считаем с этого места: всё, что раньше (запуск
+        // фреймворка), к базе почти не ходит.
+        PageTimer::startQueryCount();
+
         $response = $next($request);
 
         try {
@@ -32,6 +36,9 @@ class TimePage
                     'method' => $request->method(),
                     'route'  => $route->uri(),
                     'ms'     => (int) round((microtime(true) - (float) $start) * 1000),
+                    // Снимок до записи в terminate: её собственные запросы не в счёт.
+                    'queries' => PageTimer::$queries,
+                    'db_ms'   => (int) round(PageTimer::$dbMs),
                 ]);
             }
         } catch (Throwable $ignored) {
@@ -45,7 +52,7 @@ class TimePage
         $t = $request->attributes->get(self::ATTR);
 
         if (is_array($t)) {
-            PageTimer::record($t['tenant'], $t['method'], $t['route'], $t['ms']);
+            PageTimer::record($t['tenant'], $t['method'], $t['route'], $t['ms'], $t['queries'], $t['db_ms']);
         }
     }
 }
