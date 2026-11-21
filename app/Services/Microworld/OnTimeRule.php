@@ -32,10 +32,11 @@ final class OnTimeRule
     public static function classify(string $status, ?CarbonImmutable $due, ?BuhTaskLog $log, CarbonImmutable $today): string
     {
         if (in_array($status, self::SUBMITTED, true)) {
-            $at = self::submittedAt($log);
+            $at = self::submittedRaw($log);
 
-            // Без срока или без даты сдачи считаем в срок: доказать опоздание нечем
-            return (!$due || !$at || $at->lte($due->endOfDay())) ? self::ON_TIME : self::LATE;
+            // Без срока или без даты сдачи считаем в срок: доказать опоздание нечем.
+            // Сравниваем секунды, а не даты Carbon: зовётся на каждую задачу страницы.
+            return (!$due || !$at || $at->getTimestamp() <= $due->endOfDay()->getTimestamp()) ? self::ON_TIME : self::LATE;
         }
 
         return ($due && $due->lt($today)) ? self::OVERDUE : self::OPEN;
@@ -51,6 +52,14 @@ final class OnTimeRule
      */
     public static function submittedAt(?BuhTaskLog $log): ?CarbonImmutable
     {
+        $at = self::submittedRaw($log);
+
+        return $at ? CarbonImmutable::instance($at) : null;
+    }
+
+    /** То же без копии в CarbonImmutable, она дорогая на сотнях задач. */
+    private static function submittedRaw(?BuhTaskLog $log): ?\DateTimeInterface
+    {
         if (!$log) {
             return null;
         }
@@ -61,6 +70,11 @@ final class OnTimeRule
             default     => null,
         };
 
-        return $at ? CarbonImmutable::parse($at) : null;
+        // Поля дат приходят Carbon из кастов модели, строка только на всякий случай
+        return match (true) {
+            !$at                              => null,
+            $at instanceof \DateTimeInterface => $at,
+            default                           => CarbonImmutable::parse($at),
+        };
     }
 }

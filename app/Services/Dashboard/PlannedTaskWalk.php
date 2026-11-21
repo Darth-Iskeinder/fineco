@@ -36,11 +36,24 @@ final class PlannedTaskWalk
     /**
      * @param CarbonImmutable $from          начало окна генерации сроков
      * @param CarbonImmutable $to            конец окна
-     * @param int             $logsFromYear  с какого года читать логи
+     * @param int|CarbonImmutable $logsFrom с какого года (число) или с какого месяца читать логи
+     * @param ?Collection     $onlyClients   только эти клиенты (id); null = вся фирма.
+     *                                       Логи тогда читаются тоже только их.
+     * @param list<string>    $logColumns    какие поля логов читать. На слабом процессоре боя
+     *                                       чтение 10 тысяч логов целиком шло ~2,5 с (21.11.2026)
      */
-    public static function load(CarbonImmutable $from, CarbonImmutable $to, int $logsFromYear, CarbonImmutable $today): self
-    {
+    public static function load(
+        CarbonImmutable $from,
+        CarbonImmutable $to,
+        int|CarbonImmutable $logsFrom,
+        CarbonImmutable $today,
+        ?Collection $onlyClients = null,
+        array $logColumns = ['*'],
+    ): self {
+        [$logYear, $logMonth] = is_int($logsFrom) ? [$logsFrom, 1] : [$logsFrom->year, $logsFrom->month];
+
         $clients = Client::query()
+            ->when($onlyClients !== null, fn ($q) => $q->whereIn('id', $onlyClients))
             ->with([
                 'clientStatus',
                 'serviceSchedules',
@@ -64,13 +77,20 @@ final class PlannedTaskWalk
         // у слота могут быть логи разных исполнителей, берём последний. «Передана» не
         // участвует: задача засчитывается тому, кто делает её сейчас. Иначе запись
         // прежнего исполнителя, как самая свежая, выдавала бы задачу за «в работе».
-        $logRows = BuhTaskLog::where('year', '>=', $logsFromYear)
+        $logRows = BuhTaskLog::where(fn ($q) => $q->where('year', '>', $logYear)
+                ->orWhere(fn ($q2) => $q2->where('year', $logYear)->where('month', '>=', $logMonth)))
+            ->when($onlyClients !== null, fn ($q) => $q->whereIn('client_id', $clients->pluck('id')))
             ->where('status', '<>', BuhTaskLog::STATUS_HANDED)
             ->orderBy('id')
-            ->get();
+            ->get($logColumns);
 
-        $logs = $logRows->keyBy(fn ($l) => $l->year . '-' . $l->month . '-' . $l->estimate_item_id
-            . ($l->due_date ? '-' . $l->due_date->toDateString() : ''));
+        // Дата срока из сырого значения: разбирать её в Carbon ради ключа на 10 тысячах
+        // логов заметно дорого. И MySQL, и PostgreSQL отдают дату как «Y-m-d».
+        $logs = $logRows->keyBy(function ($l) {
+            $due = $l->getRawOriginal('due_date');
+
+            return $l->year . '-' . $l->month . '-' . $l->estimate_item_id . ($due ? '-' . substr((string) $due, 0, 10) : '');
+        });
 
         // Второй, свободный индекс: у части помесячных логов срок всё-таки проставлен,
         // и точный ключ по ним не сходится, закрытая задача выглядела незакрытой.

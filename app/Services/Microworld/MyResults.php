@@ -4,7 +4,10 @@ namespace App\Services\Microworld;
 
 use App\Models\BuhTaskLog;
 use App\Models\Client;
+use App\Models\ClientResponsibleChange;
 use App\Models\Employee;
+use App\Models\Estimate;
+use App\Models\EstimateItem;
 use App\Services\Dashboard\MonthPeople;
 use App\Services\Dashboard\PlannedTask;
 use App\Services\Dashboard\PlannedTaskWalk;
@@ -36,6 +39,12 @@ final class MyResults
     public const COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300'];
     public const OTHER_COLOR = '#94a3b8';
 
+    /** Поля логов, которые читают обход, OnTimeRule и этот класс. */
+    private const LOG_COLUMNS = [
+        'id', 'tenant_id', 'client_id', 'estimate_item_id', 'employee_id', 'year', 'month', 'due_date',
+        'status', 'review_started_at', 'reviewed_at', 'completed_at', 'updated_at',
+    ];
+
     public function __construct(private readonly CarbonImmutable $today) {}
 
     /**
@@ -63,7 +72,8 @@ final class MyResults
         $from = $focus->subMonths(self::HISTORY - 1)->min($this->today->startOfMonth()->subMonths(6))->max($cutoff);
         $to   = $this->today->endOfMonth()->max($focus->endOfMonth());
 
-        $walk = PlannedTaskWalk::load($from, $to, $from->year, $this->today);
+        // Обход только по клиентам сотрудника и только с теми полями логов, что нужны здесь
+        $walk = PlannedTaskWalk::load($from, $to, $from, $this->today, self::touchedClients($employee, $from->year), self::LOG_COLUMNS);
 
         $employees = Employee::withTrashed()->with('role:id,display_name')
             ->get(['id', 'full_name', 'role_id', 'employment_status', 'fired_at', 'deleted_at', 'created_at', 'hired_at']);
@@ -130,7 +140,8 @@ final class MyResults
                     'name'   => $item->name . ($item->branch_label ? ' — ' . $item->branch_label : ''),
                     'client' => $task->client->name,
                     'due'    => $task->due,
-                    'days'   => (int) $task->due->diffInDays($this->today),
+                    // То же, что (int) diffInDays, но без Carbon: часы UTC, перевода времени нет
+                    'days'   => intdiv($this->today->getTimestamp() - $task->due->getTimestamp(), 86400),
                     'status' => $task->status,
                 ];
             }
@@ -151,7 +162,7 @@ final class MyResults
             $count((int) $log->employee_id, $lead, $log->year . '-' . $log->month, OnTimeRule::ON_TIME, null);
         }
 
-        $byDays = fn ($a, $b) => [$b['days'], $a['client']] <=> [$a['days'], $b['client']];
+        $byDays = fn ($a, $b) => [$b['days'], $a['client'], $a['name']] <=> [$a['days'], $b['client'], $b['name']];
         usort($overdue['mine'], $byDays);
         foreach ($overdue['team'] as &$list) {
             usort($list, $byDays);
@@ -233,6 +244,27 @@ final class MyResults
             'members' => $rows,
             'ring'    => $ring,
         ];
+    }
+
+    /**
+     * Клиенты, задачи которых могут попасть сотруднику в любой из разрезов. Остальных не
+     * обходим: на слабом процессоре боя обход всей фирмы шёл 5 с (21.11.2026).
+     *
+     * Задача засчитана ему, только если он её сдал (лог), он исполнитель позиции, он
+     * ответственный за клиента (позиции без исполнителя, главбух месяца) или вёл клиента
+     * раньше (история смен). Здесь все четыре пути, с запасом: лишний клиент не меняет
+     * чисел, пропущенный менял бы.
+     */
+    private static function touchedClients(Employee $employee, int $logsFromYear): Collection
+    {
+        $id = $employee->id;
+
+        return Client::where('responsible_employee_id', $id)->pluck('id')
+            ->merge(ClientResponsibleChange::where(fn ($q) => $q->where('employee_id', $id)->orWhere('previous_employee_id', $id))
+                ->pluck('client_id'))
+            ->merge(Estimate::whereIn('id', EstimateItem::where('assignee_id', $id)->select('estimate_id'))->pluck('client_id'))
+            ->merge(BuhTaskLog::where('employee_id', $id)->where('year', '>=', $logsFromYear)->distinct()->pluck('client_id'))
+            ->filter()->unique()->values();
     }
 
     private function doer(PlannedTask $task, MonthPeople $people): int

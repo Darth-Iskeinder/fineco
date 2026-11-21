@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\BuhTaskLog;
 use App\Models\Client;
+use App\Models\ClientResponsibleChange;
 use App\Models\Employee;
 use App\Models\Estimate;
 use App\Models\EstimateItem;
@@ -285,6 +286,30 @@ class MicroworldPageTest extends TestCase
 
         // Просрочки бухгалтера на клиентах главбуха за все месяцы: июль..ноябрь
         $this->assertCount(5, $rows[$this->accountant->id]['overdue_now']);
+    }
+
+    /**
+     * Клиента передали новому главбуху в ноябре. Октябрь остаётся за прежним, хотя сейчас
+     * клиент не его и позиций на нём нет: обход берёт клиента по истории смен.
+     */
+    public function test_former_lead_keeps_the_month_before_handover(): void
+    {
+        $former = $this->employee(Role::HEAD_ACCOUNTANT);
+        $new    = $this->employee(Role::HEAD_ACCOUNTANT);
+        $client = $this->client($new);
+        $this->item($client, $this->accountant);
+
+        ClientResponsibleChange::create([
+            'client_id' => $client->id, 'previous_employee_id' => $former->id,
+            'employee_id' => $new->id, 'changed_at' => '2026-11-02 09:00:00',
+        ]);
+
+        $build = fn (Employee $e, int $month) => (new MyResults(CarbonImmutable::now()->startOfDay()))
+            ->build($e, CarbonImmutable::create(2026, $month, 1))['team'];
+
+        $this->assertSame(1, $build($former, 10)['month']['total']);
+        $this->assertSame(0, $build($former, 11)['month']['total']);
+        $this->assertSame(1, $build($new, 11)['month']['total']);
     }
 
     public function test_accountant_has_no_team(): void
